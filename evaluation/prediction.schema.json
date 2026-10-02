@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lumi evaluation prediction record",
+  "description": "A wrapper that retains the model's raw output so malformed structured responses remain countable.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "case_id", "raw_output"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "case_id": {"type": "string", "minLength": 1},
+    "raw_output": {"type": "string"},
+    "grounding_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["pending", "reviewed"]},
+        "claim_count": {"type": "integer", "minimum": 0},
+        "unsupported_claim_count": {"type": "integer", "minimum": 0},
+        "reviewer_id": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "reviewed"}}, "required": ["status"]},
+          "then": {"required": ["claim_count", "unsupported_claim_count", "reviewer_id"]}
+        }
+      ]
+    }
+  }
+}

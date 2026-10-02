@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lumi behavioral evaluation case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "family_id",
+    "split",
+    "review_status",
+    "language",
+    "categories",
+    "turns",
+    "gold",
+    "provenance_record_id",
+    "review"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "case_id": {"type": "string", "minLength": 1},
+    "family_id": {"type": "string", "minLength": 1},
+    "split": {"enum": ["development", "final_holdout"]},
+    "review_status": {"enum": ["draft", "ready", "excluded"]},
+    "language": {"enum": ["en", "ja", "en_ja"]},
+    "categories": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "turns": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "text"],
+        "properties": {
+          "role": {"enum": ["user", "assistant"]},
+          "text": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "context_id": {"type": ["string", "null"]},
+    "gold": {"$ref": "#/$defs/semanticOutput"},
+    "provenance_record_id": {"type": "string", "minLength": 1},
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["annotation_status", "language_review_status", "reviewer_ids"],
+      "properties": {
+        "annotation_status": {"enum": ["pending", "approved"]},
+        "language_review_status": {"enum": ["not_required", "pending", "approved"]},
+        "reviewer_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "adjudication_note": {"type": "string"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"review_status": {"const": "ready"}}, "required": ["review_status"]},
+      "then": {
+        "properties": {
+          "review": {
+            "properties": {
+              "annotation_status": {"const": "approved"},
+              "reviewer_ids": {"minItems": 1}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "review_status": {"const": "ready"},
+          "language": {"enum": ["ja", "en_ja"]}
+        },
+        "required": ["review_status", "language"]
+      },
+      "then": {"properties": {"review": {"properties": {"language_review_status": {"const": "approved"}}}}}
+    },
+    {
+      "if": {"properties": {"language": {"const": "en"}}, "required": ["language"]},
+      "then": {"properties": {"review": {"properties": {"language_review_status": {"enum": ["not_required", "approved"]}}}}}
+    }
+  ],
+  "$defs": {
+    "semanticOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "action", "arguments", "requires_clarification"],
+      "properties": {
+        "decision": {"enum": ["act", "no_action", "clarify", "respond"]},
+        "action": {"type": ["string", "null"]},
+        "arguments": {"type": "object"},
+        "requires_clarification": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"decision": {"const": "act"}}, "required": ["decision"]},
+          "then": {
+            "properties": {
+              "action": {"type": "string", "minLength": 1},
+              "requires_clarification": {"const": false}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"decision": {"const": "clarify"}}, "required": ["decision"]},
+          "then": {
+            "properties": {
+              "action": {"type": "null"},
+              "arguments": {"maxProperties": 0},
+              "requires_clarification": {"const": true}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"decision": {"enum": ["no_action", "respond"]}}, "required": ["decision"]},
+          "then": {
+            "properties": {
+              "action": {"type": "null"},
+              "arguments": {"maxProperties": 0},
+              "requires_clarification": {"const": false}
+            }
+          }
+        }
+      ]
+    }
+  }
+}
