@@ -2,6 +2,8 @@
 
 **Status:** Evaluation framework and dependency-free scorer implemented; no ready benchmark cases, scores, or trained candidates yet. See [evaluation/README.md](evaluation/README.md).
 
+Case authors and reviewers must follow the draft [annotation guide](evaluation/ANNOTATION_GUIDE.md). The guide records v1 schema gaps that keep tool-dependent cases and response-language/presentation claims out of ready evaluation until the required formats exist.
+
 **Before major compute:** A versioned development set and separate sealed final holdout must be authored, reviewed, and frozen.
 
 ## Required slices
@@ -18,6 +20,8 @@ Report the overall score and every slice below, in English, natural Japanese, an
 - Code-switching in both directions, including English phrases inside Japanese and Japanese phrases inside English.
 - Grounding/tool cases: available and unavailable media, authoritative tool results, failures, and unavailable or conflicting state.
 - Structured response validity, unsupported factual claims, and disallowed output content.
+
+For English/Japanese cases, score English-matrix and Japanese-matrix code-switching separately as well as together. Human review must evaluate linguistic naturalness and preservation of the intended meaning as distinct checks. Current v1 cases cannot represent hashed tool-result fixtures, and the scorer cannot measure generated reply language or presentation intent; these remain required evaluation-format work before end-to-end claims.
 
 Examples must be semantically varied, not mostly paraphrases. Split by intent pattern, source, title/entity, conversation family, and generation template where applicable so near-duplicates cannot cross into the final holdout. Keep every benchmark's source, license, revision, and use in the provenance manifest.
 
@@ -37,11 +41,11 @@ These targets come from the user goal. They are minimum targets, not claims abou
 | Multi-turn reference resolution | >= 92% |
 | Difficult ambiguous requests | >= 90% |
 
-Track false state-changing actions separately from missed actions. A false state-changing action means the model proposes an action when the gold label calls for no action, discussion, or clarification. Report raw counts, denominators, per-category scores, and confidence intervals; do not let aggregate accuracy hide a failing safety-critical slice. For a 99.9% validity target, a small sample cannot establish the target precisely: use a sufficiently large, frozen test and report a one-sided confidence bound as well as observed rate. As a rough minimum statistical resolution, zero invalid responses in about 2,995 independent trials gives a one-sided 95% binomial upper bound near a 0.1% error rate; that does not replace broad semantic coverage or per-slice checks.
+Track false actions and missed actions separately. With v1, a false action is any predicted `act` when the gold label is `no_action`, `respond`, or `clarify`; this includes unnecessary read-only calls. The harness cannot isolate false state-changing actions until a reviewed capability registry distinguishes read-only from mutating operations. Do not report the v1 false-action metric as a false state-changing-action rate. Report raw counts, denominators, per-category scores, and confidence intervals; do not let aggregate accuracy hide a failing safety-critical slice. For a 99.9% validity target, a small sample cannot establish the target precisely: use a sufficiently large, frozen test and report a one-sided confidence bound as well as observed rate. As a rough minimum statistical resolution, zero invalid responses in about 2,995 independent trials gives a one-sided 95% binomial upper bound near a 0.1% error rate; that does not replace broad semantic coverage or per-slice checks.
 
 ## Scoring and runtime records
 
-The machine-readable case and prediction formats are in `evaluation/`. The scorer uses a canonical semantic adapter; it does not select Lumi's runtime wire protocol. Raw output is retained so malformed responses count against structural validity. Structural validity, semantic exact match, argument extraction, and false state-changing actions are separate metrics. Unsupported factual claims require a separately recorded human grounding review.
+The machine-readable case and prediction formats are in `evaluation/`. The scorer uses a canonical semantic adapter; it does not select Lumi's runtime wire protocol. Raw output is retained so malformed responses count against structural validity. Structural validity, semantic exact match, argument extraction, and false-action rate are separate metrics. The current false-action rate counts every predicted `act` on a `no_action`, `respond`, or `clarify` gold case, including unnecessary read-only calls; it is not a false state-changing-action rate. Unsupported factual claims require a separately recorded human grounding review.
 
 For each candidate, report:
 

@@ -52,6 +52,8 @@
 - Chen et al. 2025. [Benchmarking Large Language Models Under Data Contamination: A Survey from Static to Dynamic Evaluation](https://aclanthology.org/2025.emnlp-main.511/). EMNLP 2025; surveys static and dynamic contamination controls and their limitations.
 - Kim et al. 2025. [Evaluating Language Models as Synthetic Data Generators](https://aclanthology.org/2025.acl-long.320/). ACL 2025; reports that generator quality varies by task and does not necessarily track the generator model's problem-solving ability.
 - Zeng et al. 2026. [Code-Switching Information Retrieval: Benchmarks, Analysis, and the Limits of Current Retrievers](https://aclanthology.org/2026.findings-acl.636/). Findings of ACL 2026; CSR-L uses human annotation to target natural mixed-language queries. It is retrieval research, not direct evidence about Lumi intent classification.
+- Winata et al. 2026. [Can Large Language Models Understand, Reason About, and Generate Code-Switched Text?](https://arxiv.org/abs/2601.07153). arXiv preprint; CODEMIXQA includes Japanese-English variants and evaluates generated text for naturalness and semantic fidelity. Its source task and prompted data do not transfer directly to Lumi's media intent cases.
+- Oh et al. 2026. [OLA: Output Language Alignment in Code-Switched LLM Interactions](https://aclanthology.org/2026.acl-long.2162/). ACL 2026; studies Korean-English output-language alignment and reports related observations for Chinese and Indonesian. It motivates a distinct reply-language slice but is not Japanese-English evidence.
 
 ## Inference, quantization, and deployment documentation
 
