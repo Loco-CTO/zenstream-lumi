@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:zenstream-lumi:evaluation:trajectory-step:v1",
+  "title": "Lumi interactive evaluation step output",
+  "description": "One raw candidate step is either a fixture-tool request or a final canonical output. Tool requests are consumed only by the local fixture simulator.",
+  "oneOf": [
+    {"$ref": "#/$defs/toolCall"},
+    {"$ref": "urn:zenstream-lumi:evaluation:output:v1"}
+  ],
+  "$defs": {
+    "toolCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "tool", "arguments"],
+      "properties": {
+        "type": {"const": "tool_call"},
+        "tool": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"},
+        "arguments": {"type": "object"}
+      }
+    }
+  }
+}

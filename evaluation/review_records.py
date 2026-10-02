@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from provenance.validate import canonical_sha256, evaluation_case_sha256
+from evaluation.tool_trajectory import ToolTrajectoryError, validate_tool_trajectory_gold
 
 
 SHA256_PATTERN = re.compile(r"^sha256:[A-Fa-f0-9]{64}$")
@@ -17,7 +18,7 @@ TIMESTAMP_PATTERN = re.compile(
 )
 RECORD_TYPES = {"independent_annotation", "language_review", "adjudication"}
 GOLD_KEYS = {"decision", "action", "arguments", "requires_clarification"}
-GOLD_OPTIONAL_KEYS = {"response_contract", "presentation_intent"}
+GOLD_OPTIONAL_KEYS = {"response_contract", "presentation_intent", "tool_trajectory"}
 PRESENTATION_INTENTS = {
     "none", "text", "media_results", "media_details", "playback_handoff", "confirmation",
 }
@@ -114,6 +115,11 @@ def _valid_semantic_output(value: Any) -> bool:
         or value["presentation_intent"] not in PRESENTATION_INTENTS
     ):
         return False
+    if "tool_trajectory" in value:
+        try:
+            validate_tool_trajectory_gold(value["tool_trajectory"])
+        except ToolTrajectoryError:
+            return False
     return True
 
 

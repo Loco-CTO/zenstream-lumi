@@ -30,7 +30,7 @@ CASE_SPLIT_TO_RECORD = {"development": "development", "final_holdout": "sealed_h
 PERMISSIONS = {"permitted", "prohibited", "conditional", "unknown", "not_applicable"}
 CASE_FINGERPRINT_FIELDS = (
     "schema_version", "case_id", "family_id", "split", "language", "categories", "turns",
-    "trusted_context", "gold",
+    "trusted_context", "tool_scenario", "gold",
 )
 
 
@@ -538,10 +538,12 @@ def validate_evaluation_case_provenance(
         if not isinstance(case, dict):
             raise ProvenanceError(f"evaluation case {index} must be an object")
         version = case.get("schema_version")
-        if not isinstance(version, int) or isinstance(version, bool) or version != 3:
-            raise ProvenanceError(f"evaluation case {case.get('case_id')!r} schema_version must be 3")
+        if not isinstance(version, int) or isinstance(version, bool) or version != 4:
+            raise ProvenanceError(f"evaluation case {case.get('case_id')!r} schema_version must be 4")
         if "trusted_context" not in case:
             raise ProvenanceError(f"evaluation case {case.get('case_id')!r} lacks trusted_context")
+        if "tool_scenario" not in case:
+            raise ProvenanceError(f"evaluation case {case.get('case_id')!r} lacks tool_scenario")
         record_id = case.get("provenance_record_id")
         if not _nonempty(record_id):
             raise ProvenanceError(f"evaluation case {case.get('case_id')!r} has no nonempty provenance_record_id")

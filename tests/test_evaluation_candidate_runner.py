@@ -1,4 +1,5 @@
 import unittest
+import json
 
 from evaluation.candidate_runner import CandidateOutputError, run_candidate_cases
 from evaluation.scorer import EvaluationInputError
@@ -19,6 +20,44 @@ class RecordingCandidate:
     def predict(self, candidate_input):
         self.inputs.append(candidate_input)
         return self.raw_output
+
+
+class SequenceCandidate:
+    def __init__(self, outputs):
+        self.outputs = list(outputs)
+        self.inputs = []
+
+    def predict(self, candidate_input):
+        self.inputs.append(candidate_input)
+        return self.outputs.pop(0)
+
+
+def make_tool_case():
+    case = make_case()
+    expected_call = {"tool": "catalog.search", "arguments": {"query": "Example"}}
+    case["tool_scenario"] = {
+        "schema_version": 1,
+        "tools": [{
+            "name": "catalog.search",
+            "description": "Search the static catalog fixture.",
+            "effect": "read_only",
+            "arguments_schema": {"type": "object", "required": ["query"]},
+        }],
+        "fixtures": [{
+            **expected_call,
+            "result": {"status": "success", "payload": {"items": [{"id": "item-1", "title": "Example"}]}},
+        }],
+        "max_model_steps": 4,
+        "max_tool_calls": 3,
+    }
+    case["gold"]["tool_trajectory"] = {"calls": [expected_call], "completion": "final"}
+    return case
+
+
+def tool_call_output(tool="catalog.search", arguments=None, **extra):
+    value = {"type": "tool_call", "tool": tool, "arguments": arguments or {"query": "Example"}}
+    value.update(extra)
+    return json.dumps(value, ensure_ascii=False)
 
 
 def run_one(case, candidate, record=None, review_records=None, **kwargs):
@@ -51,7 +90,7 @@ class EvaluationCandidateRunnerTests(unittest.TestCase):
         predictions = run_one(case, candidate)
 
         self.assertEqual(predictions, [{
-            "schema_version": 2,
+            "schema_version": 3,
             "case_id": case["case_id"],
             "raw_output": "{ malformed output",
         }])
@@ -143,6 +182,88 @@ class EvaluationCandidateRunnerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(CandidateOutputError, "raw output as a string"):
             run_one(case, candidate)
+
+    def test_tool_trajectory_exposes_only_declared_tools_and_prior_observations(self):
+        case = make_tool_case()
+        final = '{"decision":"act","action":"play","arguments":{"title":"Example"},"requires_clarification":false}'
+        candidate = SequenceCandidate([tool_call_output(), final])
+
+        prediction = run_one(case, candidate)[0]
+
+        self.assertEqual(prediction["schema_version"], 3)
+        self.assertEqual(prediction["raw_output"], final)
+        self.assertEqual(prediction["trajectory"]["stop_reason"], "final")
+        self.assertEqual(len(prediction["trajectory"]["steps"]), 2)
+        self.assertEqual(set(candidate.inputs[0]), {
+            "schema_version", "turns", "trusted_context", "tools", "tool_history",
+        })
+        self.assertEqual(candidate.inputs[0]["schema_version"], 2)
+        self.assertNotIn("fixtures", candidate.inputs[0])
+        self.assertNotIn("gold", candidate.inputs[0])
+        self.assertEqual(candidate.inputs[0]["tool_history"], [])
+        self.assertEqual(candidate.inputs[1]["tool_history"][0]["observation"], {
+            "status": "success",
+            "payload": {"items": [{"id": "item-1", "title": "Example"}]},
+            "simulated": True,
+            "effect": "read_only",
+        })
+
+    def test_wrong_and_unknown_calls_return_safe_fixture_errors_without_consuming_expected_result(self):
+        case = make_tool_case()
+        final = '{"decision":"act","action":"play","arguments":{"title":"Example"},"requires_clarification":false}'
+        candidate = SequenceCandidate([
+            tool_call_output("unknown.lookup"),
+            tool_call_output(arguments={"query": "Other"}),
+            tool_call_output(),
+            final,
+        ])
+
+        prediction = run_one(case, candidate)[0]
+
+        steps = prediction["trajectory"]["steps"]
+        self.assertEqual([step["observation"]["status"] for step in steps[:3]], [
+            "unknown_tool", "fixture_mismatch", "success",
+        ])
+        self.assertTrue(all(step["observation"]["simulated"] for step in steps[:3]))
+        self.assertEqual(prediction["trajectory"]["stop_reason"], "final")
+
+    def test_tool_call_limit_stops_before_an_additional_fixture_lookup(self):
+        case = make_tool_case()
+        case["tool_scenario"]["max_tool_calls"] = 1
+        candidate = SequenceCandidate([tool_call_output(), tool_call_output()])
+
+        prediction = run_one(case, candidate)[0]
+
+        self.assertEqual(prediction["trajectory"]["stop_reason"], "call_limit")
+        self.assertEqual(len(candidate.inputs), 2)
+        self.assertEqual(prediction["trajectory"]["steps"][-1]["observation"]["status"], "call_limit")
+        self.assertTrue(all(
+            step["observation"]["simulated"]
+            for step in prediction["trajectory"]["steps"]
+        ))
+
+    def test_malformed_tool_call_is_retained_and_stops_the_simulator(self):
+        case = make_tool_case()
+        raw = tool_call_output(extra="not-permitted")
+        candidate = SequenceCandidate([raw])
+
+        prediction = run_one(case, candidate)[0]
+
+        self.assertEqual(prediction["raw_output"], raw)
+        self.assertEqual(prediction["trajectory"]["stop_reason"], "invalid_tool_call")
+        self.assertEqual(prediction["trajectory"]["steps"][0]["tool_call"], None)
+        self.assertEqual(len(candidate.inputs), 1)
+
+    def test_inconsistent_gold_and_fixture_path_blocks_candidate_execution(self):
+        case = make_tool_case()
+        case["tool_scenario"]["fixtures"][0]["arguments"]["query"] = "Different"
+        case["gold"]["tool_trajectory"]["calls"][0]["arguments"] = {"query": "Example"}
+        candidate = SequenceCandidate([tool_call_output()])
+
+        with self.assertRaisesRegex(EvaluationInputError, "must match the ordered tool_scenario fixtures"):
+            run_one(case, candidate)
+
+        self.assertEqual(candidate.inputs, [])
 
 
 if __name__ == "__main__":

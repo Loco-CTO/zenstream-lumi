@@ -20,7 +20,7 @@ GENERATION_HASH = "sha256:" + "b" * 64
 
 def make_case():
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "case_id": "dev-001",
         "family_id": "family-001",
         "split": "development",
@@ -29,6 +29,7 @@ def make_case():
         "categories": ["simple_action"],
         "turns": [{"role": "user", "text": "play something"}],
         "trusted_context": None,
+        "tool_scenario": None,
         "gold": {
             "decision": "act",
             "action": "play",
@@ -226,9 +227,35 @@ class ProvenanceValidatorTests(unittest.TestCase):
         with self.assertRaisesRegex(ProvenanceError, "content hash differs"):
             validate_bundle(make_source_manifest(), make_generation_manifest(), [record], [case])
 
-    def test_evaluation_provenance_requires_v3_case_and_explicit_context(self):
+    def test_tool_scenario_and_ordered_results_are_bound_to_case_provenance_hash(self):
+        case = make_case()
+        expected_call = {"tool": "catalog.search", "arguments": {"query": "Example"}}
+        case["tool_scenario"] = {
+            "schema_version": 1,
+            "tools": [{
+                "name": "catalog.search",
+                "description": "Search the fixture catalog.",
+                "effect": "read_only",
+                "arguments_schema": {"type": "object", "required": ["query"]},
+            }],
+            "fixtures": [{
+                **expected_call,
+                "result": {"status": "success", "payload": {"items": [{"title": "Example"}]}},
+            }],
+            "max_model_steps": 3,
+            "max_tool_calls": 2,
+        }
+        case["gold"]["tool_trajectory"] = {"calls": [expected_call], "completion": "final"}
+        record = make_record(case)
+        case["tool_scenario"]["fixtures"][0]["result"]["payload"]["items"][0]["title"] = "Changed"
+
+        with self.assertRaisesRegex(ProvenanceError, "content hash differs"):
+            validate_bundle(make_source_manifest(), make_generation_manifest(), [record], [case])
+
+    def test_evaluation_provenance_requires_v4_case_and_context(self):
         for change, expected_error in (
-            (lambda case: case.update(schema_version=1), "schema_version must be 3"),
+            (lambda case: case.update(schema_version=1), "schema_version must be 4"),
+            (lambda case: case.pop("tool_scenario"), "lacks tool_scenario"),
             (lambda case: case.pop("trusted_context"), "lacks trusted_context"),
         ):
             with self.subTest(expected_error=expected_error):
@@ -242,7 +269,7 @@ class ProvenanceValidatorTests(unittest.TestCase):
     def test_file_scorer_checks_manifests_and_includes_their_hashes(self):
         case = make_case()
         prediction = {
-            "schema_version": 2,
+            "schema_version": 3,
             "case_id": case["case_id"],
             "raw_output": json.dumps(case["gold"], ensure_ascii=False),
         }

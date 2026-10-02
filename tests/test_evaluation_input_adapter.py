@@ -15,7 +15,7 @@ class EvaluationInputAdapterTests(unittest.TestCase):
             }],
         }
         case = {
-            "schema_version": 3,
+            "schema_version": 4,
             "case_id": "secret-case-id",
             "family_id": "secret-family-id",
             "split": "final_holdout",
@@ -27,6 +27,7 @@ class EvaluationInputAdapterTests(unittest.TestCase):
                 {"role": "user", "text": "続き再生して"},
             ],
             "trusted_context": context,
+            "tool_scenario": None,
             "gold": {"decision": "act", "action": "play", "arguments": {}, "requires_clarification": False},
             "provenance_record_id": "private-record-id",
             "review_status": "ready",
@@ -73,6 +74,46 @@ class EvaluationInputAdapterTests(unittest.TestCase):
         })
 
         self.assertIsNone(candidate_input["trusted_context"])
+
+    def test_interactive_projection_exposes_tools_and_returned_observations_only(self):
+        tool = {
+            "name": "catalog.search",
+            "description": "Search the fixture catalog.",
+            "effect": "read_only",
+            "arguments_schema": {"type": "object", "required": ["query"]},
+        }
+        scenario = {
+            "schema_version": 1,
+            "tools": [tool],
+            "fixtures": [{
+                "tool": "catalog.search",
+                "arguments": {"query": "secret expected query"},
+                "result": {"status": "success", "payload": {"items": []}},
+            }],
+            "max_model_steps": 3,
+            "max_tool_calls": 2,
+        }
+        history = [{
+            "tool": "catalog.search",
+            "arguments": {"query": "actual query"},
+            "observation": {"status": "empty", "payload": {}, "simulated": True, "effect": "read_only"},
+        }]
+        case = {
+            "turns": [{"role": "user", "text": "Find an album."}],
+            "trusted_context": None,
+            "tool_scenario": scenario,
+        }
+
+        candidate_input = build_candidate_input(case, tool_history=history)
+
+        self.assertEqual(candidate_input["schema_version"], 2)
+        self.assertEqual(candidate_input["tools"], [tool])
+        self.assertEqual(candidate_input["tool_history"], history)
+        self.assertNotIn("fixtures", candidate_input)
+        candidate_input["tools"][0]["description"] = "changed"
+        candidate_input["tool_history"][0]["observation"]["payload"]["leak"] = True
+        self.assertEqual(scenario["tools"][0]["description"], "Search the fixture catalog.")
+        self.assertNotIn("leak", history[0]["observation"]["payload"])
 
 
 if __name__ == "__main__":

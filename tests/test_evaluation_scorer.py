@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import unittest
@@ -18,7 +19,7 @@ def make_case(case_id, *, split="development", language="en", categories=None, g
     if review is not None:
         review_metadata.update(review)
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "case_id": case_id,
         "family_id": family_id or case_id,
         "split": split,
@@ -27,6 +28,7 @@ def make_case(case_id, *, split="development", language="en", categories=None, g
         "categories": categories or ["simple_action"],
         "turns": [{"role": "user", "text": "play something"}],
         "trusted_context": None,
+        "tool_scenario": None,
         "gold": gold or {
             "decision": "act",
             "action": "play",
@@ -38,12 +40,14 @@ def make_case(case_id, *, split="development", language="en", categories=None, g
     }
 
 
-def make_prediction(case_id, output, grounding_review=None, response_review=None):
-    record = {"schema_version": 2, "case_id": case_id, "raw_output": output}
+def make_prediction(case_id, output, grounding_review=None, response_review=None, trajectory=None):
+    record = {"schema_version": 3, "case_id": case_id, "raw_output": output}
     if grounding_review is not None:
         record["grounding_review"] = grounding_review
     if response_review is not None:
         record["response_review"] = response_review
+    if trajectory is not None:
+        record["trajectory"] = trajectory
     return record
 
 
@@ -67,6 +71,29 @@ def semantic_output(
     if presentation_intent is not None:
         output["presentation_intent"] = presentation_intent
     return json.dumps(output, ensure_ascii=False, separators=(",", ":"))
+
+
+def make_tool_case(case_id="tool-case"):
+    case = make_case(case_id)
+    expected_call = {"tool": "catalog.search", "arguments": {"query": "Example"}}
+    result_payload = {"items": [{"id": "item-1", "title": "Example"}]}
+    case["tool_scenario"] = {
+        "schema_version": 1,
+        "tools": [{
+            "name": "catalog.search",
+            "description": "Search the static catalog fixture.",
+            "effect": "read_only",
+            "arguments_schema": {"type": "object", "required": ["query"]},
+        }],
+        "fixtures": [{
+            **expected_call,
+            "result": {"status": "success", "payload": result_payload},
+        }],
+        "max_model_steps": 4,
+        "max_tool_calls": 3,
+    }
+    case["gold"]["tool_trajectory"] = {"calls": [expected_call], "completion": "final"}
+    return case, expected_call, result_payload
 
 
 def approved_response_review(*, language="en", qualification="fluent_english", **statuses):
@@ -551,7 +578,7 @@ class EvaluationScorerTests(unittest.TestCase):
         report = score_records([case], [prediction])
         metrics = report["metrics"]
 
-        self.assertEqual(report["report_schema_version"], 2)
+        self.assertEqual(report["report_schema_version"], 3)
         self.assertEqual(metrics["overall_semantic_exact_match"]["rate"], 1.0)
         self.assertEqual(metrics["user_facing_response_presence"]["rate"], 1.0)
         self.assertEqual(metrics["presentation_intent_accuracy"]["rate"], 1.0)
@@ -563,6 +590,81 @@ class EvaluationScorerTests(unittest.TestCase):
             "reviewed_messages": 1,
             "unreviewed_messages": 0,
         })
+
+    def test_interactive_tool_trajectory_metrics_are_separate_from_final_answer_metrics(self):
+        case, expected_call, result_payload = make_tool_case()
+        call_raw = json.dumps({
+            "type": "tool_call", "tool": expected_call["tool"], "arguments": expected_call["arguments"],
+        }, separators=(",", ":"))
+        final_raw = semantic_output("act", "play", {"title": "Example"})
+        prediction = make_prediction(case["case_id"], final_raw, trajectory={
+            "schema_version": 1,
+            "stop_reason": "final",
+            "steps": [
+                {
+                    "raw_output": call_raw,
+                    "tool_call": expected_call,
+                    "observation": {
+                        "status": "success", "payload": result_payload,
+                        "simulated": True, "effect": "read_only",
+                    },
+                },
+                {"raw_output": final_raw, "tool_call": None, "observation": None},
+            ],
+        })
+
+        report = score_records([case], [prediction])
+        metrics = report["metrics"]["interactive_tool_trajectories"]
+
+        self.assertEqual(report["report_schema_version"], 3)
+        self.assertEqual(report["metrics"]["overall_semantic_exact_match"]["rate"], 1.0)
+        self.assertEqual(metrics["exact_trajectory"]["rate"], 1.0)
+        self.assertEqual(metrics["tool_call_precision"]["rate"], 1.0)
+        self.assertEqual(metrics["tool_call_recall"]["rate"], 1.0)
+        self.assertEqual(metrics["unknown_tool_rate"]["rate"], 0.0)
+
+        invalid_final_prediction = copy.deepcopy(prediction)
+        invalid_final_prediction["raw_output"] = "not-json"
+        invalid_final_prediction["trajectory"]["steps"][-1]["raw_output"] = "not-json"
+        invalid_final_report = score_records([case], [invalid_final_prediction])
+        invalid_final_metrics = invalid_final_report["metrics"]["interactive_tool_trajectories"]
+        self.assertEqual(invalid_final_report["metrics"]["structured_response_validity"]["rate"], 0.0)
+        self.assertEqual(invalid_final_metrics["final_completion"]["rate"], 0.0)
+        self.assertEqual(invalid_final_metrics["exact_trajectory"]["rate"], 0.0)
+
+        forged_prediction = copy.deepcopy(prediction)
+        forged_prediction["trajectory"]["steps"][0]["observation"]["payload"] = {"items": []}
+        with self.assertRaisesRegex(EvaluationInputError, "differs from its fixture-only simulation"):
+            score_records([case], [forged_prediction])
+
+    def test_wrong_tool_path_and_missing_trace_fail_trajectory_metrics_or_input_gate(self):
+        case, expected_call, _ = make_tool_case("wrong-tool-case")
+        unknown_raw = '{"type":"tool_call","tool":"music.lookup","arguments":{}}'
+        final_raw = semantic_output("act", "play", {"title": "Example"})
+        wrong_prediction = make_prediction(case["case_id"], final_raw, trajectory={
+            "schema_version": 1,
+            "stop_reason": "final",
+            "steps": [
+                {
+                    "raw_output": unknown_raw,
+                    "tool_call": {"tool": "music.lookup", "arguments": {}},
+                    "observation": {
+                        "status": "unknown_tool", "payload": {},
+                        "simulated": True, "effect": "unknown",
+                    },
+                },
+                {"raw_output": final_raw, "tool_call": None, "observation": None},
+            ],
+        })
+
+        report = score_records([case], [wrong_prediction])
+        metrics = report["metrics"]["interactive_tool_trajectories"]
+        self.assertEqual(metrics["exact_trajectory"]["rate"], 0.0)
+        self.assertEqual(metrics["unknown_tool_rate"]["rate"], 1.0)
+        self.assertEqual(metrics["tool_call_recall"]["rate"], 0.0)
+
+        with self.assertRaisesRegex(EvaluationInputError, "requires an interactive tool trajectory"):
+            score_records([case], [make_prediction(case["case_id"], final_raw)])
 
     def test_reply_quality_and_language_alignment_keep_independent_failures_visible(self):
         case = make_case("japanese-reply", language="ja", gold={
