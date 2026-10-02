@@ -1,6 +1,6 @@
 # Lumi behavioral evaluation plan
 
-**Status:** Evaluation case/prediction formats, a model-independent candidate-input projection, and a dependency-free scorer implemented; no ready benchmark cases, inference runner, scores, or trained candidates yet. See [evaluation/README.md](evaluation/README.md).
+**Status:** Evaluation case/prediction formats, a model-independent candidate-input projection, a provenance-gated callback runner, and a dependency-free scorer implemented; no ready benchmark cases, model backend, scores, or trained candidates yet. See [evaluation/README.md](evaluation/README.md).
 
 Case authors and reviewers must follow the draft [annotation guide](evaluation/ANNOTATION_GUIDE.md). Case schema v2 can carry static, versioned trusted-context fixtures; the guide records remaining gaps for interactive tool execution, reply language, and presentation scoring.
 
@@ -21,7 +21,7 @@ Report the overall score and every slice below, in English, natural Japanese, an
 - Grounding/tool cases: available and unavailable media, authoritative tool results, failures, and unavailable or conflicting state.
 - Structured response validity, unsupported factual claims, and disallowed output content.
 
-For English/Japanese cases, score English-matrix and Japanese-matrix code-switching separately as well as together. Human review must evaluate linguistic naturalness and preservation of the intended meaning as distinct checks. Case v2 hashes inline trusted-context fixtures with the rest of each sample, so cases can represent static library, account, playback, and tool-outcome state. The candidate-input projection exposes only conversation turns and trusted context; it does not invoke a model or execute tools. A future runner must supply that projection to a candidate before these cases can measure behavior. The current format also cannot score interactive tool trajectories, generated reply language, or presentation intent; those remain required evaluation-format work before end-to-end claims.
+For English/Japanese cases, score English-matrix and Japanese-matrix code-switching separately as well as together. Human review must evaluate linguistic naturalness and preservation of the intended meaning as distinct checks. Case v2 hashes inline trusted-context fixtures with the rest of each sample, so cases can represent static library, account, playback, and tool-outcome state. The callback runner selects ready cases, validates sample provenance before inference, and supplies only turns and trusted context to candidate code; final-holdout execution is blocked unless explicitly enabled. The runner neither loads a model nor executes tools, and it cannot score interactive tool trajectories, generated reply language, or presentation intent. Those remain required evaluation-format work before end-to-end claims.
 
 Examples must be semantically varied, not mostly paraphrases. Split by intent pattern, source, title/entity, conversation family, and generation template where applicable so near-duplicates cannot cross into the final holdout. Keep every benchmark's source, license, revision, and use in the provenance manifest.
 

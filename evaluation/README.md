@@ -1,6 +1,6 @@
 # Lumi evaluation harness
 
-**Status:** Versioned case/prediction formats, a dependency-free scorer, and a model-independent candidate-input projection exist. There are no ready benchmark cases, inference runner, candidate model, predictions, or Lumi scores yet.
+**Status:** Versioned case/prediction formats, a dependency-free scorer, a model-independent input projection, and a provenance-gated callback runner exist. There are no ready benchmark cases, model backend, CLI runner, predictions, or Lumi scores yet.
 
 The canonical semantic record is an evaluation adapter, not a decision about Lumi's eventual runtime or ZenStream integration protocol. It gives competing model formulations one comparable representation for action/no-action choice, action name, arguments, and clarification. A later protocol adapter may map between this record and the deployed interface.
 
@@ -8,12 +8,14 @@ The canonical semantic record is an evaluation adapter, not a decision about Lum
 
 - `case.schema.json` defines version 2 authored benchmark cases. A case carries an immutable family ID, language and category labels, conversation turns, a required nullable `trusted_context` fixture, a gold semantic record, and a provenance-record ID. The fixture has its own version and structured status/payload records; it is static test input, not tool execution or a runtime protocol.
 - `input_adapter.py` projects a validated case into a versioned candidate input containing only `turns` and `trusted_context`. It leaves out the gold answer, language/category labels, IDs, split, review, and provenance metadata, and deep-copies the candidate-visible values. It does not invoke a model or execute tools.
+- `candidate_runner.py` invokes an in-process `Candidate.predict(...)` callback on ready cases only after schema/readiness and provenance checks, then wraps the untouched raw output for scoring. Final-holdout execution requires explicit opt-in. It is synchronous and does not load a model or run tools.
 - `prediction.schema.json` wraps the raw model output. Keeping the original string means malformed JSON and schema-invalid output count as failures instead of disappearing during preprocessing.
 - `thresholds.json` contains the initial targets from the goal. It is not editable to make a candidate pass.
 - `scorer.py` is a Python standard-library-only scorer. It reports structural validity separately from semantic exact match, language/category slices, argument extraction, false actions, and manually reviewed unsupported factual claims. The v1 false-action rate counts any predicted `act` on a non-`act` gold case, including read-only calls; it does not isolate false state-changing actions. Scoring requires sample-level provenance records and validates their source/generation joins and use permissions first.
 - The direct `score_records(...)` API takes the source and synthetic-generation manifests as required inputs, just like file-based scoring; callers cannot bypass source-level use-permission checks by supplying sample records alone.
 - `tests/test_evaluation_scorer.py` checks only scorer behavior. Its inline cases are software fixtures, not Lumi benchmark or training data.
 - `tests/test_evaluation_input_adapter.py` checks the candidate-input projection and mutation isolation; its inline cases are software fixtures, not Lumi benchmark or training data.
+- `tests/test_evaluation_candidate_runner.py` checks provenance/readiness gates, final-holdout opt-in, and raw-output preservation; its inline cases are software fixtures, not Lumi benchmark or training data.
 
 To score a reviewed development set:
 
@@ -29,4 +31,4 @@ Cases are scoreable only when `review_status` is `ready`, their annotation is ap
 
 Structural validity is evaluated from the raw response. Semantic exact match, action selection, and slot extraction are separate. The report includes two-sided 95% Wilson intervals. For the 99.9% structural-validity target it also reports a one-sided exact binomial upper bound on the error rate; zero invalid outputs in 2,995 independent trials is the approximate minimum for that bound to reach 0.1%.
 
-The current directory has no benchmark cases or inference runner. The input projection is not a candidate execution harness and does not simulate stateful tool trajectories. Do not interpret software fixtures or example snippets as behavioral evidence. The eventual development set and sealed final holdout still need semantically diverse English, natural Japanese, code-switching, multi-turn, grounding, and no-action coverage plus full provenance records.
+The callback runner has no model backend or batch CLI and does not simulate stateful tool trajectories. The current directory still has no benchmark cases, candidate predictions, or behavioral evidence. Do not interpret software fixtures or example snippets as model results. The eventual development set and sealed final holdout still need semantically diverse English, natural Japanese, code-switching, multi-turn, grounding, and no-action coverage plus full provenance records.
