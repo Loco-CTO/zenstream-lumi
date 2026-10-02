@@ -1,10 +1,12 @@
 # Lumi evaluation harness
 
-**Status:** Versioned case/prediction formats, a dependency-free scorer, a model-independent input projection, and a provenance-gated callback runner exist. There are no ready benchmark cases, model backend, CLI runner, predictions, or Lumi scores yet.
+**Status:** Versioned case/prediction formats, a draft capability registry, a dependency-free scorer, a model-independent input projection, and a provenance-gated callback runner exist. There are no ready benchmark cases, model backend, CLI runner, predictions, or Lumi scores yet.
 
 The canonical semantic record is an evaluation adapter, not a decision about Lumi's eventual runtime or ZenStream integration protocol. It gives competing model formulations one comparable representation for action/no-action choice, action name, arguments, and clarification. A later protocol adapter may map between this record and the deployed interface.
 
 ## Files and use
+
+The draft capability vocabulary lives in capabilities.json. It records read-only versus state-changing effects, integration maturity, argument schemas, operation mappings, known limitations, and the exact Orchestrator contract and implementation snapshot. It is an annotation resource, not an executable tool allow-list or Lumi runtime protocol. Validate it with python evaluation/capability_registry.py. Action-bearing benchmark cases remain drafts until their capability definitions are reviewed.
 
 - `case.schema.json` defines version 2 authored benchmark cases. A case carries an immutable family ID, language and category labels, conversation turns, a required nullable `trusted_context` fixture, a gold semantic record, and a provenance-record ID. The fixture has its own version and structured status/payload records; it is static test input, not tool execution or a runtime protocol.
 - `input_adapter.py` projects a validated case into a versioned candidate input containing only `turns` and `trusted_context`. It leaves out the gold answer, language/category labels, IDs, split, review, and provenance metadata, and deep-copies the candidate-visible values. It does not invoke a model or execute tools.
@@ -31,4 +33,4 @@ Cases are scoreable only when `review_status` is `ready`, their annotation is ap
 
 Structural validity is evaluated from the raw response. Semantic exact match, action selection, and slot extraction are separate. The report includes two-sided 95% Wilson intervals. For the 99.9% structural-validity target it also reports a one-sided exact binomial upper bound on the error rate; zero invalid outputs in 2,995 independent trials is the approximate minimum for that bound to reach 0.1%.
 
-The callback runner has no model backend or batch CLI and does not simulate stateful tool trajectories. The current directory still has no benchmark cases, candidate predictions, or behavioral evidence. Do not interpret software fixtures or example snippets as model results. The eventual development set and sealed final holdout still need semantically diverse English, natural Japanese, code-switching, multi-turn, grounding, and no-action coverage plus full provenance records.
+The callback runner has no model backend or batch CLI and does not simulate stateful tool trajectories. The capability registry is draft: catalog search has no explicit genre/year/runtime/watched filters, the generated OpenAPI enum omits the recommendations value accepted by the runtime Home route, and no Lumi playback gateway exists. The current directory still has no benchmark cases, candidate predictions, or behavioral evidence. Do not interpret software fixtures or example snippets as model results. The eventual development set and sealed final holdout still need semantically diverse English, natural Japanese, code-switching, multi-turn, grounding, and no-action coverage plus full provenance records.

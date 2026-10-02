@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "registry_id": "zenstream-lumi-capabilities-v0-1",
+  "review_status": "draft",
+  "created_date": "2026-10-02",
+  "source_snapshot": {
+    "repository": "Loco-CTO/zenstream-orchestrator",
+    "commit": "f4fc86cdf97d2519779a842d540df5b5b99074cc",
+    "contract_path": "contracts/openapi.json",
+    "contract_sha256": "89d614ade8d7d9f8a46d96ac0047c63d1377b49f53bba3979e15405886447bbf",
+    "implementation_path": "orchestrator/api/zenstream/client_routes.py",
+    "implementation_sha256": "2dcc411882c2ba2779655ab0006f7c75a9e090a65c0c77985cd4a2bdef33a5df"
+  },
+  "capabilities": [
+    {
+      "id": "catalog.search",
+      "title": "Search the granted catalog",
+      "effect": "read_only",
+      "integration_status": "implemented",
+      "review_status": "draft",
+      "description": "Search catalog text and optionally restrict results by catalog type. Results are filtered by the authenticated user's library grants.",
+      "argument_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query"],
+        "properties": {
+          "query": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "type": { "type": "string" }
+        }
+      },
+      "operations": [
+        {
+          "method": "GET",
+          "path": "/api/catalog/search",
+          "evidence": "openapi"
+        }
+      ],
+      "limitations": [
+        "The route has no explicit argument for genre, release year, runtime, watched state, or other structured search constraints.",
+        "The API contract does not enumerate accepted values for the optional type argument.",
+        "This registry maps intent to existing service operations; it does not define a Lumi execution gateway."
+      ]
+    },
+    {
+      "id": "catalog.home.read",
+      "title": "Read a Home catalog section",
+      "effect": "read_only",
+      "integration_status": "partial",
+      "review_status": "draft",
+      "description": "Read Home rows such as continue watching, next up, recommendations, or a selected library row from the authenticated account's grant-filtered catalog.",
+      "argument_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "section": {
+            "type": "string",
+            "enum": [
+              "featured",
+              "continueWatching",
+              "nextUp",
+              "recommendations",
+              "derived",
+              "library"
+            ]
+          },
+          "libraryId": { "type": "string" }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "section": { "const": "library" } },
+              "required": ["section"]
+            },
+            "then": { "required": ["libraryId"] }
+          }
+        ]
+      },
+      "operations": [
+        {
+          "method": "GET",
+          "path": "/api/catalog/home",
+          "evidence": "openapi"
+        },
+        {
+          "method": "GET",
+          "path": "/api/catalog/home",
+          "evidence": "route_implementation"
+        }
+      ],
+      "limitations": [
+        "The runtime route accepts section=recommendations, but the generated OpenAPI section enum omits that value; the registry remains draft until this contract drift is resolved.",
+        "The library section requires a libraryId and remains subject to account grants.",
+        "continueWatching is an authoritative continuation row, not proof of what is currently playing."
+      ]
+    },
+    {
+      "id": "catalog.item.read",
+      "title": "Read a catalog item or its details",
+      "effect": "read_only",
+      "integration_status": "implemented",
+      "review_status": "draft",
+      "description": "Read grant-filtered catalog item data or detail sections for a known stable entity identifier.",
+      "argument_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["entity_id"],
+        "properties": {
+          "entity_id": { "type": "string", "minLength": 1 }
+        }
+      },
+      "operations": [
+        {
+          "method": "GET",
+          "path": "/api/catalog/items/{entity_id}",
+          "evidence": "openapi"
+        },
+        {
+          "method": "GET",
+          "path": "/api/catalog/items/{entity_id}/detail",
+          "evidence": "openapi"
+        }
+      ],
+      "limitations": [
+        "An entity identifier must come from trusted catalog results or an explicitly versioned context fixture; the model must not invent identifiers.",
+        "A title in user text must be resolved through a grant-filtered catalog operation before an entity-specific read."
+      ]
+    },
+    {
+      "id": "playback.start",
+      "title": "Start playback for a resolved media target",
+      "effect": "state_changing",
+      "integration_status": "proposed",
+      "review_status": "draft",
+      "description": "A proposed high-level assistant capability that resolves a user-provided target, requests a playable source, and asks the active ZenStream client to start it.",
+      "argument_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target_text"],
+        "properties": {
+          "target_text": { "type": "string", "minLength": 1 }
+        }
+      },
+      "operations": [
+        {
+          "method": "GET",
+          "path": "/api/catalog/search",
+          "evidence": "openapi"
+        },
+        {
+          "method": "POST",
+          "path": "/api/playback/items/{entity_id}/negotiate",
+          "evidence": "openapi"
+        },
+        {
+          "method": "POST",
+          "path": "/api/catalog/items/{entity_id}/play-start",
+          "evidence": "openapi"
+        }
+      ],
+      "limitations": [
+        "There is no Lumi-specific gateway that resolves target_text, handles ambiguous results, negotiates access, and starts the active client player.",
+        "target_text must never be inserted directly into an entity_id path; resolve it against grant-filtered trusted catalog results and clarify when the target is ambiguous.",
+        "A model action proposal does not authorize playback. The ZenStream server and active player remain responsible for validating access, current state, and user intent."
+      ]
+    }
+  ]
+}

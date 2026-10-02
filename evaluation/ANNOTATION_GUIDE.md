@@ -6,6 +6,7 @@ Use this guide with [`case.schema.json`](case.schema.json), the [evaluation plan
 
 ## Annotation principles
 
+- Use only action IDs from the capability registry. Keep a case draft while its capability definition is draft or its integration status is proposed. The registry is an annotation vocabulary with effect and evidence metadata; it does not authorize tool execution.
 - Label what the user asks Lumi to do in the supplied conversation and context. Do not infer missing facts from world knowledge, a media title, or an annotator's personal library.
 - Separate intent from language form. A polite question can request an action; an imperative quoted for discussion does not.
 - Treat read-only lookups as capabilities too. A request for current library, playback, or watch-history facts needs an authoritative lookup; the model must not invent the answer.
@@ -89,4 +90,4 @@ These rules are informed by human-authored Japanese-English retrieval-query rewr
 
 ## Current v2 coverage limits
 
-The v2 scorer measures structured intent and arguments and verifies that inline static trusted-context fixtures are included in the sample hash. It does not execute tools or measure interactive tool trajectories. It also does not score natural-language reply quality or reply-language alignment, presentation intent, or explicit per-slot precision/recall; there is no bounded capability registry or independently reviewable annotation ledger yet. These are open evaluation-format requirements, not evidence that Lumi has passed them. Do not claim end-to-end task quality or readiness until the relevant formats and measurements exist.
+The v2 scorer measures structured intent and arguments and verifies that inline static trusted-context fixtures are included in the sample hash. It does not execute tools or measure interactive tool trajectories. It also does not score natural-language reply quality or reply-language alignment, presentation intent, or explicit per-slot precision/recall. A draft capability registry now records candidate action names, effects, operation evidence, and current gaps, but it is not approved and is not consumed by the scorer; there is also no independently reviewable annotation ledger yet. These remain open evaluation-format requirements, not evidence that Lumi has passed them. Do not claim end-to-end task quality or readiness until the relevant formats and measurements exist.

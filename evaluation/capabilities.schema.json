@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lumi evaluation capability registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "registry_id",
+    "review_status",
+    "created_date",
+    "source_snapshot",
+    "capabilities"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "registry_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "review_status": { "enum": ["draft", "approved"] },
+    "created_date": { "type": "string", "format": "date" },
+    "source_snapshot": { "$ref": "#/$defs/sourceSnapshot" },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/capability" }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "review_status": { "const": "approved" } },
+        "required": ["review_status"]
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "properties": { "review_status": { "const": "approved" } }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sourceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "commit",
+        "contract_path",
+        "contract_sha256",
+        "implementation_path",
+        "implementation_sha256"
+      ],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "contract_path": { "type": "string", "minLength": 1 },
+        "contract_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "implementation_path": { "type": "string", "minLength": 1 },
+        "implementation_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "effect",
+        "integration_status",
+        "review_status",
+        "description",
+        "argument_schema",
+        "operations",
+        "limitations"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+        },
+        "title": { "type": "string", "minLength": 1 },
+        "effect": { "enum": ["read_only", "state_changing"] },
+        "integration_status": { "enum": ["implemented", "partial", "proposed"] },
+        "review_status": { "enum": ["draft", "approved"] },
+        "description": { "type": "string", "minLength": 1 },
+        "argument_schema": {
+          "type": "object",
+          "description": "JSON Schema for the semantic arguments of this capability."
+        },
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/operation" }
+        },
+        "limitations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "path", "evidence"],
+      "properties": {
+        "method": { "type": "string", "pattern": "^(GET|POST|PUT|PATCH|DELETE)$" },
+        "path": { "type": "string", "pattern": "^/api/" },
+        "evidence": {
+          "enum": ["openapi", "route_implementation", "client_implementation"]
+        }
+      }
+    }
+  }
+}
