@@ -20,8 +20,8 @@ Architecture, tokenizer, model size, runtime, training corpus, integration proto
 ## Project records
 
 - [Evaluation plan](EVALUATION_PLAN.md): target thresholds, error categories, measurement, and holdout rules.
-- [Evaluation harness](evaluation/README.md): canonical case/prediction formats and a standard-library scorer; no ready evaluation cases exist yet.
-- [Annotation guide](evaluation/ANNOTATION_GUIDE.md): draft labeling, Japanese/code-switch review, split grouping, and v1 coverage limits.
+- [Evaluation tools](evaluation/README.md): canonical case/prediction formats, a candidate-input projection, and a standard-library scorer; no inference runner or ready evaluation cases exist yet.
+- [Annotation guide](evaluation/ANNOTATION_GUIDE.md): draft labeling, Japanese/code-switch review, split grouping, and v2 coverage limits.
 - [Research notes](RESEARCH_NOTES.md): current findings, limitations, open hypotheses, and proposed experiments.
 - [Research references](RESEARCH_REFERENCES.md): sources that influence design; these are not training data.
 - [Data sources](DATA_SOURCES.md): inclusion policy and human-readable provenance summary.
