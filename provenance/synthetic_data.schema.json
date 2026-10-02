@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lumi synthetic data provenance manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest_version", "status", "generations"],
+  "properties": {
+    "manifest_version": {"const": 1},
+    "status": {"enum": ["empty", "records_present"]},
+    "generations": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/generation"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "empty"}}},
+      "then": {"properties": {"generations": {"maxItems": 0}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "records_present"}}},
+      "then": {"properties": {"generations": {"minItems": 1}}}
+    }
+  ],
+  "$defs": {
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generation_id", "provider", "model_name", "model_version",
+        "generation_date", "purpose", "prompt_family", "settings",
+        "example_count", "filtered", "filter_details", "deduplicated",
+        "deduplication_details", "automatically_validated",
+        "automatic_validation_details", "manually_reviewed",
+        "manual_review_details", "downstream_uses", "provider_terms_url",
+        "output_checksum", "review_notes"
+      ],
+      "properties": {
+        "generation_id": {"type": "string", "minLength": 1},
+        "provider": {"type": "string", "minLength": 1},
+        "model_name": {"type": "string", "minLength": 1},
+        "model_version": {"type": "string", "minLength": 1},
+        "generation_date": {"type": "string", "format": "date"},
+        "purpose": {"type": "string", "minLength": 1},
+        "prompt_family": {"type": "string", "minLength": 1},
+        "settings": {"type": "object"},
+        "example_count": {"type": "integer", "minimum": 0},
+        "filtered": {"type": "boolean"},
+        "filter_details": {"type": "string"},
+        "deduplicated": {"type": "boolean"},
+        "deduplication_details": {"type": "string"},
+        "automatically_validated": {"type": "boolean"},
+        "automatic_validation_details": {"type": "string"},
+        "manually_reviewed": {"type": "boolean"},
+        "manual_review_details": {"type": "string"},
+        "downstream_uses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["pretraining", "instruction_training", "zenstream_specific_training", "evaluation", "filtering", "other"]}
+        },
+        "provider_terms_url": {"type": "string", "format": "uri"},
+        "output_checksum": {"type": ["string", "null"], "pattern": "^sha256:[A-Fa-f0-9]{64}$"},
+        "review_notes": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}
