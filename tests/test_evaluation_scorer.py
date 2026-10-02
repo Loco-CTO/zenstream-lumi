@@ -6,7 +6,7 @@ from test_provenance_validator import make_generation_manifest, make_record, mak
 
 def make_case(case_id, *, split="development", language="en", categories=None, gold=None, family_id=None, review=None):
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "case_id": case_id,
         "family_id": family_id or case_id,
         "split": split,
@@ -14,6 +14,7 @@ def make_case(case_id, *, split="development", language="en", categories=None, g
         "language": language,
         "categories": categories or ["simple_action"],
         "turns": [{"role": "user", "text": "play something"}],
+        "trusted_context": None,
         "gold": gold or {
             "decision": "act",
             "action": "play",
@@ -87,6 +88,45 @@ class EvaluationScorerTests(unittest.TestCase):
         self.assertEqual(metrics["overall_semantic_exact_match"]["successes"], 1)
         self.assertEqual(metrics["false_action_rate"]["rate"], 1.0)
         self.assertEqual(metrics["negation_no_action_correctness"]["rate"], 0.0)
+
+    def test_accepts_a_versioned_trusted_context_fixture(self):
+        case = make_case("context")
+        case["trusted_context"] = {
+            "schema_version": 1,
+            "items": [{
+                "kind": "playback_state",
+                "source": "playback.current_item",
+                "status": "success",
+                "payload": {"title": "Example", "position_ms": 42000},
+            }],
+        }
+        prediction = make_prediction(
+            "context",
+            '{"decision":"act","action":"play","arguments":{"title":"Example"},"requires_clarification":false}',
+        )
+
+        report = score_records([case], [prediction])
+
+        self.assertEqual(report["metrics"]["overall_semantic_exact_match"]["rate"], 1.0)
+
+    def test_rejects_invalid_trusted_context_status(self):
+        case = make_case("bad-context")
+        case["trusted_context"] = {
+            "schema_version": 1,
+            "items": [{
+                "kind": "tool_result",
+                "source": "catalog.lookup",
+                "status": "unrecognized",
+                "payload": {},
+            }],
+        }
+        prediction = make_prediction(
+            "bad-context",
+            '{"decision":"act","action":"play","arguments":{"title":"Example"},"requires_clarification":false}',
+        )
+
+        with self.assertRaisesRegex(EvaluationInputError, "invalid status"):
+            score_records([case], [prediction])
 
     def test_false_action_rate_covers_all_non_action_gold_decisions(self):
         cases = [

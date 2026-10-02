@@ -2,7 +2,7 @@
 
 **Status:** Evaluation framework and dependency-free scorer implemented; no ready benchmark cases, scores, or trained candidates yet. See [evaluation/README.md](evaluation/README.md).
 
-Case authors and reviewers must follow the draft [annotation guide](evaluation/ANNOTATION_GUIDE.md). The guide records v1 schema gaps that keep tool-dependent cases and response-language/presentation claims out of ready evaluation until the required formats exist.
+Case authors and reviewers must follow the draft [annotation guide](evaluation/ANNOTATION_GUIDE.md). Case schema v2 can carry static, versioned trusted-context fixtures; the guide records remaining gaps for interactive tool execution, reply language, and presentation scoring.
 
 **Before major compute:** A versioned development set and separate sealed final holdout must be authored, reviewed, and frozen.
 
@@ -21,7 +21,7 @@ Report the overall score and every slice below, in English, natural Japanese, an
 - Grounding/tool cases: available and unavailable media, authoritative tool results, failures, and unavailable or conflicting state.
 - Structured response validity, unsupported factual claims, and disallowed output content.
 
-For English/Japanese cases, score English-matrix and Japanese-matrix code-switching separately as well as together. Human review must evaluate linguistic naturalness and preservation of the intended meaning as distinct checks. Current v1 cases cannot represent hashed tool-result fixtures, and the scorer cannot measure generated reply language or presentation intent; these remain required evaluation-format work before end-to-end claims.
+For English/Japanese cases, score English-matrix and Japanese-matrix code-switching separately as well as together. Human review must evaluate linguistic naturalness and preservation of the intended meaning as distinct checks. Case v2 hashes inline trusted-context fixtures with the rest of each sample, so cases can represent static library, account, playback, and tool-outcome state. The current scorer validates and hashes these fixtures but does not pass them to a model or execute tools; a runner must do that before these cases can measure grounded behavior. It also cannot score interactive tool trajectories, generated reply language, or presentation intent; those remain required evaluation-format work before end-to-end claims.
 
 Examples must be semantically varied, not mostly paraphrases. Split by intent pattern, source, title/entity, conversation family, and generation template where applicable so near-duplicates cannot cross into the final holdout. Keep every benchmark's source, license, revision, and use in the provenance manifest.
 

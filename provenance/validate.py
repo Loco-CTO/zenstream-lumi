@@ -29,7 +29,8 @@ RECORD_SPLITS = {"unassigned", "train", "development", "public_test", "sealed_ho
 CASE_SPLIT_TO_RECORD = {"development": "development", "final_holdout": "sealed_holdout"}
 PERMISSIONS = {"permitted", "prohibited", "conditional", "unknown", "not_applicable"}
 CASE_FINGERPRINT_FIELDS = (
-    "schema_version", "case_id", "family_id", "split", "language", "categories", "turns", "gold",
+    "schema_version", "case_id", "family_id", "split", "language", "categories", "turns",
+    "trusted_context", "gold",
 )
 
 
@@ -115,7 +116,6 @@ def canonical_sha256(value: Any) -> str:
 def evaluation_case_sha256(case: dict[str, Any]) -> str:
     """Hash the authored evaluation content, excluding review and provenance metadata."""
     payload = {key: case.get(key) for key in CASE_FINGERPRINT_FIELDS}
-    payload["context_id"] = case.get("context_id")
     return canonical_sha256(payload)
 
 
@@ -537,6 +537,11 @@ def validate_evaluation_case_provenance(
     for index, case in enumerate(cases, start=1):
         if not isinstance(case, dict):
             raise ProvenanceError(f"evaluation case {index} must be an object")
+        version = case.get("schema_version")
+        if not isinstance(version, int) or isinstance(version, bool) or version != 2:
+            raise ProvenanceError(f"evaluation case {case.get('case_id')!r} schema_version must be 2")
+        if "trusted_context" not in case:
+            raise ProvenanceError(f"evaluation case {case.get('case_id')!r} lacks trusted_context")
         record_id = case.get("provenance_record_id")
         if not _nonempty(record_id):
             raise ProvenanceError(f"evaluation case {case.get('case_id')!r} has no nonempty provenance_record_id")
