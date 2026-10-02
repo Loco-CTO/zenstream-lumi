@@ -1,8 +1,8 @@
 # Lumi behavioral evaluation plan
 
-**Status:** Evaluation case/prediction formats, a model-independent candidate-input projection, a provenance-gated callback runner, and a dependency-free scorer implemented; no ready benchmark cases, model backend, scores, or trained candidates yet. See [evaluation/README.md](evaluation/README.md).
+**Status:** Evaluation case/prediction formats, a draft capability registry, a model-independent candidate-input projection, a provenance-gated callback runner, and a dependency-free scorer implemented; no ready benchmark cases, model backend, scores, or trained candidates yet. See [evaluation/README.md](evaluation/README.md).
 
-Case authors and reviewers must follow the draft [annotation guide](evaluation/ANNOTATION_GUIDE.md). Case schema v2 can carry static, versioned trusted-context fixtures; the guide records remaining gaps for interactive tool execution, reply language, and presentation scoring.
+Case authors and reviewers must follow the draft [annotation guide](evaluation/ANNOTATION_GUIDE.md). Case schema v2 can carry static, versioned trusted-context fixtures. The capability registry maps a first set of candidate outcomes to a pinned Orchestrator contract and route implementation, but remains unapproved. Its current gaps include explicit catalog filters for genre/year/runtime/watched state, a generated OpenAPI enum that omits the runtime-supported recommendations section, and the missing Lumi playback gateway. Do not label cases for these unreviewed or unimplemented outcomes as ready.
 
 **Before major compute:** A versioned development set and separate sealed final holdout must be authored, reviewed, and frozen.
 
