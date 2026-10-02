@@ -20,6 +20,7 @@ Architecture, tokenizer, model size, runtime, training corpus, integration proto
 ## Project records
 
 - [Evaluation plan](EVALUATION_PLAN.md): target thresholds, error categories, measurement, and holdout rules.
+- [Evaluation harness](evaluation/README.md): canonical case/prediction formats and a standard-library scorer; no ready evaluation cases exist yet.
 - [Research notes](RESEARCH_NOTES.md): current findings, limitations, open hypotheses, and proposed experiments.
 - [Research references](RESEARCH_REFERENCES.md): sources that influence design; these are not training data.
 - [Data sources](DATA_SOURCES.md): inclusion policy and human-readable provenance summary.

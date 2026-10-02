@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "confidence_level": 0.95,
+  "targets": {
+    "structured_response_validity": {"minimum": 0.999, "evidence": "one_sided_exact_error_bound"},
+    "simple_action_selection": {"minimum": 0.97, "evidence": "report_point_and_wilson_interval"},
+    "argument_extraction": {"minimum": 0.95, "evidence": "report_point_and_wilson_interval"},
+    "negation_no_action_correctness": {"minimum": 0.98, "evidence": "report_point_and_wilson_interval"},
+    "english_zenstream_tasks": {"minimum": 0.97, "evidence": "report_point_and_wilson_interval"},
+    "japanese_zenstream_tasks": {"minimum": 0.95, "evidence": "report_point_and_wilson_interval"},
+    "code_switching": {"minimum": 0.94, "evidence": "report_point_and_wilson_interval"},
+    "multi_turn_reference_resolution": {"minimum": 0.92, "evidence": "report_point_and_wilson_interval"},
+    "difficult_ambiguous_requests": {"minimum": 0.90, "evidence": "report_point_and_wilson_interval"}
+  }
+}

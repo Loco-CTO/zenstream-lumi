@@ -1,6 +1,6 @@
 # Lumi behavioral evaluation plan
 
-**Status:** Evaluation framework specified; no benchmark cases, scores, or trained candidates yet.
+**Status:** Evaluation framework and dependency-free scorer implemented; no ready benchmark cases, scores, or trained candidates yet. See [evaluation/README.md](evaluation/README.md).
 
 **Before major compute:** A versioned development set and separate sealed final holdout must be authored, reviewed, and frozen.
 
@@ -40,6 +40,8 @@ These targets come from the user goal. They are minimum targets, not claims abou
 Track false state-changing actions separately from missed actions. A false state-changing action means the model proposes an action when the gold label calls for no action, discussion, or clarification. Report raw counts, denominators, per-category scores, and confidence intervals; do not let aggregate accuracy hide a failing safety-critical slice. For a 99.9% validity target, a small sample cannot establish the target precisely: use a sufficiently large, frozen test and report a one-sided confidence bound as well as observed rate. As a rough minimum statistical resolution, zero invalid responses in about 2,995 independent trials gives a one-sided 95% binomial upper bound near a 0.1% error rate; that does not replace broad semantic coverage or per-slice checks.
 
 ## Scoring and runtime records
+
+The machine-readable case and prediction formats are in `evaluation/`. The scorer uses a canonical semantic adapter; it does not select Lumi's runtime wire protocol. Raw output is retained so malformed responses count against structural validity. Structural validity, semantic exact match, argument extraction, and false state-changing actions are separate metrics. Unsupported factual claims require a separately recorded human grounding review.
 
 For each candidate, report:
 

@@ -42,6 +42,9 @@
 ## Structured generation and reliability
 
 - Geng et al. 2025. [Generating Structured Outputs from Language Models: Benchmark and Studies](https://arxiv.org/abs/2501.10868); [JSONSchemaBench](https://github.com/guidance-ai/jsonschemabench). Evaluates structured decoding validity, schema coverage, efficiency, and output quality; syntax and semantic correctness must be scored separately.
+- Xiong et al. 2026. [StructureBench: A Unified Benchmark Suite for Multi-Scenario Structured Generation Tasks with On-Device Models](https://www.ijcai.org/proceedings/2026/267). IJCAI 2026; compares prompt-only and constrained decoding, and separately measures structural validity and semantic correctness across on-device models.
+- Ray. 2026. [The Constraint Tax: Measuring Validity-Correctness Tradeoffs in Structured Outputs for Small Language Models](https://arxiv.org/abs/2605.26128). Preprint; measures answer/executable accuracy alongside schema validity and wrong-valid outputs. Its experiments use pretrained models and commodity GPUs, so results are not direct evidence for Lumi's from-scratch CPU candidate.
+- Li et al. 2026. [Efficient Grammar-Constrained Decoding via Parser Stack Classification](https://arxiv.org/abs/2608.03065). Preprint; reports reduced mask-computation overhead for JSON and code grammars, with preprocessing cost and break-even conditions to consider if Lumi later adopts constrained decoding.
 
 ## Inference, quantization, and deployment documentation
 

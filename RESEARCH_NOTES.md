@@ -50,6 +50,8 @@ The Mamba comparison, RWKV-7, and Gated DeltaNet are evidence that alternatives 
 
 JSONSchemaBench (2025, [Geng et al.](https://arxiv.org/abs/2501.10868)) evaluates constrained-generation frameworks on schema validity, constraint coverage, efficiency, and output quality. Constrained decoding can limit output syntax, but syntactic validity alone cannot prove correct intent, slots, or safe action selection. Lumi evaluation must score schema validity separately from semantic accuracy, and ZenStream must validate each proposed operation against current permissions and state.
 
+Two 2026 structured-output studies reinforce that split. [StructureBench](https://www.ijcai.org/proceedings/2026/267) reports that constrained decoding guarantees syntactic validity in its evaluated setup but does not reliably improve semantic accuracy and can reduce it for smaller models or complex grammars. The arXiv preprint [*The Constraint Tax*](https://arxiv.org/abs/2605.26128) reports large validity/correctness trade-offs on pretrained SLMs; its numerical results do not transfer directly to a random-initialized Lumi model, but the measurement design is relevant. This supports retaining raw outputs and scoring structural validity, action correctness, executable correctness, and false valid actions independently. It does not select a Lumi decoding method.
+
 **Hypothesis (untested):** A compact, versioned response schema with constrained decoding and server-side allow-list validation may reduce malformed responses and contain model errors. The schema, decoder, and response format remain open decisions until candidate runtimes are compared.
 
 ## Inference, quantization, and resource behavior
