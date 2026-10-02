@@ -46,6 +46,12 @@
 - Ray. 2026. [The Constraint Tax: Measuring Validity-Correctness Tradeoffs in Structured Outputs for Small Language Models](https://arxiv.org/abs/2605.26128). Preprint; measures answer/executable accuracy alongside schema validity and wrong-valid outputs. Its experiments use pretrained models and commodity GPUs, so results are not direct evidence for Lumi's from-scratch CPU candidate.
 - Li et al. 2026. [Efficient Grammar-Constrained Decoding via Parser Stack Classification](https://arxiv.org/abs/2608.03065). Preprint; reports reduced mask-computation overhead for JSON and code grammars, with preprocessing cost and break-even conditions to consider if Lumi later adopts constrained decoding.
 
+## Tool use and grounded evaluation
+
+- Lu et al. 2025. [ToolSandbox: A Stateful, Conversational, Interactive Evaluation Benchmark for LLM Tool Use Capabilities](https://machinelearning.apple.com/research/toolsandbox-stateful-conversational-llm-benchmark). Apple/NAACL 2025; evaluates stateful execution, implicit tool dependencies, multi-turn interaction, and insufficient-information behavior.
+- Patil et al. 2025. [The Berkeley Function Calling Leaderboard (BFCL): From Tool Use to Agentic Evaluation of Large Language Models](https://proceedings.mlr.press/v267/patil25a.html). ICML 2025; evaluates function calls and abstention in stateful multi-step settings.
+- Yang et al. 2026. [Beyond Ideal Instruction: A Comprehensive Framework for Evaluating LLMs in Realistic Interactions](https://arxiv.org/abs/2606.03318). RUT-Bench preprint; covers ideal and non-ideal user behavior in single- and multi-turn tool scenarios. Its results are preliminary and are not Lumi performance evidence.
+
 ## Benchmark integrity, synthetic data, and code-switching
 
 - Li et al. 2025. [C²LEVA: Toward Comprehensive and Contamination-Free Language Model Evaluation](https://aclanthology.org/2025.findings-acl.116/). Findings of ACL 2025; introduces a multi-task evaluation with contamination prevention, protected test data, and renewal controls.

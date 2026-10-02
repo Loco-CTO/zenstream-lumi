@@ -105,15 +105,42 @@ def _validate_semantic_output(value: Any, *, allow_message: bool) -> str | None:
     return None
 
 
+def _validate_trusted_context(value: Any, prefix: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict) or set(value) != {"schema_version", "items"}:
+        raise EvaluationInputError(f"{prefix}: trusted_context must be null or a versioned fixture")
+    version = value["schema_version"]
+    if not isinstance(version, int) or isinstance(version, bool) or version != 1:
+        raise EvaluationInputError(f"{prefix}: trusted_context schema_version must be 1")
+    items = value["items"]
+    if not isinstance(items, list) or not items:
+        raise EvaluationInputError(f"{prefix}: trusted_context items must be a nonempty list")
+    allowed_statuses = {
+        "success", "empty", "not_found", "unavailable", "permission_denied", "timeout", "error",
+    }
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict) or set(item) != {"kind", "source", "status", "payload"}:
+            raise EvaluationInputError(
+                f"{prefix}: trusted_context item {index} must contain kind, source, status, and payload"
+            )
+        if not _is_nonempty_string(item["kind"]) or not _is_nonempty_string(item["source"]):
+            raise EvaluationInputError(f"{prefix}: trusted_context item {index} needs kind and source labels")
+        if not isinstance(item["status"], str) or item["status"] not in allowed_statuses:
+            raise EvaluationInputError(f"{prefix}: trusted_context item {index} has an invalid status")
+        if not isinstance(item["payload"], dict):
+            raise EvaluationInputError(f"{prefix}: trusted_context item {index} payload must be an object")
+
+
 def _validate_case(record: dict[str, Any], line_number: int) -> None:
     if not isinstance(record, dict):
         raise EvaluationInputError(f"case row {line_number} must be an object")
     required = {
         "schema_version", "case_id", "family_id", "split", "review_status",
-        "language", "categories", "turns", "gold", "provenance_record_id", "review",
+        "language", "categories", "turns", "trusted_context", "gold", "provenance_record_id", "review",
     }
     missing = sorted(required - record.keys())
-    extra = sorted(record.keys() - (required | {"context_id"}))
+    extra = sorted(record.keys() - required)
     prefix = f"case row {line_number}"
     if missing:
         raise EvaluationInputError(f"{prefix}: missing field(s): {', '.join(missing)}")
@@ -122,9 +149,9 @@ def _validate_case(record: dict[str, Any], line_number: int) -> None:
     if (
         not isinstance(record["schema_version"], int)
         or isinstance(record["schema_version"], bool)
-        or record["schema_version"] != 1
+        or record["schema_version"] != 2
     ):
-        raise EvaluationInputError(f"{prefix}: schema_version must be 1")
+        raise EvaluationInputError(f"{prefix}: schema_version must be 2")
     for field in ("case_id", "family_id", "provenance_record_id"):
         if not _is_nonempty_string(record[field]):
             raise EvaluationInputError(f"{prefix}: {field} must be a nonempty string")
@@ -155,8 +182,7 @@ def _validate_case(record: dict[str, Any], line_number: int) -> None:
             or not _is_nonempty_string(turn["text"])
         ):
             raise EvaluationInputError(f"{prefix}: invalid turn role or empty text")
-    if "context_id" in record and record["context_id"] is not None and not isinstance(record["context_id"], str):
-        raise EvaluationInputError(f"{prefix}: context_id must be a string or null")
+    _validate_trusted_context(record["trusted_context"], prefix)
     error = _validate_semantic_output(record["gold"], allow_message=False)
     if error:
         raise EvaluationInputError(f"{prefix}: invalid gold output: {error}")

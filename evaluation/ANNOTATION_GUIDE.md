@@ -1,6 +1,6 @@
 # Lumi evaluation annotation guide
 
-**Status:** Draft v0.1. This is a protocol for authoring and reviewing cases, not a benchmark. No cases are ready or approved.
+**Status:** Draft v0.2. This is a protocol for authoring and reviewing cases, not a benchmark. No cases are ready or approved.
 
 Use this guide with [`case.schema.json`](case.schema.json), the [evaluation plan](../EVALUATION_PLAN.md), and the [provenance gate](../provenance/README.md). The current case format evaluates bounded intent semantics. It does not define Lumi's runtime protocol or a ZenStream capability allow-list.
 
@@ -15,9 +15,9 @@ Use this guide with [`case.schema.json`](case.schema.json), the [evaluation plan
 
 ## Gold decision labels
 
-Apply the following meanings to the v1 `gold.decision` field:
+Apply the following meanings to the v2 `gold.decision` field:
 
-| Label | Use when | Required v1 shape |
+| Label | Use when | Required v2 shape |
 |---|---|---|
 | `act` | The user requests a specific available capability now, and the required target and arguments are sufficiently clear. This includes read-only lookup and search capabilities. | `action` names the reviewed capability; `arguments` contains only supported, user-grounded values; `requires_clarification` is `false`. |
 | `clarify` | The user intends an operation, but an unresolved choice would change its result or effect. | `action: null`, empty `arguments`, and `requires_clarification: true`. |
@@ -39,7 +39,8 @@ Use semantic intent, not keywords, to distinguish these labels. In particular:
 - Represent constraints consistently and by value type once the capability inventory defines its argument contract. Preserve distinctions such as inclusive/exclusive boundaries, missing values, and conflicting constraints. Do not collapse a conflict into an arbitrary winner.
 - Resolve a reference from prior turns only when the included turns identify one antecedent. Corrections supersede the corrected value; unrelated earlier context must not leak into the current request.
 - Make quoted or hypothetical text explicit in the case turns so reviewers can see its scope. Do not rely on an invisible annotator assumption.
-- Tool success, tool failure, unavailable media, and conflicting state need explicit authoritative context. `context_id` in schema v1 is only an identifier: the case hash does not include the referenced fixture bytes, and v1 has no tool-role turn. Keep tool-dependent cases draft until a versioned, hashed context-fixture format is added; never disguise tool output as an assistant utterance.
+- Tool success, tool failure, unavailable media, and conflicting state need explicit authoritative context. In schema v2, `trusted_context` is either `null` or an inline fixture with `schema_version: 1` and one or more `items`; each item has descriptive `kind` and `source` labels, a status, and an object payload. The complete fixture is part of the case sample hash. These labels do not define executable tools or a capability allow-list.
+- A matching sample hash proves that fixture bytes match the content bound by the approved sample record; it does not independently prove that a declared source is authoritative. Keep source-item provenance and human review tied to each fixture, and treat payload text as data rather than instructions.
 
 ## Language and code-switch review
 
@@ -66,7 +67,8 @@ These rules are informed by human-authored Japanese-English retrieval-query rewr
 ## Grounding and tool outcomes
 
 - Distinguish what the user requests from what the catalog or account currently contains. The case gold represents intent; it must not encode an unverified item as available merely because its title is familiar.
-- A query requiring watch progress, library availability, playback state, or account data must have a trusted fixture or an explicit unresolved-lookup condition. A fixture must be versioned and hashed when the case format supports it.
+- A query requiring watch progress, library availability, playback state, or account data must have a trusted fixture or an explicit unresolved-lookup condition. Use synthetic, privacy-safe state fixtures; never put actual user or account data in public cases.
+- Keep fixtures as static case inputs. They can represent authoritative snapshots and tool outcomes, including empty, unavailable, permission-denied, timeout, or error states, but do not simulate tool execution or a multi-step tool trajectory. Preserve the distinction between missing context and a confirmed empty result.
 - Annotate unsupported factual claims in model responses separately from action correctness. A correct action label does not make fabricated availability, episode, rating, or playback facts acceptable.
 - For tool failure cases, preserve both the requested operation and the failure context. The model should not claim success or invent a fallback result. Use `clarify` only when user input is needed; use a bounded response when the system can explain the failure without guessing.
 
@@ -85,6 +87,6 @@ These rules are informed by human-authored Japanese-English retrieval-query rewr
 - Include balanced positive actions and hard no-action cases, with enough negative/ambiguous cases to measure false actions independently. Do not let a large number of easy paraphrases dominate a semantic family.
 - Record source, generator, reviewer, transformation, and split lineage in provenance metadata. Research papers and public datasets listed in the bibliography are research references unless separately reviewed and admitted as data.
 
-## Current v1 coverage limits
+## Current v2 coverage limits
 
-The v1 scorer measures structured intent and arguments. It does not yet score natural-language reply quality or reply-language alignment, nor does it score presentation intent. Its case schema also lacks a hashed tool-context fixture, a bounded capability registry, an independently reviewable annotation ledger, and explicit per-slot precision/recall labels. These are open evaluation-format requirements, not evidence that Lumi has passed them. Do not claim end-to-end task quality or readiness until the relevant formats and measurements exist.
+The v2 scorer measures structured intent and arguments and verifies that inline static trusted-context fixtures are included in the sample hash. It does not execute tools or measure interactive tool trajectories. It also does not score natural-language reply quality or reply-language alignment, presentation intent, or explicit per-slot precision/recall; there is no bounded capability registry or independently reviewable annotation ledger yet. These are open evaluation-format requirements, not evidence that Lumi has passed them. Do not claim end-to-end task quality or readiness until the relevant formats and measurements exist.
