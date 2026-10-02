@@ -37,6 +37,11 @@ from evaluation.review_records import (  # noqa: E402
     review_records_sha256,
     validate_case_review_records,
 )
+from evaluation.tool_trajectory import (  # noqa: E402
+    ToolTrajectoryError,
+    validate_case_tool_trajectory,
+    validate_prediction_trajectory,
+)
 
 
 THRESHOLDS_PATH = Path(__file__).with_name("thresholds.json")
@@ -108,7 +113,7 @@ def _validate_semantic_output(
     if allow_message:
         allowed.update({"message", "presentation_intent"})
     if allow_case_contract:
-        allowed.update({"response_contract", "presentation_intent"})
+        allowed.update({"response_contract", "presentation_intent", "tool_trajectory"})
     if not OUTPUT_KEYS.issubset(value):
         missing = sorted(OUTPUT_KEYS - value.keys())
         return f"output is missing required field(s): {', '.join(missing)}"
@@ -189,7 +194,8 @@ def _validate_case(record: dict[str, Any], line_number: int) -> None:
         raise EvaluationInputError(f"case row {line_number} must be an object")
     required = {
         "schema_version", "case_id", "family_id", "split", "review_status",
-        "language", "categories", "turns", "trusted_context", "gold", "provenance_record_id", "review",
+        "language", "categories", "turns", "trusted_context", "tool_scenario", "gold",
+        "provenance_record_id", "review",
     }
     missing = sorted(required - record.keys())
     extra = sorted(record.keys() - required)
@@ -201,9 +207,9 @@ def _validate_case(record: dict[str, Any], line_number: int) -> None:
     if (
         not isinstance(record["schema_version"], int)
         or isinstance(record["schema_version"], bool)
-        or record["schema_version"] != 3
+        or record["schema_version"] != 4
     ):
-        raise EvaluationInputError(f"{prefix}: schema_version must be 3")
+        raise EvaluationInputError(f"{prefix}: schema_version must be 4")
     for field in ("case_id", "family_id", "provenance_record_id"):
         if not _is_nonempty_string(record[field]):
             raise EvaluationInputError(f"{prefix}: {field} must be a nonempty string")
@@ -240,6 +246,14 @@ def _validate_case(record: dict[str, Any], line_number: int) -> None:
     )
     if error:
         raise EvaluationInputError(f"{prefix}: invalid gold output: {error}")
+    if record["tool_scenario"] is None and "tool_trajectory" in record["gold"]:
+        raise EvaluationInputError(f"{prefix}: gold.tool_trajectory requires a non-null tool_scenario")
+    try:
+        validate_case_tool_trajectory(
+            record["tool_scenario"], record["gold"].get("tool_trajectory")
+        )
+    except ToolTrajectoryError as exc:
+        raise EvaluationInputError(f"{prefix}: {exc}") from exc
 
     review = record["review"]
     required_review_fields = {
@@ -318,16 +332,23 @@ def _validate_response_review_wrapper(record: dict[str, Any], line_number: int) 
 def _validate_prediction_wrapper(record: dict[str, Any], line_number: int) -> None:
     if not isinstance(record, dict):
         raise EvaluationInputError(f"prediction row {line_number} must be an object")
-    allowed = {"schema_version", "case_id", "raw_output", "grounding_review", "response_review"}
+    allowed = {
+        "schema_version", "case_id", "raw_output", "grounding_review", "response_review", "trajectory",
+    }
     if set(record) - allowed:
         raise EvaluationInputError(f"prediction row {line_number}: unsupported field(s)")
     version = record.get("schema_version")
-    if not isinstance(version, int) or isinstance(version, bool) or version != 2:
-        raise EvaluationInputError(f"prediction row {line_number}: schema_version must be 2")
+    if not isinstance(version, int) or isinstance(version, bool) or version != 3:
+        raise EvaluationInputError(f"prediction row {line_number}: schema_version must be 3")
     if not _is_nonempty_string(record.get("case_id")):
         raise EvaluationInputError(f"prediction row {line_number}: case_id must be a nonempty string")
     if not isinstance(record.get("raw_output"), str):
         raise EvaluationInputError(f"prediction row {line_number}: raw_output must be a string")
+    if "trajectory" in record:
+        try:
+            validate_prediction_trajectory(record["trajectory"], record["raw_output"])
+        except ToolTrajectoryError as exc:
+            raise EvaluationInputError(f"prediction row {line_number}: {exc}") from exc
     if "grounding_review" not in record:
         _validate_response_review_wrapper(record, line_number)
         return
@@ -698,6 +719,91 @@ def _argument_slot_scores(
     )
 
 
+def _tool_trajectory_metrics(
+    cases: list[dict[str, Any]],
+    predictions: dict[str, dict[str, Any]],
+    decoded: dict[str, dict[str, Any] | None],
+    confidence: float,
+) -> dict[str, Any]:
+    trajectory_cases = [case for case in cases if case["tool_scenario"] is not None]
+    true_call_count = 0
+    predicted_call_count = 0
+    expected_call_count = 0
+    exact_path_count = 0
+    completed_count = 0
+    fixture_miss_count = 0
+    unknown_tool_count = 0
+    simulated_call_count = 0
+    stop_reasons: dict[str, int] = {
+        "final": 0,
+        "invalid_tool_call": 0,
+        "call_limit": 0,
+        "step_limit": 0,
+        "missing_prediction": 0,
+    }
+
+    for case in trajectory_cases:
+        record = predictions.get(case["case_id"])
+        if record is None:
+            stop_reasons["missing_prediction"] += 1
+            expected_call_count += len(case["gold"]["tool_trajectory"]["calls"])
+            continue
+        trace = record["trajectory"]
+        stop_reason = trace["stop_reason"]
+        stop_reasons[stop_reason] += 1
+        final_output_valid = stop_reason == "final" and decoded[case["case_id"]] is not None
+        completed_count += final_output_valid
+        actual_calls = [step["tool_call"] for step in trace["steps"] if step["tool_call"] is not None]
+        expected_calls = case["gold"]["tool_trajectory"]["calls"]
+        predicted_call_count += len(actual_calls)
+        expected_call_count += len(expected_calls)
+
+        unmatched_expected = list(expected_calls)
+        for actual in actual_calls:
+            match_index = next((
+                index for index, expected in enumerate(unmatched_expected)
+                if actual["tool"] == expected["tool"]
+                and _normalise(actual["arguments"]) == _normalise(expected["arguments"])
+            ), None)
+            if match_index is not None:
+                true_call_count += 1
+                unmatched_expected.pop(match_index)
+        exact_path = (
+            final_output_valid
+            and len(actual_calls) == len(expected_calls)
+            and all(
+                actual["tool"] == expected["tool"]
+                and _normalise(actual["arguments"]) == _normalise(expected["arguments"])
+                for actual, expected in zip(actual_calls, expected_calls)
+            )
+        )
+        exact_path_count += exact_path
+        for step in trace["steps"]:
+            observation = step["observation"]
+            if observation is None:
+                continue
+            simulated_call_count += 1
+            fixture_miss_count += observation["status"] == "fixture_mismatch"
+            unknown_tool_count += observation["status"] == "unknown_tool"
+
+    return {
+        "trajectory_case_count": len(trajectory_cases),
+        "exact_trajectory": _rate(exact_path_count, len(trajectory_cases), confidence),
+        "final_completion": _rate(completed_count, len(trajectory_cases), confidence),
+        "tool_call_precision": _rate(true_call_count, predicted_call_count, confidence),
+        "tool_call_recall": _rate(true_call_count, expected_call_count, confidence),
+        "fixture_miss_rate": _rate(fixture_miss_count, simulated_call_count, confidence),
+        "unknown_tool_rate": _rate(unknown_tool_count, simulated_call_count, confidence),
+        "tool_call_counts": {
+            "matched": true_call_count,
+            "predicted": predicted_call_count,
+            "expected": expected_call_count,
+        },
+        "simulated_call_count": simulated_call_count,
+        "stop_reasons": stop_reasons,
+    }
+
+
 def score_records(
     cases: list[dict[str, Any]],
     prediction_records: list[dict[str, Any]],
@@ -733,6 +839,25 @@ def score_records(
         if case_id in predictions:
             raise EvaluationInputError(f"duplicate prediction case_id {case_id!r}")
         predictions[case_id] = record
+
+    for case_id, case in available.items():
+        prediction = predictions.get(case_id)
+        if prediction is None:
+            continue
+        expects_trajectory = case["tool_scenario"] is not None
+        has_trajectory = "trajectory" in prediction
+        if expects_trajectory != has_trajectory:
+            requirement = "requires" if expects_trajectory else "does not accept"
+            raise EvaluationInputError(
+                f"prediction for {case_id!r} {requirement} an interactive tool trajectory"
+            )
+        if has_trajectory:
+            try:
+                validate_prediction_trajectory(
+                    prediction["trajectory"], prediction["raw_output"], case["tool_scenario"]
+                )
+            except ToolTrajectoryError as exc:
+                raise EvaluationInputError(f"prediction for {case_id!r}: {exc}") from exc
 
     missing_count = len(set(available) - set(predictions))
     decoded: dict[str, dict[str, Any] | None] = {}
@@ -906,6 +1031,9 @@ def score_records(
         len(reviewed_response_pairs),
         confidence,
     )
+    metrics["interactive_tool_trajectories"] = _tool_trajectory_metrics(
+        all_cases, predictions, decoded, confidence
+    )
 
     category_metrics: dict[str, Any] = {}
     for category in sorted({tag for case in all_cases for tag in case["categories"]}):
@@ -937,7 +1065,7 @@ def score_records(
         }
 
     return {
-        "report_schema_version": 2,
+        "report_schema_version": 3,
         "candidate_version": candidate_version,
         "split": split,
         "final_audit": split == "final_holdout",

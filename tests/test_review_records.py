@@ -17,7 +17,7 @@ def make_case(case_id="case-1", language="en"):
     if language in {"ja", "en_ja"}:
         reviewers.append("language-reviewer")
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "case_id": case_id,
         "family_id": case_id,
         "split": "development",
@@ -26,6 +26,7 @@ def make_case(case_id="case-1", language="en"):
         "categories": ["simple_action"],
         "turns": [{"role": "user", "text": "Play the album"}],
         "trusted_context": None,
+        "tool_scenario": None,
         "gold": {
             "decision": "act",
             "action": "play",

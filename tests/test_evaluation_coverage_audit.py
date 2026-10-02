@@ -19,7 +19,7 @@ def make_case(
 ):
     reviewed = review_status == "ready"
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "case_id": case_id,
         "family_id": family_id or case_id,
         "split": split,
@@ -28,6 +28,7 @@ def make_case(
         "categories": [category],
         "turns": [{"role": "user", "text": "Play it"}],
         "trusted_context": None,
+        "tool_scenario": None,
         "gold": {
             "decision": "act",
             "action": "play",

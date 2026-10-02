@@ -84,6 +84,27 @@
         },
         "presentation_intent": {
           "enum": ["none", "text", "media_results", "media_details", "playback_handoff", "confirmation"]
+        },
+        "tool_trajectory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["calls", "completion"],
+          "properties": {
+            "calls": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["tool", "arguments"],
+                "properties": {
+                  "tool": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"},
+                  "arguments": {"type": "object"}
+                }
+              }
+            },
+            "completion": {"const": "final"}
+          }
         }
       },
       "allOf": [
