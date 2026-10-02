@@ -31,6 +31,12 @@ from evaluation.capability_registry import (  # noqa: E402
     CapabilityRegistryError,
     validate_registry as validate_capability_registry,
 )
+from evaluation.review_records import (  # noqa: E402
+    ReviewRecordError,
+    read_review_records,
+    review_records_sha256,
+    validate_case_review_records,
+)
 
 
 THRESHOLDS_PATH = Path(__file__).with_name("thresholds.json")
@@ -204,12 +210,13 @@ def _validate_case(record: dict[str, Any], line_number: int) -> None:
         raise EvaluationInputError(f"{prefix}: invalid gold output: {error}")
 
     review = record["review"]
-    if not isinstance(review, dict) or not {"annotation_status", "language_review_status", "reviewer_ids"}.issubset(review):
+    required_review_fields = {
+        "annotation_status", "language_review_status", "reviewer_ids", "review_record_ids",
+    }
+    if not isinstance(review, dict) or not required_review_fields.issubset(review):
         raise EvaluationInputError(f"{prefix}: review metadata is incomplete")
-    if set(review) - {"annotation_status", "language_review_status", "reviewer_ids", "adjudication_note"}:
+    if set(review) - required_review_fields:
         raise EvaluationInputError(f"{prefix}: unsupported review metadata")
-    if "adjudication_note" in review and not isinstance(review["adjudication_note"], str):
-        raise EvaluationInputError(f"{prefix}: adjudication_note must be a string")
     if not isinstance(review["annotation_status"], str) or review["annotation_status"] not in {"pending", "approved"}:
         raise EvaluationInputError(f"{prefix}: invalid annotation_status")
     if not isinstance(review["language_review_status"], str) or review["language_review_status"] not in {"not_required", "pending", "approved"}:
@@ -219,11 +226,22 @@ def _validate_case(record: dict[str, Any], line_number: int) -> None:
         raise EvaluationInputError(f"{prefix}: reviewer_ids must be a list of nonempty strings")
     if len(set(reviewers)) != len(reviewers):
         raise EvaluationInputError(f"{prefix}: reviewer_ids must be unique")
+    review_record_ids = review["review_record_ids"]
+    if (
+        not isinstance(review_record_ids, list)
+        or not all(_is_nonempty_string(item) for item in review_record_ids)
+        or len(set(review_record_ids)) != len(review_record_ids)
+    ):
+        raise EvaluationInputError(f"{prefix}: review_record_ids must be a unique list of nonempty strings")
     if record["review_status"] == "ready":
-        if review["annotation_status"] != "approved" or not reviewers:
-            raise EvaluationInputError(f"{prefix}: ready cases need approved annotation and at least one reviewer")
+        if review["annotation_status"] != "approved" or len(reviewers) < 2 or len(review_record_ids) < 2:
+            raise EvaluationInputError(
+                f"{prefix}: ready cases need approved annotation and at least two independent reviewers"
+            )
         if record["language"] in {"ja", "en_ja"} and review["language_review_status"] != "approved":
             raise EvaluationInputError(f"{prefix}: Japanese and code-switch cases need language review approval")
+        if record["language"] in {"ja", "en_ja"} and len(review_record_ids) < 3:
+            raise EvaluationInputError(f"{prefix}: Japanese and code-switch cases need a separate language review record")
         if record["language"] == "en" and review["language_review_status"] == "pending":
             raise EvaluationInputError(f"{prefix}: English cases cannot be ready with language review pending")
 
@@ -477,12 +495,14 @@ def _capability_action_metrics(
 
 def select_evaluation_cases(
     cases: list[dict[str, Any]],
+    review_records: list[dict[str, Any]],
     split: str = "development",
     allow_final_holdout: bool = False,
 ) -> list[dict[str, Any]]:
     """Validate case structure/readiness and select one authorized split.
 
-    This does not validate sample provenance; callers that expose cases to a
+    The selected cases must have a valid current review ledger. This function
+    does not validate sample provenance; callers that expose cases to a
     candidate must validate the provenance bundle separately.
     """
     if split not in SPLITS:
@@ -510,6 +530,10 @@ def select_evaluation_cases(
     if not_ready:
         preview = ", ".join(not_ready[:5])
         raise EvaluationInputError(f"selected split contains unreviewed or excluded cases: {preview}")
+    try:
+        validate_case_review_records(selected, review_records)
+    except ReviewRecordError as exc:
+        raise EvaluationInputError(str(exc)) from exc
     return selected
 
 
@@ -610,13 +634,19 @@ def score_records(
     source_manifest: dict[str, Any],
     generation_manifest: dict[str, Any],
     *,
+    review_records: list[dict[str, Any]],
     split: str = "development",
     allow_final_holdout: bool = False,
     candidate_version: str | None = None,
     confidence: float = 0.95,
     capability_registry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    selected = select_evaluation_cases(cases, split, allow_final_holdout)
+    selected = select_evaluation_cases(
+        cases,
+        review_records,
+        split=split,
+        allow_final_holdout=allow_final_holdout,
+    )
     try:
         validate_provenance_bundle(source_manifest, generation_manifest, provenance_records, selected)
     except ProvenanceError as exc:
@@ -760,6 +790,11 @@ def score_records(
         "final_audit": split == "final_holdout",
         "case_count": len(all_cases),
         "prediction_count": len(prediction_records),
+        "review_record_count": len(review_records),
+        "active_review_record_count": sum(
+            len(case["review"]["review_record_ids"]) for case in selected
+        ),
+        "review_records_sha256": review_records_sha256(review_records),
         "missing_prediction_count": missing_count,
         "invalid_response_count": sum(value is None for value in decoded.values()),
         "capability_registry": {
@@ -791,6 +826,7 @@ def score_files(
     predictions_path: Path,
     provenance_records_path: Path,
     *,
+    review_records_path: Path,
     split: str,
     allow_final_holdout: bool,
     candidate_version: str | None = None,
@@ -801,6 +837,7 @@ def score_files(
     cases = _read_jsonl(cases_path)
     predictions = _read_jsonl(predictions_path)
     provenance_records = _read_jsonl(provenance_records_path)
+    review_records = read_review_records(review_records_path)
     validate_provenance_files(
         source_manifest_path,
         generation_manifest_path,
@@ -819,6 +856,7 @@ def score_files(
         provenance_records,
         source_manifest,
         generation_manifest,
+        review_records=review_records,
         split=split,
         allow_final_holdout=allow_final_holdout,
         candidate_version=candidate_version,
@@ -827,6 +865,7 @@ def score_files(
     report["case_manifest_sha256"] = _sha256(cases_path)
     report["prediction_file_sha256"] = _sha256(predictions_path)
     report["provenance_records_sha256"] = _sha256(provenance_records_path)
+    report["review_records_sha256"] = _sha256(review_records_path)
     report["source_manifest_sha256"] = _sha256(source_manifest_path)
     report["synthetic_manifest_sha256"] = _sha256(generation_manifest_path)
     report["capability_registry"]["sha256"] = _sha256(capability_registry_path)
@@ -838,6 +877,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cases", required=True, type=Path, help="JSONL evaluation cases")
     parser.add_argument("--predictions", required=True, type=Path, help="JSONL raw prediction wrappers")
     parser.add_argument("--provenance-records", required=True, type=Path, help="sample-level provenance JSONL for the evaluation cases")
+    parser.add_argument("--review-records", required=True, type=Path, help="single-split independent review ledger JSONL")
     parser.add_argument("--sources", type=Path, default=PROJECT_ROOT / "provenance" / "data_sources.json", help="data-source manifest JSON")
     parser.add_argument("--generations", type=Path, default=PROJECT_ROOT / "provenance" / "synthetic_data.json", help="synthetic-generation manifest JSON")
     parser.add_argument("--capabilities", type=Path, default=CAPABILITY_REGISTRY_PATH, help="versioned capability registry JSON")
@@ -848,11 +888,25 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.final_audit and args.split != "final_holdout":
         parser.error("--final-audit is valid only with --split final_holdout")
+    if args.output:
+        output_path = args.output.resolve()
+        protected_paths = {
+            args.cases.resolve(),
+            args.predictions.resolve(),
+            args.provenance_records.resolve(),
+            args.review_records.resolve(),
+            args.sources.resolve(),
+            args.generations.resolve(),
+            args.capabilities.resolve(),
+        }
+        if output_path in protected_paths:
+            parser.error("--output must not overwrite an evaluation input or manifest")
     try:
         report = score_files(
             args.cases,
             args.predictions,
             args.provenance_records,
+            review_records_path=args.review_records,
             split=args.split,
             allow_final_holdout=args.final_audit,
             candidate_version=args.candidate_version,
@@ -865,6 +919,7 @@ def main(argv: list[str] | None = None) -> int:
         EvaluationInputError,
         ProvenanceError,
         CapabilityRegistryError,
+        ReviewRecordError,
         json.JSONDecodeError,
     ) as exc:
         parser.error(str(exc))

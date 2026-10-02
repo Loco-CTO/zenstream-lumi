@@ -54,16 +54,21 @@
     "review": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["annotation_status", "language_review_status", "reviewer_ids"],
+      "required": ["annotation_status", "language_review_status", "reviewer_ids", "review_record_ids"],
       "properties": {
         "annotation_status": {"enum": ["pending", "approved"]},
         "language_review_status": {"enum": ["not_required", "pending", "approved"]},
+        "review_record_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1},
+          "description": "IDs of the current independent review records in the controlled ledger."
+        },
         "reviewer_ids": {
           "type": "array",
           "uniqueItems": true,
           "items": {"type": "string", "minLength": 1}
-        },
-        "adjudication_note": {"type": "string"}
+        }
       }
     }
   },
@@ -75,7 +80,8 @@
           "review": {
             "properties": {
               "annotation_status": {"const": "approved"},
-              "reviewer_ids": {"minItems": 1}
+              "review_record_ids": {"minItems": 2},
+              "reviewer_ids": {"minItems": 2}
             }
           }
         }
@@ -89,7 +95,17 @@
         },
         "required": ["review_status", "language"]
       },
-      "then": {"properties": {"review": {"properties": {"language_review_status": {"const": "approved"}}}}}
+      "then": {
+        "properties": {
+          "review": {
+            "properties": {
+              "language_review_status": {"const": "approved"},
+              "review_record_ids": {"minItems": 3},
+              "reviewer_ids": {"minItems": 3}
+            }
+          }
+        }
+      }
     },
     {
       "if": {"properties": {"language": {"const": "en"}}, "required": ["language"]},

@@ -11,6 +11,7 @@ from provenance.validate import (
     validate_bundle,
     validate_evaluation_case_provenance,
 )
+from review_fixtures import make_review_records
 
 
 HASH = "sha256:" + "a" * 64
@@ -38,7 +39,8 @@ def make_case():
         "review": {
             "annotation_status": "approved",
             "language_review_status": "not_required",
-            "reviewer_ids": ["reviewer-001"],
+            "reviewer_ids": ["annotator-001", "annotator-002"],
+            "review_record_ids": [],
         },
     }
 
@@ -249,11 +251,17 @@ class ProvenanceValidatorTests(unittest.TestCase):
             cases_path = folder / "cases.jsonl"
             predictions_path = folder / "predictions.jsonl"
             records_path = folder / "records.jsonl"
+            review_records_path = folder / "review-records.jsonl"
             sources_path = folder / "sources.json"
             generations_path = folder / "generations.json"
+            review_records = make_review_records(case)
             cases_path.write_text(json.dumps(case, ensure_ascii=False) + "\n", encoding="utf-8")
             predictions_path.write_text(json.dumps(prediction, ensure_ascii=False) + "\n", encoding="utf-8")
             records_path.write_text(json.dumps(make_record(case), ensure_ascii=False) + "\n", encoding="utf-8")
+            review_records_path.write_text(
+                "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in review_records),
+                encoding="utf-8",
+            )
             sources_path.write_text(json.dumps(make_source_manifest()), encoding="utf-8")
             generations_path.write_text(json.dumps(make_generation_manifest()), encoding="utf-8")
 
@@ -261,6 +269,7 @@ class ProvenanceValidatorTests(unittest.TestCase):
                 cases_path,
                 predictions_path,
                 records_path,
+                review_records_path=review_records_path,
                 split="development",
                 allow_final_holdout=False,
                 source_manifest_path=sources_path,
@@ -269,6 +278,7 @@ class ProvenanceValidatorTests(unittest.TestCase):
 
         self.assertEqual(report["metrics"]["overall_semantic_exact_match"]["rate"], 1.0)
         self.assertTrue(report["provenance_records_sha256"].startswith("sha256:"))
+        self.assertTrue(report["review_records_sha256"].startswith("sha256:"))
         self.assertTrue(report["source_manifest_sha256"].startswith("sha256:"))
         self.assertTrue(report["synthetic_manifest_sha256"].startswith("sha256:"))
 

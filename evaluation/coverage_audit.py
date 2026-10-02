@@ -19,6 +19,12 @@ from evaluation.scorer import (  # noqa: E402
     SPLITS,
     _validate_case,
 )
+from evaluation.review_records import (  # noqa: E402
+    ReviewRecordError,
+    read_review_records,
+    review_records_sha256,
+    validate_case_review_records,
+)
 
 
 REQUIRED_SLICES_PATH = Path(__file__).resolve().with_name("required_slices.json")
@@ -139,6 +145,7 @@ def _case_counts(cases: list[dict[str, Any]]) -> dict[str, Any]:
 
 def audit_cases(
     cases: list[dict[str, Any]],
+    review_records: list[dict[str, Any]],
     *,
     split: str = "development",
     allow_final_holdout: bool = False,
@@ -154,6 +161,10 @@ def audit_cases(
         raise CoverageInputError("final-audit authorization is valid only for final_holdout")
 
     _validate_inventory(cases, split)
+    try:
+        validate_case_review_records(cases, review_records)
+    except ReviewRecordError as exc:
+        raise CoverageInputError(str(exc)) from exc
     selected = cases
     required_slices = _load_required_slices()
 
@@ -187,6 +198,11 @@ def audit_cases(
         "report_schema_version": 1,
         "split": split,
         "final_audit": split == "final_holdout",
+        "review_record_count": len(review_records),
+        "active_review_record_count": sum(
+            len(case["review"]["review_record_ids"]) for case in selected
+        ),
+        "review_records_sha256": review_records_sha256(review_records),
         "case_inventory": _case_counts(selected),
         "language_inventory": {
             language: _case_counts([case for case in selected if case["language"] == language])
@@ -198,7 +214,7 @@ def audit_cases(
             "excluded_only_slice_language_count": excluded_only_count,
             "missing_slice_language_count": missing_count,
             "all_required_slices_have_ready_cases": all_required_slices_present,
-            "interpretation": "Presence requires at least one ready case and does not establish adequate sample size, quality, or independence.",
+            "interpretation": "Presence requires a ready case whose ledger satisfies the configured reviewer-separation rules; it does not establish sufficient sample size, annotation quality, or reviewer identity or qualification.",
         },
         "required_slices": matrix,
         "unmapped_category_tags": sorted(category_tags - required_category_ids),
@@ -213,6 +229,7 @@ def audit_cases(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", required=True, type=Path, help="JSONL case inventory")
+    parser.add_argument("--review-records", required=True, type=Path, help="single-split independent review ledger JSONL")
     parser.add_argument("--split", choices=sorted(SPLITS), default="development")
     parser.add_argument(
         "--final-audit",
@@ -227,18 +244,22 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("final holdout requires --split final_holdout and --final-audit")
     if args.output:
         output_path = args.output.resolve()
-        protected_paths = {args.cases.resolve(), REQUIRED_SLICES_PATH.resolve()}
+        protected_paths = {
+            args.cases.resolve(), args.review_records.resolve(), REQUIRED_SLICES_PATH.resolve(),
+        }
         if output_path in protected_paths:
-            parser.error("--output must not overwrite the case inventory or required-slice taxonomy")
+            parser.error("--output must not overwrite a case inventory, review ledger, or required-slice taxonomy")
     try:
         report = audit_cases(
             _read_cases(args.cases),
+            read_review_records(args.review_records),
             split=args.split,
             allow_final_holdout=args.final_audit,
         )
         report["case_manifest_sha256"] = _sha256_file(args.cases)
+        report["review_records_sha256"] = _sha256_file(args.review_records)
         report["required_slices_sha256"] = _sha256_file(REQUIRED_SLICES_PATH)
-    except (OSError, CoverageInputError, json.JSONDecodeError) as exc:
+    except (OSError, CoverageInputError, ReviewRecordError, json.JSONDecodeError) as exc:
         parser.error(str(exc))
     serialized = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
     if args.output:

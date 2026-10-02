@@ -30,17 +30,24 @@ def run_candidate_cases(
     source_manifest: dict[str, Any],
     generation_manifest: dict[str, Any],
     *,
+    review_records: list[dict[str, Any]],
     split: str = "development",
     allow_final_holdout: bool = False,
 ) -> list[dict[str, Any]]:
     """Validate and run ready cases, then wrap raw output for the existing scorer.
 
-    Case structure/readiness, selected-split membership, and source/generation/sample
-    provenance are checked before invoking candidate code. Final holdout runs require
-    explicit opt-in. This is a synchronous callback runner; it does not load a model,
-    execute tools, or simulate changes to application state.
+    Case structure/readiness, the current independent review ledger, selected-split
+    membership, and source/generation/sample provenance are checked before invoking
+    candidate code. Final holdout runs require explicit opt-in. This is a synchronous
+    callback runner; it does not load a model, execute tools, or simulate changes to
+    application state.
     """
-    selected = select_evaluation_cases(cases, split, allow_final_holdout)
+    selected = select_evaluation_cases(
+        cases,
+        review_records,
+        split=split,
+        allow_final_holdout=allow_final_holdout,
+    )
     try:
         validate_bundle(source_manifest, generation_manifest, provenance_records, selected)
     except ProvenanceError as exc:

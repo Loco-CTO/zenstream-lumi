@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lumi independent evaluation review record",
+  "description": "One immutable reviewer decision bound to a case's canonical content hash. Keep development and final-holdout ledgers separate and access controlled.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "review_record_id", "case_id", "case_sha256", "reviewer_id", "reviewed_at", "record_type", "supersedes_record_ids", "proposed_gold"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "review_record_id": {"type": "string", "minLength": 1},
+        "case_id": {"type": "string", "minLength": 1},
+        "case_sha256": {"$ref": "#/$defs/sha256"},
+        "reviewer_id": {"type": "string", "minLength": 1, "description": "Stable pseudonymous reviewer ID, not a personal name."},
+        "reviewed_at": {"type": "string", "format": "date-time"},
+        "record_type": {"const": "independent_annotation"},
+        "supersedes_record_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "proposed_gold": {"$ref": "#/$defs/semanticOutput"}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "review_record_id", "case_id", "case_sha256", "reviewer_id", "reviewed_at", "record_type", "supersedes_record_ids", "language", "qualification", "naturalness_status", "meaning_preservation_status"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "review_record_id": {"type": "string", "minLength": 1},
+        "case_id": {"type": "string", "minLength": 1},
+        "case_sha256": {"$ref": "#/$defs/sha256"},
+        "reviewer_id": {"type": "string", "minLength": 1, "description": "Stable pseudonymous reviewer ID, not a personal name."},
+        "reviewed_at": {"type": "string", "format": "date-time"},
+        "record_type": {"const": "language_review"},
+        "supersedes_record_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "language": {"enum": ["ja", "en_ja"]},
+        "qualification": {"enum": ["native_japanese", "fluent_japanese", "fluent_bilingual"]},
+        "naturalness_status": {"enum": ["approved", "needs_revision"]},
+        "meaning_preservation_status": {"enum": ["approved", "needs_revision"]}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "review_record_id", "case_id", "case_sha256", "reviewer_id", "reviewed_at", "record_type", "supersedes_record_ids", "basis_record_ids", "adjudicated_gold", "rationale"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "review_record_id": {"type": "string", "minLength": 1},
+        "case_id": {"type": "string", "minLength": 1},
+        "case_sha256": {"$ref": "#/$defs/sha256"},
+        "reviewer_id": {"type": "string", "minLength": 1, "description": "Stable pseudonymous reviewer ID, not a personal name."},
+        "reviewed_at": {"type": "string", "format": "date-time"},
+        "record_type": {"const": "adjudication"},
+        "supersedes_record_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "basis_record_ids": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "adjudicated_gold": {"$ref": "#/$defs/semanticOutput"},
+        "rationale": {"type": "string", "minLength": 1}
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^sha256:[A-Fa-f0-9]{64}$"},
+    "semanticOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "action", "arguments", "requires_clarification"],
+      "properties": {
+        "decision": {"enum": ["act", "no_action", "clarify", "respond"]},
+        "action": {"type": ["string", "null"]},
+        "arguments": {"type": "object"},
+        "requires_clarification": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"decision": {"const": "act"}}, "required": ["decision"]},
+          "then": {
+            "properties": {
+              "action": {"type": "string", "minLength": 1},
+              "requires_clarification": {"const": false}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"decision": {"const": "clarify"}}, "required": ["decision"]},
+          "then": {
+            "properties": {
+              "action": {"type": "null"},
+              "arguments": {"maxProperties": 0},
+              "requires_clarification": {"const": true}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"decision": {"enum": ["no_action", "respond"]}}, "required": ["decision"]},
+          "then": {
+            "properties": {
+              "action": {"type": "null"},
+              "arguments": {"maxProperties": 0},
+              "requires_clarification": {"const": false}
+            }
+          }
+        }
+      ]
+    }
+  }
+}
