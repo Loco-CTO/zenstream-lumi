@@ -67,6 +67,8 @@ Recent ACL work on [multilingual synthetic pretraining data](https://aclantholog
 
 No external corpus, benchmark, tokenizer corpus, synthetic example, model weight, or training artifact has been admitted to Lumi. References in this document inform research only; they are not training sources. Before use, each source needs a recorded version/revision, access date, license and permissions, transformations, filters, deduplication, split use, and measured contribution. Synthetic examples require generator provenance and automated plus human validation. Unknown or unclear rights mean exclusion until resolved.
 
+The first source-rights scan is recorded in [DATASET_CANDIDATES.md](DATASET_CANDIDATES.md). It found narrow English and Japanese candidates but no approved corpus for natural EN/JA code-switching. The collection-level source manifest is now paired with [sample-level provenance records](provenance/README.md), which preserve item lineage without storing text in this public repository.
+
 The training-data manifest is currently empty. A future training run must consume a frozen manifest and preserve the exact manifest and data-processing revisions used for that run. Development evaluation and final holdout material must remain separate from every training, generation, and filtering input.
 
 ## Research areas not yet assessed
