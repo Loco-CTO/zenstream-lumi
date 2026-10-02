@@ -15,7 +15,7 @@ class EvaluationInputAdapterTests(unittest.TestCase):
             }],
         }
         case = {
-            "schema_version": 2,
+            "schema_version": 3,
             "case_id": "secret-case-id",
             "family_id": "secret-family-id",
             "split": "final_holdout",

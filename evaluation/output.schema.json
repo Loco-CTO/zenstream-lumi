@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:zenstream-lumi:evaluation:output:v1",
+  "title": "Lumi canonical candidate output",
+  "description": "Version 1 evaluation output envelope: semantic intent, optional user-facing message, and optional presentation intent. This is not a ZenStream runtime protocol.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision", "action", "arguments", "requires_clarification"],
+  "properties": {
+    "decision": {"enum": ["act", "no_action", "clarify", "respond"]},
+    "action": {"type": ["string", "null"]},
+    "arguments": {"type": "object"},
+    "requires_clarification": {"type": "boolean"},
+    "message": {"type": "string", "minLength": 1, "description": "Optional user-facing natural-language response; reviewed separately from intent."},
+    "presentation_intent": {
+      "enum": ["none", "text", "media_results", "media_details", "playback_handoff", "confirmation"]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"decision": {"const": "act"}}, "required": ["decision"]},
+      "then": {
+        "properties": {
+          "action": {"type": "string", "minLength": 1},
+          "requires_clarification": {"const": false}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"decision": {"const": "clarify"}}, "required": ["decision"]},
+      "then": {
+        "properties": {
+          "action": {"type": "null"},
+          "arguments": {"maxProperties": 0},
+          "requires_clarification": {"const": true}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"decision": {"enum": ["no_action", "respond"]}}, "required": ["decision"]},
+      "then": {
+        "properties": {
+          "action": {"type": "null"},
+          "arguments": {"maxProperties": 0},
+          "requires_clarification": {"const": false}
+        }
+      }
+    }
+  ]
+}

@@ -17,7 +17,7 @@ class CandidateInput(TypedDict):
 
 
 def build_candidate_input(case: Mapping[str, Any]) -> CandidateInput:
-    """Return only conversation turns and static trusted context from a v2 case.
+    """Return only conversation turns and static trusted context from a v3 case.
 
     Callers must validate the case and its provenance before using this projection.
     The returned values are deep copies so candidate code cannot mutate the authored

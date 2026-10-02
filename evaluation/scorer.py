@@ -43,7 +43,15 @@ THRESHOLDS_PATH = Path(__file__).with_name("thresholds.json")
 CAPABILITY_REGISTRY_PATH = Path(__file__).with_name("capabilities.json")
 DECISIONS = {"act", "no_action", "clarify", "respond"}
 OUTPUT_KEYS = {"decision", "action", "arguments", "requires_clarification"}
-OPTIONAL_OUTPUT_KEYS = {"message"}
+PRESENTATION_INTENTS = {
+    "none", "text", "media_results", "media_details", "playback_handoff", "confirmation",
+}
+RESPONSE_REQUIREMENTS = {"required", "optional", "forbidden"}
+RESPONSE_LANGUAGES = {"same_as_case", "en", "ja", "en_ja", "any"}
+RESPONSE_REVIEW_FIELDS = {
+    "reviewer_id", "language", "qualification", "naturalness_status",
+    "meaning_preservation_status", "intent_appropriateness_status", "conciseness_status",
+}
 LANGUAGES = {"en", "ja", "en_ja"}
 SPLITS = {"development", "final_holdout"}
 NO_ACTION_CATEGORIES = {
@@ -88,10 +96,19 @@ def _is_nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
-def _validate_semantic_output(value: Any, *, allow_message: bool) -> str | None:
+def _validate_semantic_output(
+    value: Any,
+    *,
+    allow_message: bool,
+    allow_case_contract: bool = False,
+) -> str | None:
     if not isinstance(value, dict):
         return "output must be a JSON object"
-    allowed = OUTPUT_KEYS | (OPTIONAL_OUTPUT_KEYS if allow_message else set())
+    allowed = set(OUTPUT_KEYS)
+    if allow_message:
+        allowed.update({"message", "presentation_intent"})
+    if allow_case_contract:
+        allowed.update({"response_contract", "presentation_intent"})
     if not OUTPUT_KEYS.issubset(value):
         missing = sorted(OUTPUT_KEYS - value.keys())
         return f"output is missing required field(s): {', '.join(missing)}"
@@ -106,8 +123,21 @@ def _validate_semantic_output(value: Any, *, allow_message: bool) -> str | None:
         return "arguments must be an object"
     if not isinstance(value["requires_clarification"], bool):
         return "requires_clarification must be a boolean"
-    if "message" in value and not isinstance(value["message"], str):
-        return "message must be a string when present"
+    if "message" in value and not _is_nonempty_string(value["message"]):
+        return "message must be a nonempty string when present"
+    if "presentation_intent" in value and (
+        not isinstance(value["presentation_intent"], str)
+        or value["presentation_intent"] not in PRESENTATION_INTENTS
+    ):
+        return "presentation_intent must be a supported presentation label"
+    if "response_contract" in value:
+        contract = value["response_contract"]
+        if not isinstance(contract, dict) or set(contract) != {"requirement", "language"}:
+            return "response_contract must contain only requirement and language"
+        if not isinstance(contract["requirement"], str) or contract["requirement"] not in RESPONSE_REQUIREMENTS:
+            return "response_contract.requirement must be required, optional, or forbidden"
+        if not isinstance(contract["language"], str) or contract["language"] not in RESPONSE_LANGUAGES:
+            return "response_contract.language must be same_as_case, en, ja, en_ja, or any"
 
     decision = value["decision"]
     if decision == "act":
@@ -171,9 +201,9 @@ def _validate_case(record: dict[str, Any], line_number: int) -> None:
     if (
         not isinstance(record["schema_version"], int)
         or isinstance(record["schema_version"], bool)
-        or record["schema_version"] != 2
+        or record["schema_version"] != 3
     ):
-        raise EvaluationInputError(f"{prefix}: schema_version must be 2")
+        raise EvaluationInputError(f"{prefix}: schema_version must be 3")
     for field in ("case_id", "family_id", "provenance_record_id"):
         if not _is_nonempty_string(record[field]):
             raise EvaluationInputError(f"{prefix}: {field} must be a nonempty string")
@@ -205,7 +235,9 @@ def _validate_case(record: dict[str, Any], line_number: int) -> None:
         ):
             raise EvaluationInputError(f"{prefix}: invalid turn role or empty text")
     _validate_trusted_context(record["trusted_context"], prefix)
-    error = _validate_semantic_output(record["gold"], allow_message=False)
+    error = _validate_semantic_output(
+        record["gold"], allow_message=False, allow_case_contract=True
+    )
     if error:
         raise EvaluationInputError(f"{prefix}: invalid gold output: {error}")
 
@@ -246,20 +278,58 @@ def _validate_case(record: dict[str, Any], line_number: int) -> None:
             raise EvaluationInputError(f"{prefix}: English cases cannot be ready with language review pending")
 
 
+def _validate_response_review_wrapper(record: dict[str, Any], line_number: int) -> None:
+    if "response_review" not in record:
+        return
+    review = record["response_review"]
+    if (
+        not isinstance(review, dict)
+        or not isinstance(review.get("status"), str)
+        or review["status"] not in {"pending", "reviewed"}
+    ):
+        raise EvaluationInputError(f"prediction row {line_number}: invalid response_review")
+    if review["status"] == "pending":
+        if set(review) != {"status"}:
+            raise EvaluationInputError(f"prediction row {line_number}: pending response reviews must contain only status")
+        return
+    if set(review) != {"status"} | RESPONSE_REVIEW_FIELDS:
+        raise EvaluationInputError(f"prediction row {line_number}: reviewed response_review is incomplete or has unsupported fields")
+    if not _is_nonempty_string(review["reviewer_id"]):
+        raise EvaluationInputError(f"prediction row {line_number}: response reviewer_id must be nonempty")
+    if not isinstance(review["language"], str) or review["language"] not in LANGUAGES:
+        raise EvaluationInputError(f"prediction row {line_number}: response review language is invalid")
+    qualifications = {
+        "native_english", "fluent_english", "native_japanese", "fluent_japanese", "fluent_bilingual",
+    }
+    if not isinstance(review["qualification"], str) or review["qualification"] not in qualifications:
+        raise EvaluationInputError(f"prediction row {line_number}: response reviewer qualification is invalid")
+    allowed_qualifications = {
+        "en": {"native_english", "fluent_english", "fluent_bilingual"},
+        "ja": {"native_japanese", "fluent_japanese", "fluent_bilingual"},
+        "en_ja": {"fluent_bilingual"},
+    }[review["language"]]
+    if review["qualification"] not in allowed_qualifications:
+        raise EvaluationInputError(f"prediction row {line_number}: response reviewer qualification does not match language")
+    for field in RESPONSE_REVIEW_FIELDS - {"reviewer_id", "language", "qualification"}:
+        if not isinstance(review[field], str) or review[field] not in {"approved", "needs_revision"}:
+            raise EvaluationInputError(f"prediction row {line_number}: {field} must be approved or needs_revision")
+
+
 def _validate_prediction_wrapper(record: dict[str, Any], line_number: int) -> None:
     if not isinstance(record, dict):
         raise EvaluationInputError(f"prediction row {line_number} must be an object")
-    allowed = {"schema_version", "case_id", "raw_output", "grounding_review"}
+    allowed = {"schema_version", "case_id", "raw_output", "grounding_review", "response_review"}
     if set(record) - allowed:
         raise EvaluationInputError(f"prediction row {line_number}: unsupported field(s)")
     version = record.get("schema_version")
-    if not isinstance(version, int) or isinstance(version, bool) or version != 1:
-        raise EvaluationInputError(f"prediction row {line_number}: schema_version must be 1")
+    if not isinstance(version, int) or isinstance(version, bool) or version != 2:
+        raise EvaluationInputError(f"prediction row {line_number}: schema_version must be 2")
     if not _is_nonempty_string(record.get("case_id")):
         raise EvaluationInputError(f"prediction row {line_number}: case_id must be a nonempty string")
     if not isinstance(record.get("raw_output"), str):
         raise EvaluationInputError(f"prediction row {line_number}: raw_output must be a string")
     if "grounding_review" not in record:
+        _validate_response_review_wrapper(record, line_number)
         return
     review = record["grounding_review"]
     if not isinstance(review, dict) or set(review) - {"status", "claim_count", "unsupported_claim_count", "reviewer_id"}:
@@ -275,6 +345,7 @@ def _validate_prediction_wrapper(record: dict[str, Any], line_number: int) -> No
             raise EvaluationInputError(f"prediction row {line_number}: unsupported claims cannot exceed reviewed claims")
         if not _is_nonempty_string(review.get("reviewer_id")):
             raise EvaluationInputError(f"prediction row {line_number}: reviewed grounding records need reviewer_id")
+    _validate_response_review_wrapper(record, line_number)
 
 
 def _normalise(value: Any) -> Any:
@@ -672,6 +743,13 @@ def score_records(
             decoded[case_id], output_errors[case_id] = None, "missing prediction"
         else:
             decoded[case_id], output_errors[case_id] = _evaluate_prediction(record["raw_output"])
+            response_review = record.get("response_review", {})
+            if response_review.get("status") == "reviewed":
+                parsed = decoded[case_id]
+                if parsed is None or not _is_nonempty_string(parsed.get("message")):
+                    raise EvaluationInputError(
+                        f"prediction for {case_id!r}: a reviewed response needs a valid nonempty message"
+                    )
 
     def rate_for(subset: Iterable[dict[str, Any]], predicate: Callable[[dict[str, Any], dict[str, Any]], bool]) -> dict[str, Any]:
         selected_subset = list(subset)
@@ -754,6 +832,81 @@ def score_records(
         "unsupported_claims": unsupported_claims,
     }
 
+    produced_responses = [
+        (case, decoded[case["case_id"]])
+        for case in all_cases
+        if decoded[case["case_id"]] is not None
+        and _is_nonempty_string(decoded[case["case_id"]].get("message"))
+    ]
+    reviewed_response_pairs = [
+        (case, prediction, predictions[case["case_id"]]["response_review"])
+        for case, prediction in produced_responses
+        if predictions[case["case_id"]].get("response_review", {}).get("status") == "reviewed"
+    ]
+    presence_cases = [
+        case
+        for case in all_cases
+        if case["gold"].get("response_contract", {}).get("requirement") in {"required", "forbidden"}
+    ]
+    presence_successes = 0
+    for case in presence_cases:
+        requirement = case["gold"]["response_contract"]["requirement"]
+        prediction = decoded[case["case_id"]]
+        has_message = prediction is not None and _is_nonempty_string(prediction.get("message"))
+        if has_message == (requirement == "required"):
+            presence_successes += 1
+    metrics["user_facing_response_presence"] = _rate(presence_successes, len(presence_cases), confidence)
+
+    presentation_cases = [case for case in all_cases if "presentation_intent" in case["gold"]]
+    presentation_successes = sum(
+        1
+        for case in presentation_cases
+        if decoded[case["case_id"]] is not None
+        and decoded[case["case_id"]].get("presentation_intent") == case["gold"]["presentation_intent"]
+    )
+    metrics["presentation_intent_accuracy"] = _rate(
+        presentation_successes, len(presentation_cases), confidence
+    )
+
+    language_review_pairs = []
+    for case, prediction, review in reviewed_response_pairs:
+        contract = case["gold"].get("response_contract")
+        if contract is None:
+            continue
+        expected_language = contract["language"]
+        if expected_language == "same_as_case":
+            expected_language = case["language"]
+        if expected_language != "any":
+            language_review_pairs.append((expected_language, review["language"]))
+    metrics["response_language_alignment"] = _rate(
+        sum(expected == actual for expected, actual in language_review_pairs),
+        len(language_review_pairs),
+        confidence,
+    )
+    metrics["response_review_coverage"] = _rate(
+        len(reviewed_response_pairs), len(produced_responses), confidence
+    )
+    quality_fields = (
+        "naturalness_status", "meaning_preservation_status",
+        "intent_appropriateness_status", "conciseness_status",
+    )
+    for metric_name, field in (
+        ("response_naturalness", "naturalness_status"),
+        ("response_meaning_preservation", "meaning_preservation_status"),
+        ("response_intent_appropriateness", "intent_appropriateness_status"),
+        ("response_conciseness", "conciseness_status"),
+    ):
+        metrics[metric_name] = _rate(
+            sum(review[field] == "approved" for _, _, review in reviewed_response_pairs),
+            len(reviewed_response_pairs),
+            confidence,
+        )
+    metrics["response_quality"] = _rate(
+        sum(all(review[field] == "approved" for field in quality_fields) for _, _, review in reviewed_response_pairs),
+        len(reviewed_response_pairs),
+        confidence,
+    )
+
     category_metrics: dict[str, Any] = {}
     for category in sorted({tag for case in all_cases for tag in case["categories"]}):
         category_metrics[category] = rate_for(
@@ -784,7 +937,7 @@ def score_records(
         }
 
     return {
-        "report_schema_version": 1,
+        "report_schema_version": 2,
         "candidate_version": candidate_version,
         "split": split,
         "final_audit": split == "final_holdout",
@@ -806,6 +959,11 @@ def score_records(
         },
         "invalid_response_examples": {
             case_id: error for case_id, error in output_errors.items() if error is not None
+        },
+        "response_review_counts": {
+            "produced_messages": len(produced_responses),
+            "reviewed_messages": len(reviewed_response_pairs),
+            "unreviewed_messages": len(produced_responses) - len(reviewed_response_pairs),
         },
         "metrics": metrics,
         "metrics_by_category": category_metrics,

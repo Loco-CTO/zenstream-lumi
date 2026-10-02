@@ -72,7 +72,19 @@
         "decision": {"enum": ["act", "no_action", "clarify", "respond"]},
         "action": {"type": ["string", "null"]},
         "arguments": {"type": "object"},
-        "requires_clarification": {"type": "boolean"}
+        "requires_clarification": {"type": "boolean"},
+        "response_contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requirement", "language"],
+          "properties": {
+            "requirement": {"enum": ["required", "optional", "forbidden"]},
+            "language": {"enum": ["same_as_case", "en", "ja", "en_ja", "any"]}
+          }
+        },
+        "presentation_intent": {
+          "enum": ["none", "text", "media_results", "media_details", "playback_handoff", "confirmation"]
+        }
       },
       "allOf": [
         {

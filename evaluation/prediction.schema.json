@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Lumi evaluation prediction record",
-  "description": "A wrapper that retains the model's raw output so malformed structured responses remain countable.",
+  "description": "A wrapper that retains the model's raw output and optional human response review so malformed structured responses remain countable.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "case_id", "raw_output"],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "case_id": {"type": "string", "minLength": 1},
-    "raw_output": {"type": "string"},
+    "raw_output": {"type": "string", "description": "Raw UTF-8 JSON text conforming to output.schema.json; do not repair it before scoring."},
     "grounding_review": {
       "type": "object",
       "additionalProperties": false,
@@ -23,6 +23,31 @@
         {
           "if": {"properties": {"status": {"const": "reviewed"}}, "required": ["status"]},
           "then": {"required": ["claim_count", "unsupported_claim_count", "reviewer_id"]}
+        }
+      ]
+    },
+    "response_review": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {"status": {"const": "pending"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reviewer_id", "language", "qualification", "naturalness_status", "meaning_preservation_status", "intent_appropriateness_status", "conciseness_status"],
+          "properties": {
+            "status": {"const": "reviewed"},
+            "reviewer_id": {"type": "string", "minLength": 1, "description": "Stable pseudonymous reviewer ID, not a personal name."},
+            "language": {"enum": ["en", "ja", "en_ja"]},
+            "qualification": {"enum": ["native_english", "fluent_english", "native_japanese", "fluent_japanese", "fluent_bilingual"]},
+            "naturalness_status": {"enum": ["approved", "needs_revision"]},
+            "meaning_preservation_status": {"enum": ["approved", "needs_revision"]},
+            "intent_appropriateness_status": {"enum": ["approved", "needs_revision"]},
+            "conciseness_status": {"enum": ["approved", "needs_revision"]}
+          }
         }
       ]
     }

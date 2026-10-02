@@ -17,7 +17,7 @@ def make_case(case_id="case-1", language="en"):
     if language in {"ja", "en_ja"}:
         reviewers.append("language-reviewer")
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "case_id": case_id,
         "family_id": case_id,
         "split": "development",

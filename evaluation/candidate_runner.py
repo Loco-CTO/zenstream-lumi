@@ -9,7 +9,7 @@ from evaluation.scorer import EvaluationInputError, select_evaluation_cases
 from provenance.validate import ProvenanceError, validate_bundle
 
 
-PREDICTION_SCHEMA_VERSION = 1
+PREDICTION_SCHEMA_VERSION = 2
 
 
 class Candidate(Protocol):
