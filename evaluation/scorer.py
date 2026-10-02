@@ -432,13 +432,13 @@ def score_records(
         ),
     }
 
-    no_action_cases = [case for case in all_cases if case["gold"]["decision"] != "act"]
+    non_action_gold_cases = [case for case in all_cases if case["gold"]["decision"] != "act"]
     false_actions = sum(
-        1 for case in no_action_cases
+        1 for case in non_action_gold_cases
         if (prediction := decoded[case["case_id"]]) is not None
         and prediction["decision"] == "act"
     )
-    metrics["false_state_changing_action_rate"] = _event_rate(false_actions, len(no_action_cases), confidence)
+    metrics["false_action_rate"] = _event_rate(false_actions, len(non_action_gold_cases), confidence)
 
     reviewed_predictions = [
         predictions[case_id]["grounding_review"]

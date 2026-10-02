@@ -85,8 +85,40 @@ class EvaluationScorerTests(unittest.TestCase):
 
         self.assertEqual(metrics["structured_response_validity"]["rate"], 1.0)
         self.assertEqual(metrics["overall_semantic_exact_match"]["successes"], 1)
-        self.assertEqual(metrics["false_state_changing_action_rate"]["rate"], 1.0)
+        self.assertEqual(metrics["false_action_rate"]["rate"], 1.0)
         self.assertEqual(metrics["negation_no_action_correctness"]["rate"], 0.0)
+
+    def test_false_action_rate_covers_all_non_action_gold_decisions(self):
+        cases = [
+            make_case("no-action", categories=["no_action"], gold={
+                "decision": "no_action", "action": None, "arguments": {},
+                "requires_clarification": False,
+            }),
+            make_case("respond", categories=["capability_question"], gold={
+                "decision": "respond", "action": None, "arguments": {},
+                "requires_clarification": False,
+            }),
+            make_case("clarify", categories=["difficult_ambiguous"], gold={
+                "decision": "clarify", "action": None, "arguments": {},
+                "requires_clarification": True,
+            }),
+        ]
+        act = '{"decision":"act","action":"play","arguments":{},"requires_clarification":false}'
+        predictions = [
+            make_prediction("no-action", act),
+            make_prediction("respond", act),
+            make_prediction(
+                "clarify",
+                '{"decision":"clarify","action":null,"arguments":{},"requires_clarification":true}',
+            ),
+        ]
+
+        metrics = score_records(cases, predictions)["metrics"]
+
+        self.assertEqual(metrics["false_action_rate"]["events"], 2)
+        self.assertEqual(metrics["false_action_rate"]["total"], 3)
+        self.assertAlmostEqual(metrics["false_action_rate"]["rate"], 2 / 3)
+        self.assertNotIn("false_state_changing_action_rate", metrics)
 
     def test_invalid_json_counts_against_validity_and_semantics(self):
         cases = [make_case("invalid")]

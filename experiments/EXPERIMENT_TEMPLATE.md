@@ -23,7 +23,7 @@
 | English | | | |
 | Japanese | | | |
 | English/Japanese code-switch | | | |
-| False state-changing action rate | | | |
+| False action rate (all non-action gold, includes read-only) | | | |
 | Negation/no-action | | | |
 | Argument extraction | | | |
 | Ambiguity/reference resolution | | | |
