@@ -5,9 +5,18 @@ from pathlib import Path
 
 from evaluation.scorer import EvaluationInputError, _one_sided_error_upper, score_records as _score_records
 from test_provenance_validator import make_generation_manifest, make_record, make_source_manifest
+from review_fixtures import make_review_ledger
 
 
 def make_case(case_id, *, split="development", language="en", categories=None, gold=None, family_id=None, review=None):
+    review_metadata = {
+        "annotation_status": "approved",
+        "language_review_status": "approved" if language in {"ja", "en_ja"} else "not_required",
+        "reviewer_ids": ["annotator-1", "annotator-2"] + (["language-reviewer"] if language in {"ja", "en_ja"} else []),
+        "review_record_ids": [],
+    }
+    if review is not None:
+        review_metadata.update(review)
     return {
         "schema_version": 2,
         "case_id": case_id,
@@ -25,11 +34,7 @@ def make_case(case_id, *, split="development", language="en", categories=None, g
             "requires_clarification": False,
         },
         "provenance_record_id": f"prov-{case_id}",
-        "review": review or {
-            "annotation_status": "approved",
-            "language_review_status": "not_required",
-            "reviewer_ids": ["reviewer-1"],
-        },
+        "review": review_metadata,
     }
 
 
@@ -50,6 +55,7 @@ def semantic_output(decision, action, arguments, requires_clarification=False):
 
 
 def score_records(cases, predictions, **kwargs):
+    review_records = make_review_ledger(cases)
     provenance = [make_record(case) for case in cases]
     return _score_records(
         cases,
@@ -57,6 +63,7 @@ def score_records(cases, predictions, **kwargs):
         provenance,
         make_source_manifest(),
         make_generation_manifest(),
+        review_records=review_records,
         **kwargs,
     )
 
@@ -71,6 +78,21 @@ def approved_capability_registry():
 
 
 class EvaluationScorerTests(unittest.TestCase):
+    def test_ready_case_cannot_be_scored_without_its_linked_review_ledger(self):
+        case = make_case("missing-review-ledger")
+        make_review_ledger([case])
+        prediction = make_prediction("missing-review-ledger", semantic_output("act", "play", {"title": "Example"}))
+
+        with self.assertRaisesRegex(EvaluationInputError, "unknown review_record_id"):
+            _score_records(
+                [case],
+                [prediction],
+                [make_record(case)],
+                make_source_manifest(),
+                make_generation_manifest(),
+                review_records=[],
+            )
+
     def test_direct_scoring_enforces_source_manifest_permissions(self):
         case = make_case("unpermitted-source")
         provenance = make_record(case)
@@ -84,6 +106,7 @@ class EvaluationScorerTests(unittest.TestCase):
                 [provenance],
                 sources,
                 make_generation_manifest(),
+                review_records=make_review_ledger([case]),
             )
 
     def test_reports_semantics_and_false_actions_separately_from_validity(self):
@@ -412,7 +435,7 @@ class EvaluationScorerTests(unittest.TestCase):
             review={
                 "annotation_status": "approved",
                 "language_review_status": "pending",
-                "reviewer_ids": ["reviewer-1"],
+                "reviewer_ids": ["annotator-1", "annotator-2", "language-reviewer"],
             },
         )
         prediction = make_prediction(

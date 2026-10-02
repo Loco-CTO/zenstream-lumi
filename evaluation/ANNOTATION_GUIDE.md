@@ -75,11 +75,14 @@ These rules are informed by human-authored Japanese-English retrieval-query rewr
 
 ## Review and adjudication
 
-1. An author records the source/authoring method, scenario family, language, categories, intended meaning, and a proposed gold label.
-2. A second reviewer independently checks intent, action/no-action distinction, arguments, and scenario-family grouping. Japanese and code-switched cases also receive competent native-language review.
-3. Reviewers resolve disagreements by checking the supplied turns and trusted context, not by adding unstated assumptions. Record the adjudication rationale. If the utterance remains legitimately ambiguous, label `clarify`; if the right clarification is itself uncertain, keep it draft or exclude it.
-4. Mark a case `ready` only when the annotation is approved, reviewer IDs are present, and Japanese/code-switched language review is approved. The current schema stores only final status and reviewer IDs; preserve independent judgments and adjudication history in the controlled annotation ledger until a public review-record schema is added.
-5. If a later correction changes the user text, conversation, context, or gold meaning, recompute the provenance sample hash and repeat the affected reviews.
+1. Keep each reviewer decision as a separate JSONL record matching [`review_records.schema.json`](review_records.schema.json). Each record uses a stable pseudonymous reviewer ID, an ISO 8601 timestamp, and the existing canonical case-content SHA-256. Review and provenance metadata remain outside that content hash.
+2. At least two reviewers independently record a complete proposed semantic label in `independent_annotation` records before discussing the case. The case's `review.review_record_ids` points to the active records, and `review.reviewer_ids` lists exactly their reviewers, including any language reviewer or adjudicator.
+3. A ready English case needs two distinct independent annotations, and the active labels must match the case gold. If they disagree or the final gold differs from their active labels, an independent adjudicator records the complete final label after the independent reviews, gives a rationale, and references every active independent annotation.
+4. A ready Japanese case also needs one separate reviewer with native or fluent Japanese qualification. A ready code-switched case needs one separate fluent bilingual reviewer. That reviewer records naturalness and meaning-preservation decisions separately; both must be approved. The language reviewer must not be one of the semantic annotators or adjudicator.
+5. Keep prior records when a case or review is revised. A record referenced by the case must match its current canonical content hash; after changing the user text, conversation, trusted context, language, or gold meaning, recompute the provenance sample hash and repeat the affected reviews. If a reviewer corrects their decision without a content change, the later record must name the earlier same-reviewer, same-case, same-hash record in `supersedes_record_ids`; retain both in the ledger and reference only the unsuperseded record from the case.
+6. Keep development and final-holdout case files and review ledgers separate. A holdout review ledger contains gold labels and adjudication history, so restrict it to the controlled final-audit workflow.
+
+The JSONL ledger is a process record, not proof of reviewer identity or qualification. Record qualifications only when they have actually been established. No benchmark cases or independent review records are currently present, and software-test fixtures do not count as human review evidence.
 
 ## Diversity, splits, and holdout handling
 

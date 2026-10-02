@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from evaluation.coverage_audit import CoverageInputError, audit_cases, main
+from evaluation.coverage_audit import CoverageInputError, audit_cases as _audit_cases, main
+from review_fixtures import make_review_ledger
 
 
 def make_case(
@@ -37,9 +38,18 @@ def make_case(
         "review": {
             "annotation_status": "approved" if reviewed else "pending",
             "language_review_status": "approved" if language in {"ja", "en_ja"} else "not_required",
-            "reviewer_ids": ["reviewer-1"] if reviewed else [],
+            "reviewer_ids": (
+                ["annotator-1", "annotator-2"] + (["language-reviewer"] if language in {"ja", "en_ja"} else [])
+                if reviewed else []
+            ),
+            "review_record_ids": [],
         },
     }
+
+
+def audit_cases(cases, **kwargs):
+    review_records = make_review_ledger(cases)
+    return _audit_cases(cases, review_records, **kwargs)
 
 
 class EvaluationCoverageAuditTests(unittest.TestCase):
@@ -88,15 +98,29 @@ class EvaluationCoverageAuditTests(unittest.TestCase):
     def test_cli_reads_jsonl_and_hashes_the_inventory_and_slice_taxonomy(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             case_path = Path(temporary_directory) / "cases.jsonl"
+            review_path = Path(temporary_directory) / "review-records.jsonl"
             report_path = Path(temporary_directory) / "coverage.json"
-            case_path.write_text(json.dumps(make_case("cli-case")) + "\n", encoding="utf-8")
+            case = make_case("cli-case")
+            review_records = make_review_ledger([case])
+            case_path.write_text(json.dumps(case) + "\n", encoding="utf-8")
+            review_path.write_text(
+                "".join(json.dumps(record) + "\n" for record in review_records),
+                encoding="utf-8",
+            )
 
-            result = main(["--cases", str(case_path), "--output", str(report_path)])
+            result = main([
+                "--cases", str(case_path), "--review-records", str(review_path),
+                "--output", str(report_path),
+            ])
 
             self.assertEqual(result, 0)
             report = json.loads(report_path.read_text(encoding="utf-8"))
             expected_case_hash = "sha256:" + hashlib.sha256(case_path.read_bytes()).hexdigest()
             self.assertEqual(report["case_manifest_sha256"], expected_case_hash)
+            self.assertEqual(
+                report["review_records_sha256"],
+                "sha256:" + hashlib.sha256(review_path.read_bytes()).hexdigest(),
+            )
             self.assertTrue(report["required_slices_sha256"].startswith("sha256:"))
 
     def test_reports_descriptive_categories_separately_from_required_categories(self):

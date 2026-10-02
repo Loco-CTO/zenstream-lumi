@@ -30,7 +30,12 @@ class EvaluationInputAdapterTests(unittest.TestCase):
             "gold": {"decision": "act", "action": "play", "arguments": {}, "requires_clarification": False},
             "provenance_record_id": "private-record-id",
             "review_status": "ready",
-            "review": {"annotation_status": "approved", "reviewer_ids": ["reviewer"], "language_review_status": "approved"},
+            "review": {
+                "annotation_status": "approved",
+                "reviewer_ids": ["annotator-1", "annotator-2", "language-reviewer"],
+                "review_record_ids": ["review-1", "review-2", "review-language"],
+                "language_review_status": "approved",
+            },
         }
 
         candidate_input = build_candidate_input(case)

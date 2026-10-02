@@ -8,6 +8,7 @@ from test_provenance_validator import (
     make_record,
     make_source_manifest,
 )
+from review_fixtures import make_review_records
 
 
 class RecordingCandidate:
@@ -20,13 +21,15 @@ class RecordingCandidate:
         return self.raw_output
 
 
-def run_one(case, candidate, record=None, **kwargs):
+def run_one(case, candidate, record=None, review_records=None, **kwargs):
+    ledger = make_review_records(case) if review_records is None else review_records
     return run_candidate_cases(
         [case],
         candidate,
         [record or make_record(case)],
         make_source_manifest(),
         make_generation_manifest(),
+        review_records=ledger,
         **kwargs,
     )
 
@@ -86,6 +89,17 @@ class EvaluationCandidateRunnerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(EvaluationInputError, "unreviewed or excluded"):
             run_one(case, candidate, record=record)
+
+        self.assertEqual(candidate.inputs, [])
+
+    def test_stale_review_ledger_prevents_candidate_execution(self):
+        case = make_case()
+        records = make_review_records(case)
+        case["turns"][0]["text"] = "Changed after annotation"
+        candidate = RecordingCandidate('{"decision":"respond"}')
+
+        with self.assertRaisesRegex(EvaluationInputError, "stale case hash"):
+            run_one(case, candidate, review_records=records)
 
         self.assertEqual(candidate.inputs, [])
 
