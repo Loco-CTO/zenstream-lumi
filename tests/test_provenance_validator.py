@@ -20,7 +20,7 @@ GENERATION_HASH = "sha256:" + "b" * 64
 
 def make_case():
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "case_id": "dev-001",
         "family_id": "family-001",
         "split": "development",
@@ -226,9 +226,9 @@ class ProvenanceValidatorTests(unittest.TestCase):
         with self.assertRaisesRegex(ProvenanceError, "content hash differs"):
             validate_bundle(make_source_manifest(), make_generation_manifest(), [record], [case])
 
-    def test_evaluation_provenance_requires_v2_case_and_explicit_context(self):
+    def test_evaluation_provenance_requires_v3_case_and_explicit_context(self):
         for change, expected_error in (
-            (lambda case: case.update(schema_version=1), "schema_version must be 2"),
+            (lambda case: case.update(schema_version=1), "schema_version must be 3"),
             (lambda case: case.pop("trusted_context"), "lacks trusted_context"),
         ):
             with self.subTest(expected_error=expected_error):
@@ -242,7 +242,7 @@ class ProvenanceValidatorTests(unittest.TestCase):
     def test_file_scorer_checks_manifests_and_includes_their_hashes(self):
         case = make_case()
         prediction = {
-            "schema_version": 1,
+            "schema_version": 2,
             "case_id": case["case_id"],
             "raw_output": json.dumps(case["gold"], ensure_ascii=False),
         }

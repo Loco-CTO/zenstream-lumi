@@ -18,7 +18,7 @@ def make_case(case_id, *, split="development", language="en", categories=None, g
     if review is not None:
         review_metadata.update(review)
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "case_id": case_id,
         "family_id": family_id or case_id,
         "split": split,
@@ -38,20 +38,50 @@ def make_case(case_id, *, split="development", language="en", categories=None, g
     }
 
 
-def make_prediction(case_id, output, grounding_review=None):
-    record = {"schema_version": 1, "case_id": case_id, "raw_output": output}
+def make_prediction(case_id, output, grounding_review=None, response_review=None):
+    record = {"schema_version": 2, "case_id": case_id, "raw_output": output}
     if grounding_review is not None:
         record["grounding_review"] = grounding_review
+    if response_review is not None:
+        record["response_review"] = response_review
     return record
 
 
-def semantic_output(decision, action, arguments, requires_clarification=False):
-    return json.dumps({
+def semantic_output(
+    decision,
+    action,
+    arguments,
+    requires_clarification=False,
+    *,
+    message=None,
+    presentation_intent=None,
+):
+    output = {
         "decision": decision,
         "action": action,
         "arguments": arguments,
         "requires_clarification": requires_clarification,
-    }, ensure_ascii=False, separators=(",", ":"))
+    }
+    if message is not None:
+        output["message"] = message
+    if presentation_intent is not None:
+        output["presentation_intent"] = presentation_intent
+    return json.dumps(output, ensure_ascii=False, separators=(",", ":"))
+
+
+def approved_response_review(*, language="en", qualification="fluent_english", **statuses):
+    review = {
+        "status": "reviewed",
+        "reviewer_id": "response-reviewer",
+        "language": language,
+        "qualification": qualification,
+        "naturalness_status": "approved",
+        "meaning_preservation_status": "approved",
+        "intent_appropriateness_status": "approved",
+        "conciseness_status": "approved",
+    }
+    review.update(statuses)
+    return review
 
 
 def score_records(cases, predictions, **kwargs):
@@ -498,6 +528,151 @@ class EvaluationScorerTests(unittest.TestCase):
         self.assertEqual(metric["total"], 2)
         self.assertEqual(metric["rate"], 0.5)
         self.assertIsNotNone(metric["one_sided_95_event_upper"])
+
+    def test_response_and_presentation_metrics_are_separate_from_semantic_match(self):
+        case = make_case("reply", gold={
+            "decision": "act",
+            "action": "catalog.search",
+            "arguments": {"query": "Example"},
+            "requires_clarification": False,
+            "response_contract": {"requirement": "required", "language": "same_as_case"},
+            "presentation_intent": "media_results",
+        })
+        prediction = make_prediction(
+            "reply",
+            semantic_output(
+                "act", "catalog.search", {"query": "Example"},
+                message="I found a few matches.",
+                presentation_intent="media_results",
+            ),
+            response_review=approved_response_review(),
+        )
+
+        report = score_records([case], [prediction])
+        metrics = report["metrics"]
+
+        self.assertEqual(report["report_schema_version"], 2)
+        self.assertEqual(metrics["overall_semantic_exact_match"]["rate"], 1.0)
+        self.assertEqual(metrics["user_facing_response_presence"]["rate"], 1.0)
+        self.assertEqual(metrics["presentation_intent_accuracy"]["rate"], 1.0)
+        self.assertEqual(metrics["response_language_alignment"]["rate"], 1.0)
+        self.assertEqual(metrics["response_review_coverage"]["rate"], 1.0)
+        self.assertEqual(metrics["response_quality"]["rate"], 1.0)
+        self.assertEqual(report["response_review_counts"], {
+            "produced_messages": 1,
+            "reviewed_messages": 1,
+            "unreviewed_messages": 0,
+        })
+
+    def test_reply_quality_and_language_alignment_keep_independent_failures_visible(self):
+        case = make_case("japanese-reply", language="ja", gold={
+            "decision": "respond",
+            "action": None,
+            "arguments": {},
+            "requires_clarification": False,
+            "response_contract": {"requirement": "required", "language": "same_as_case"},
+            "presentation_intent": "confirmation",
+        })
+        prediction = make_prediction(
+            "japanese-reply",
+            semantic_output(
+                "respond", None, {},
+                message="I'll do that.",
+                presentation_intent="text",
+            ),
+            response_review=approved_response_review(
+                language="en",
+                qualification="fluent_english",
+                meaning_preservation_status="needs_revision",
+            ),
+        )
+
+        metrics = score_records([case], [prediction])["metrics"]
+
+        self.assertEqual(metrics["overall_semantic_exact_match"]["rate"], 1.0)
+        self.assertEqual(metrics["response_language_alignment"]["rate"], 0.0)
+        self.assertEqual(metrics["response_naturalness"]["rate"], 1.0)
+        self.assertEqual(metrics["response_meaning_preservation"]["rate"], 0.0)
+        self.assertEqual(metrics["response_intent_appropriateness"]["rate"], 1.0)
+        self.assertEqual(metrics["response_conciseness"]["rate"], 1.0)
+        self.assertEqual(metrics["response_quality"]["rate"], 0.0)
+        self.assertEqual(metrics["presentation_intent_accuracy"]["rate"], 0.0)
+
+    def test_response_presence_only_scores_required_and_forbidden_contracts(self):
+        cases = [
+            make_case("required-reply", gold={
+                "decision": "respond", "action": None, "arguments": {},
+                "requires_clarification": False,
+                "response_contract": {"requirement": "required", "language": "any"},
+            }),
+            make_case("forbidden-reply", gold={
+                "decision": "no_action", "action": None, "arguments": {},
+                "requires_clarification": False,
+                "response_contract": {"requirement": "forbidden", "language": "any"},
+            }),
+            make_case("optional-reply", gold={
+                "decision": "respond", "action": None, "arguments": {},
+                "requires_clarification": False,
+                "response_contract": {"requirement": "optional", "language": "any"},
+            }),
+        ]
+        predictions = [
+            make_prediction("required-reply", semantic_output("respond", None, {})),
+            make_prediction("forbidden-reply", semantic_output("no_action", None, {}, message="Unrequested.")),
+            make_prediction("optional-reply", semantic_output("respond", None, {}, message="Optional.")),
+        ]
+
+        metric = score_records(cases, predictions)["metrics"]["user_facing_response_presence"]
+
+        self.assertEqual(metric["successes"], 0)
+        self.assertEqual(metric["total"], 2)
+        self.assertEqual(metric["rate"], 0.0)
+
+    def test_missing_response_reviews_are_not_reported_as_zero_quality(self):
+        case = make_case("unreviewed-response")
+        prediction = make_prediction(
+            "unreviewed-response",
+            semantic_output("act", "play", {"title": "Example"}),
+        )
+
+        report = score_records([case], [prediction])
+        metrics = report["metrics"]
+
+        self.assertIsNone(metrics["response_quality"]["rate"])
+        self.assertIsNone(metrics["response_review_coverage"]["rate"])
+        self.assertIsNone(metrics["presentation_intent_accuracy"]["rate"])
+        self.assertEqual(report["response_review_counts"], {
+            "produced_messages": 0,
+            "reviewed_messages": 0,
+            "unreviewed_messages": 0,
+        })
+
+    def test_reviewed_response_requires_a_qualified_reviewer_and_emitted_message(self):
+        case = make_case("bad-response-review", language="ja")
+        output = semantic_output("act", "play", {"title": "Example"})
+        unqualified = make_prediction(
+            "bad-response-review", output, response_review=approved_response_review(
+                language="ja", qualification="fluent_english",
+            ),
+        )
+        with self.assertRaisesRegex(EvaluationInputError, "qualification does not match"):
+            score_records([case], [unqualified])
+
+        missing_message = make_prediction(
+            "bad-response-review", output, response_review=approved_response_review(),
+        )
+        with self.assertRaisesRegex(EvaluationInputError, "reviewed response needs"):
+            score_records([case], [missing_message])
+
+    def test_invalid_gold_response_contract_is_rejected_without_type_error(self):
+        case = make_case("bad-contract", gold={
+            "decision": "act", "action": "play", "arguments": {},
+            "requires_clarification": False,
+            "response_contract": {"requirement": [], "language": "en"},
+        })
+
+        with self.assertRaisesRegex(EvaluationInputError, "response_contract.requirement"):
+            score_records([case], [make_prediction("bad-contract", semantic_output("act", "play", {}))])
 
     def test_zero_errors_in_2995_trials_supports_point_one_percent_error_bound(self):
         upper = _one_sided_error_upper(0, 2995)

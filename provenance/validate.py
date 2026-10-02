@@ -538,8 +538,8 @@ def validate_evaluation_case_provenance(
         if not isinstance(case, dict):
             raise ProvenanceError(f"evaluation case {index} must be an object")
         version = case.get("schema_version")
-        if not isinstance(version, int) or isinstance(version, bool) or version != 2:
-            raise ProvenanceError(f"evaluation case {case.get('case_id')!r} schema_version must be 2")
+        if not isinstance(version, int) or isinstance(version, bool) or version != 3:
+            raise ProvenanceError(f"evaluation case {case.get('case_id')!r} schema_version must be 3")
         if "trusted_context" not in case:
             raise ProvenanceError(f"evaluation case {case.get('case_id')!r} lacks trusted_context")
         record_id = case.get("provenance_record_id")

@@ -51,7 +51,7 @@ class EvaluationCandidateRunnerTests(unittest.TestCase):
         predictions = run_one(case, candidate)
 
         self.assertEqual(predictions, [{
-            "schema_version": 1,
+            "schema_version": 2,
             "case_id": case["case_id"],
             "raw_output": "{ malformed output",
         }])

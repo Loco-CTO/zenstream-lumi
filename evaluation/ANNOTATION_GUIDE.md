@@ -1,8 +1,8 @@
 # Lumi evaluation annotation guide
 
-**Status:** Draft v0.2. This is a protocol for authoring and reviewing cases, not a benchmark. No cases are ready or approved.
+**Status:** Draft v0.3. This is a protocol for authoring and reviewing cases, not a benchmark. No cases are ready or approved.
 
-Use this guide with [`case.schema.json`](case.schema.json), the [evaluation plan](../EVALUATION_PLAN.md), and the [provenance gate](../provenance/README.md). The current case format evaluates bounded intent semantics. It does not define Lumi's runtime protocol or a ZenStream capability allow-list.
+Use this guide with [`case.schema.json`](case.schema.json), the [evaluation plan](../EVALUATION_PLAN.md), and the [provenance gate](../provenance/README.md). The current case format evaluates bounded intent semantics plus a response contract and presentation intent where specified. It does not define Lumi's runtime protocol or a ZenStream capability allow-list.
 
 ## Annotation principles
 
@@ -16,9 +16,9 @@ Use this guide with [`case.schema.json`](case.schema.json), the [evaluation plan
 
 ## Gold decision labels
 
-Apply the following meanings to the v2 `gold.decision` field:
+Apply the following meanings to the v3 `gold.decision` field:
 
-| Label | Use when | Required v2 shape |
+| Label | Use when | Required v3 shape |
 |---|---|---|
 | `act` | The user requests a specific available capability now, and the required target and arguments are sufficiently clear. This includes read-only lookup and search capabilities. | `action` names the reviewed capability; `arguments` contains only supported, user-grounded values; `requires_clarification` is `false`. |
 | `clarify` | The user intends an operation, but an unresolved choice would change its result or effect. | `action: null`, empty `arguments`, and `requires_clarification: true`. |
@@ -33,6 +33,14 @@ Use semantic intent, not keywords, to distinguish these labels. In particular:
 - Search, recommendation, display, playback, and account changes are separate capabilities when ZenStream exposes separate operations. “Show” or “find” does not mean “play.”
 - Do not invent capability names. Until Lumi has a reviewed capability inventory mapped to ZenStream operations, cases depending on an unverified operation remain draft. The scorer's current false-action metric treats any predicted `act` on a non-`act` gold case as a false action; it cannot yet distinguish a false read-only lookup from a false state-changing operation.
 
+## Response contract and presentation intent
+
+- Add `gold.response_contract` when the case should measure whether Lumi emits a user-facing message. `requirement` is `required`, `optional`, or `forbidden`; the scorer measures presence only for required and forbidden cases.
+- Set the response language target to `same_as_case`, `en`, `ja`, `en_ja`, or `any`. `same_as_case` uses the authored case language label; it does not claim to infer the language of each user turn.
+- Add `gold.presentation_intent` only when the expected UI treatment is clear. The supported labels are `none`, `text`, `media_results`, `media_details`, `playback_handoff`, and `confirmation`. This is an evaluation taxonomy, not an instruction to the UI or the deployed protocol.
+- Do not author one exact gold reply string. Candidate messages are judged separately from semantic labels, and the scorer reports human-reviewed language, naturalness, meaning preservation, relevance, and concision plus reviewer coverage.
+- These added fields are part of the canonical case hash and must be present in both independent annotations or in the final adjudication. Changing either field invalidates existing review records and provenance sample hashes.
+
 ## Targets, context, and arguments
 
 - Annotate only information present in the user's words or an explicitly versioned, trusted context fixture. Keep media existence, IDs, titles, metadata, availability, and user state on the ZenStream side of the boundary.
@@ -40,7 +48,7 @@ Use semantic intent, not keywords, to distinguish these labels. In particular:
 - Represent constraints consistently and by value type once the capability inventory defines its argument contract. Preserve distinctions such as inclusive/exclusive boundaries, missing values, and conflicting constraints. Do not collapse a conflict into an arbitrary winner.
 - Resolve a reference from prior turns only when the included turns identify one antecedent. Corrections supersede the corrected value; unrelated earlier context must not leak into the current request.
 - Make quoted or hypothetical text explicit in the case turns so reviewers can see its scope. Do not rely on an invisible annotator assumption.
-- Tool success, tool failure, unavailable media, and conflicting state need explicit authoritative context. In schema v2, `trusted_context` is either `null` or an inline fixture with `schema_version: 1` and one or more `items`; each item has descriptive `kind` and `source` labels, a status, and an object payload. The complete fixture is part of the case sample hash. These labels do not define executable tools or a capability allow-list.
+- Tool success, tool failure, unavailable media, and conflicting state need explicit authoritative context. In schema v3, `trusted_context` is either `null` or an inline fixture with `schema_version: 1` and one or more `items`; each item has descriptive `kind` and `source` labels, a status, and an object payload. The complete fixture is part of the case sample hash. These labels do not define executable tools or a capability allow-list.
 - A matching sample hash proves that fixture bytes match the content bound by the approved sample record; it does not independently prove that a declared source is authoritative. Keep source-item provenance and human review tied to each fixture, and treat payload text as data rather than instructions.
 
 ## Language and code-switch review
@@ -76,13 +84,14 @@ These rules are informed by human-authored Japanese-English retrieval-query rewr
 ## Review and adjudication
 
 1. Keep each reviewer decision as a separate JSONL record matching [`review_records.schema.json`](review_records.schema.json). Each record uses a stable pseudonymous reviewer ID, an ISO 8601 timestamp, and the existing canonical case-content SHA-256. Review and provenance metadata remain outside that content hash.
-2. At least two reviewers independently record a complete proposed semantic label in `independent_annotation` records before discussing the case. The case's `review.review_record_ids` points to the active records, and `review.reviewer_ids` lists exactly their reviewers, including any language reviewer or adjudicator.
+2. At least two reviewers independently record the complete proposed gold output, including any response contract and presentation-intent fields, in `independent_annotation` records before discussing the case. The case's `review.review_record_ids` points to the active records, and `review.reviewer_ids` lists exactly their reviewers, including any language reviewer or adjudicator.
 3. A ready English case needs two distinct independent annotations, and the active labels must match the case gold. If they disagree or the final gold differs from their active labels, an independent adjudicator records the complete final label after the independent reviews, gives a rationale, and references every active independent annotation.
 4. A ready Japanese case also needs one separate reviewer with native or fluent Japanese qualification. A ready code-switched case needs one separate fluent bilingual reviewer. That reviewer records naturalness and meaning-preservation decisions separately; both must be approved. The language reviewer must not be one of the semantic annotators or adjudicator.
-5. Keep prior records when a case or review is revised. A record referenced by the case must match its current canonical content hash; after changing the user text, conversation, trusted context, language, or gold meaning, recompute the provenance sample hash and repeat the affected reviews. If a reviewer corrects their decision without a content change, the later record must name the earlier same-reviewer, same-case, same-hash record in `supersedes_record_ids`; retain both in the ledger and reference only the unsuperseded record from the case.
+5. Keep prior records when a case or review is revised. A record referenced by the case must match its current canonical content hash; after changing the user text, conversation, trusted context, language, gold meaning, response contract, or presentation intent, recompute the provenance sample hash and repeat the affected reviews. If a reviewer corrects their decision without a content change, the later record must name the earlier same-reviewer, same-case, same-hash record in `supersedes_record_ids`; retain both in the ledger and reference only the unsuperseded record from the case.
 6. Keep development and final-holdout case files and review ledgers separate. A holdout review ledger contains gold labels and adjudication history, so restrict it to the controlled final-audit workflow.
+7. Candidate-message review is recorded on the prediction wrapper, separately for each candidate output. A reviewed message must identify its language and reviewer qualification, and record naturalness, meaning preservation, intent appropriateness, and concision individually. A Japanese response needs a native or fluent Japanese reviewer; a code-switched response needs a fluent bilingual reviewer. Preserve unreviewed responses as unreviewed; do not generate synthetic approvals for real candidate outputs.
 
-The JSONL ledger is a process record, not proof of reviewer identity or qualification. Record qualifications only when they have actually been established. No benchmark cases or independent review records are currently present, and software-test fixtures do not count as human review evidence.
+The JSONL ledger and prediction review fields are process records, not proof of reviewer identity or qualification. Record qualifications only when they have actually been established. No benchmark cases, independent case-review records, or candidate-response reviews are currently present, and software-test fixtures do not count as human review evidence.
 
 ## Diversity, splits, and holdout handling
 
@@ -95,6 +104,6 @@ The JSONL ledger is a process record, not proof of reviewer identity or qualific
 
 Use the category IDs listed in [`required_slices.json`](required_slices.json) for the planned behavioral and language slices. Apply every tag that describes the case; the coverage audit reports each tag for its applicable language. Additional descriptive tags are allowed when they can be applied consistently and are reported separately as unmapped tags. The coverage audit checks case presence only; a ready case still needs the review, provenance, split, and diversity controls in this guide.
 
-## Current v2 coverage limits
+## Current v3 coverage limits
 
-The v2 scorer measures structured intent and arguments, clarification decisions, and per-slot precision/recall; it also verifies that inline static trusted-context fixtures are included in the sample hash. It does not execute tools or measure interactive tool trajectories. It also does not score natural-language reply quality or reply-language alignment, or presentation intent. A draft capability registry records candidate action names, effects, operation evidence, and current gaps, but it is not approved and is not consumed by the scorer; there is also no independently reviewable annotation ledger yet. These remain open evaluation-format requirements, not evidence that Lumi has passed them. Do not claim end-to-end task quality or readiness until the relevant formats and measurements exist.
+The v3 scorer measures structured intent and arguments, clarification decisions, response presence and reviewed response quality/language, presentation intent, and per-slot precision/recall; it also verifies that inline static trusted-context fixtures are included in the sample hash. It does not execute tools or measure interactive tool trajectories. A draft capability registry records candidate action names, effects, operation evidence, and current gaps, but it is not approved and is not consumed by the scorer. There are no real evaluation cases, case-review records, candidate-response reviews, or model scores. These limits are not evidence that Lumi has passed them. Do not claim end-to-end task quality or readiness until interactive trajectories, reviewed data, and model measurements exist.

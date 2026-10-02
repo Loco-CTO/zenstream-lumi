@@ -19,7 +19,7 @@ def make_case(
 ):
     reviewed = review_status == "ready"
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "case_id": case_id,
         "family_id": family_id or case_id,
         "split": split,

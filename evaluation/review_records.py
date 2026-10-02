@@ -1,4 +1,4 @@
-"""Validate independent semantic and language-review records for evaluation cases."""
+"""Validate independent semantic, response-contract, and language-review records."""
 
 from __future__ import annotations
 
@@ -17,6 +17,12 @@ TIMESTAMP_PATTERN = re.compile(
 )
 RECORD_TYPES = {"independent_annotation", "language_review", "adjudication"}
 GOLD_KEYS = {"decision", "action", "arguments", "requires_clarification"}
+GOLD_OPTIONAL_KEYS = {"response_contract", "presentation_intent"}
+PRESENTATION_INTENTS = {
+    "none", "text", "media_results", "media_details", "playback_handoff", "confirmation",
+}
+RESPONSE_REQUIREMENTS = {"required", "optional", "forbidden"}
+RESPONSE_LANGUAGES = {"same_as_case", "en", "ja", "en_ja", "any"}
 
 
 class ReviewRecordError(ValueError):
@@ -70,7 +76,11 @@ def _nonempty(value: Any) -> bool:
 
 
 def _valid_semantic_output(value: Any) -> bool:
-    if not isinstance(value, dict) or set(value) != GOLD_KEYS:
+    if (
+        not isinstance(value, dict)
+        or not GOLD_KEYS.issubset(value)
+        or set(value) - GOLD_KEYS - GOLD_OPTIONAL_KEYS
+    ):
         return False
     decision = value["decision"]
     action = value["action"]
@@ -81,10 +91,30 @@ def _valid_semantic_output(value: Any) -> bool:
     if not isinstance(arguments, dict) or not isinstance(clarification, bool):
         return False
     if decision == "act":
-        return _nonempty(action) and not clarification
-    if action is not None or arguments:
+        valid_core = _nonempty(action) and not clarification
+    elif action is not None or arguments:
         return False
-    return clarification is (decision == "clarify")
+    else:
+        valid_core = clarification is (decision == "clarify")
+    if not valid_core:
+        return False
+    if "response_contract" in value:
+        contract = value["response_contract"]
+        if (
+            not isinstance(contract, dict)
+            or set(contract) != {"requirement", "language"}
+            or not isinstance(contract["requirement"], str)
+            or contract["requirement"] not in RESPONSE_REQUIREMENTS
+            or not isinstance(contract["language"], str)
+            or contract["language"] not in RESPONSE_LANGUAGES
+        ):
+            return False
+    if "presentation_intent" in value and (
+        not isinstance(value["presentation_intent"], str)
+        or value["presentation_intent"] not in PRESENTATION_INTENTS
+    ):
+        return False
+    return True
 
 
 def _same_json_value(left: Any, right: Any) -> bool:
