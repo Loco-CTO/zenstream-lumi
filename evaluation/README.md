@@ -1,6 +1,6 @@
 # Lumi evaluation harness
 
-**Status:** Versioned case/prediction formats, a draft capability registry, a dependency-free scorer, a model-independent input projection, and a provenance-gated callback runner exist. There are no ready benchmark cases, model backend, CLI runner, predictions, or Lumi scores yet.
+**Status:** Versioned case/prediction formats, a draft capability registry, a dependency-free scorer, a model-independent input projection, a provenance-gated callback runner, and a required-slice coverage audit exist. There are no ready benchmark cases, model backend, batch candidate CLI, predictions, or Lumi scores yet.
 
 The canonical semantic record is an evaluation adapter, not a decision about Lumi's eventual runtime or ZenStream integration protocol. It gives competing model formulations one comparable representation for action/no-action choice, action name, arguments, and clarification. A later protocol adapter may map between this record and the deployed interface.
 
@@ -13,17 +13,28 @@ The draft capability vocabulary lives in capabilities.json. It records read-only
 - `candidate_runner.py` invokes an in-process `Candidate.predict(...)` callback on ready cases only after schema/readiness and provenance checks, then wraps the untouched raw output for scoring. Final-holdout execution requires explicit opt-in. It is synchronous and does not load a model or run tools.
 - `prediction.schema.json` wraps the raw model output. Keeping the original string means malformed JSON and schema-invalid output count as failures instead of disappearing during preprocessing.
 - `thresholds.json` contains the initial targets from the goal. It is not editable to make a candidate pass.
+- `required_slices.json` defines the stable case-category IDs and language applicability for the required evaluation-plan slices.
+- `coverage_audit.py` validates a case inventory and reports ready, draft, and excluded presence for every required slice/language pair, including distinct family counts. It does not score model output or assess sample sufficiency or quality. It defaults to development and requires explicit final-audit opt-in for holdout inventory.
 - `scorer.py` is a Python standard-library-only scorer. It reports structural validity separately from semantic exact match, language/category slices, argument extraction, clarification decisions, false actions, and manually reviewed unsupported factual claims. It reports clarification precision/recall and micro/per-action-slot argument precision/recall. A slot is one top-level argument property scoped by action ID; a wrong value counts as both a false positive and a missed gold slot. The v1 false-action rate counts any predicted `act` on a non-`act` gold case, including read-only calls. False state-changing action and unclassified action rates use the capability registry only after the entire registry is approved; while it remains draft, both rates are explicitly `not_measured`, never reported as zero. The state-changing rate counts unmatched registered mutations over all selected cases, and the unclassified rate counts action IDs outside the approved registry among valid predicted action decisions. Scoring requires sample-level provenance records and validates their source/generation joins and use permissions first.
 - The direct `score_records(...)` API takes the source and synthetic-generation manifests as required inputs, just like file-based scoring; callers cannot bypass source-level use-permission checks by supplying sample records alone.
 - `tests/test_evaluation_scorer.py` checks only scorer behavior. Its inline cases are software fixtures, not Lumi benchmark or training data.
 - `tests/test_evaluation_input_adapter.py` checks the candidate-input projection and mutation isolation; its inline cases are software fixtures, not Lumi benchmark or training data.
 - `tests/test_evaluation_candidate_runner.py` checks provenance/readiness gates, final-holdout opt-in, and raw-output preservation; its inline cases are software fixtures, not Lumi benchmark or training data.
+- `tests/test_evaluation_coverage_audit.py` checks inventory validation, split isolation, review-state counts, and slice/language presence; its inline cases are software fixtures, not Lumi benchmark or training data.
 
 To score a reviewed development set:
 
 ```powershell
 python evaluation/scorer.py --cases <development-cases.jsonl> --predictions <candidate-predictions.jsonl> --provenance-records <document-records.jsonl> --capabilities evaluation/capabilities.json --split development --candidate-version <id> --output <report.json>
 ```
+
+To inspect development-set coverage before scoring:
+
+```powershell
+python evaluation/coverage_audit.py --cases <development-cases.jsonl> --output <coverage-report.json>
+```
+
+The audit uses the fixed category IDs in `required_slices.json`; any extra descriptive category tags are listed separately. A `ready_cases_present` result means at least one approved case exists in that slice and language. It is not a model score, a minimum-size check, or a substitute for independent native-speaker and semantic review. Pass a single-split inventory; the coverage audit rejects rows assigned to the other split. The scorer checks family leakage when it validates the full evaluation inventory. For a sealed holdout inventory, pass `--split final_holdout --final-audit` only in the controlled final-audit workflow. The flag is a workflow checkpoint, not filesystem access control; keep holdout files in controlled storage.
 
 Each prediction row must include the raw output as a string. Grounding review is a separate optional annotation; when present, it records the number of factual claims and the unsupported subset. The scorer reports its review coverage so a low unsupported-claim rate cannot hide unaudited answers.
 
