@@ -67,3 +67,23 @@
 - [ONNX Runtime GenAI installation and execution providers](https://onnxruntime.ai/docs/genai/howto/install.html). Documents separate CPU, CUDA, and DirectML packages; use as a portability candidate, not a selected runtime.
 - [TorchAO quantized inference workflows](https://docs.pytorch.org/ao/stable/workflows/inference.html). Current quantization options include CPU-oriented x86 and accelerator paths; hardware-specific support and accuracy must be measured.
 - Xia et al. 2026. [Efficient INT8 Inference of Small NLP Models on Server CPUs with PyTorch Native Stack](https://arxiv.org/abs/2608.18182). Reports CPU INT8 results for BERT-family encoders on Xeon; adjacent evidence only, not autoregressive Lumi benchmark evidence.
+
+## 2025–2026 short-context, bilingual evaluation, and deployment update
+
+These additional references were reviewed on 2026-10-02. They inform Lumi research only; their weights, datasets, and text have not been used by Lumi.
+
+### Architecture and inference
+
+- NVIDIA Research. 2025. [Hymba: A Hybrid-head Architecture for Small Language Models](https://research.nvidia.com/labs/twn/publication/iclr_2025_hymba/). ICLR 2025; combines attention and SSM heads and adds learned meta tokens. Architecture evidence only; benchmark and runtime results do not directly determine Lumi's CPU-first choice.
+- Bae et al. 2025. [Hybrid Architectures for Language Models: Systematic Analysis and Design Insights](https://arxiv.org/abs/2510.04800). Systematically compares inter-layer and intra-layer hybridization. Its reported quality/efficiency tradeoffs motivate a matched Lumi experiment; model size, training, and workload differ from Lumi.
+- Amini et al. 2025. [LFM2 Technical Report](https://arxiv.org/abs/2511.23404). First-party report on hardware-in-the-loop search for gated short-convolution and grouped-query-attention hybrids, with CPU speed claims. Models were pretrained on 10–12T tokens; do not use its weights or transfer its speed claims without reproduction.
+- Koutsiaris. 2026. [Daedalus-150M: A Convolution-Attention Hybrid Designed for CPU Inference](https://arxiv.org/abs/2608.20210). Single-author preprint reporting a matched from-scratch hybrid/all-attention comparison at 150M parameters. Useful experiment design and a candidate to reproduce; general-task results and lack of independent review limit its evidence.
+- Mitra et al. 2025. [Characterizing State Space Model and Hybrid Language Model Performance with Long Context](https://arxiv.org/abs/2507.12442); [SSM-Scope project page](https://sapmitra.github.io/ssm-scope/). Published at ISPASS 2026; reports a Transformer advantage at short sequences and SSM/hybrid benefits at long contexts on consumer and embedded GPUs. It does not measure CPU inference or from-scratch Lumi models.
+- Adatiya and Hu. 2026. [Cold Start Latency of Quantized Small Language Models on Serverless CPU Infrastructure](https://research.google/pubs/cold-start-latency-of-quantized-small-language-models-on-serverless-cpu-infrastructure/). Google Research; benchmarks pretrained 270M–3.8B models on 4/8 GiB Cloud Run tiers and separates load from warm latency. The tier's vCPU difference is a confound for interpreting RAM effects.
+
+### Tokenization and bilingual evaluation
+
+- Chiu. 2026. [TokLens: A Multilingual Lens on Tokenizer Quality for LLMs](https://aclanthology.org/2026.acl-srw.18/). ACL Student Research Workshop 2026; evaluates tokenizer metrics across 15 languages and reports multilingual associations, with confounding and limited causal evidence. Relevant to measuring English/Japanese fertility and parity.
+- Dussolle et al. 2025. [M-IFEval: Multilingual Instruction-Following Evaluation](https://aclanthology.org/2025.findings-naacl.344/). Findings of NAACL 2025; includes Japanese-specific instruction checks and reports variation by language and instruction type. General instruction following, not conversational media intent.
+- Yang and Chai. 2025. [CodeMixBench: Evaluating Code-Mixing Capabilities of LLMs Across 18 Languages](https://aclanthology.org/2025.emnlp-main.109/). EMNLP 2025; broad code-mixing task suite and reported weaknesses across mixed-language settings. Check its exact language-pair coverage and dataset rights before reuse.
+- Sterner and Teufel. 2025. [Minimal Pair-Based Evaluation of Code-Switching](https://aclanthology.org/2025.acl-long.910/). ACL 2025; compares naturally occurring code-switch examples with minimally changed variants and includes bilingual judgments. Useful for naturalness-review design, not direct intent accuracy.
