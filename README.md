@@ -21,7 +21,7 @@ Architecture, tokenizer, model size, runtime, training corpus, integration proto
 
 - [Evaluation plan](EVALUATION_PLAN.md): target thresholds, error categories, measurement, and holdout rules.
 - [Evaluation tools](evaluation/README.md): canonical case/output/prediction formats, a hash-bound independent-review ledger, a candidate-input projection, provenance/review-gated runner, coverage audit, and standard-library scorer; no model backend, human review records, or ready evaluation cases exist yet.
-- [Annotation guide](evaluation/ANNOTATION_GUIDE.md): draft labeling, response contracts and presentation intent, the controlled review ledger, Japanese/code-switch review, split grouping, and v3 coverage limits.
+- [Annotation guide](evaluation/ANNOTATION_GUIDE.md): draft labeling, response contracts and presentation intent, the controlled review ledger, Japanese/code-switch review, split grouping, and v4 coverage limits.
 - [Research notes](RESEARCH_NOTES.md): current findings, limitations, open hypotheses, and proposed experiments.
 - [Research references](RESEARCH_REFERENCES.md): sources that influence design; these are not training data.
 - [Data sources](DATA_SOURCES.md): inclusion policy and human-readable provenance summary.
