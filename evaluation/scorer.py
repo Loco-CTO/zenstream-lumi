@@ -40,6 +40,17 @@ OUTPUT_KEYS = {"decision", "action", "arguments", "requires_clarification"}
 OPTIONAL_OUTPUT_KEYS = {"message"}
 LANGUAGES = {"en", "ja", "en_ja"}
 SPLITS = {"development", "final_holdout"}
+NO_ACTION_CATEGORIES = {
+    "negation",
+    "no_action",
+    "no_action_negation",
+    "no_action_capability_question",
+    "no_action_hypothetical",
+    "no_action_future_intent",
+    "no_action_discussion",
+    "no_action_troubleshooting",
+    "no_action_quoted_command",
+}
 _Z_95 = 1.959963984540054
 
 
@@ -655,7 +666,7 @@ def score_records(
             _argument_equal,
         ),
         "negation_no_action_correctness": rate_for(
-            (case for case in all_cases if {"negation", "no_action"} & set(case["categories"])),
+            (case for case in all_cases if NO_ACTION_CATEGORIES & set(case["categories"])),
             exact,
         ),
         "english_zenstream_tasks": rate_for((case for case in all_cases if case["language"] == "en"), exact),

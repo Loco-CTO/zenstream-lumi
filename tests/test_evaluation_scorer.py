@@ -360,6 +360,39 @@ class EvaluationScorerTests(unittest.TestCase):
             slots["playback.start"]["target_text"]["recall"]["rate"], 0.0
         )
 
+    def test_required_slice_tags_feed_existing_behavioral_target_metrics(self):
+        cases = [
+            make_case("negation-tag", categories=["no_action_negation"], gold={
+                "decision": "no_action", "action": None, "arguments": {},
+                "requires_clarification": False,
+            }),
+            make_case("capability-question-tag", categories=["no_action_capability_question"], gold={
+                "decision": "respond", "action": None, "arguments": {},
+                "requires_clarification": False,
+            }),
+            make_case("multi-turn-tag", categories=["multi_turn_reference_resolution"]),
+            make_case("ambiguity-tag", categories=["difficult_ambiguous"], gold={
+                "decision": "clarify", "action": None, "arguments": {},
+                "requires_clarification": True,
+            }),
+        ]
+        predictions = [
+            make_prediction("negation-tag", semantic_output("no_action", None, {})),
+            make_prediction("capability-question-tag", semantic_output("respond", None, {})),
+            make_prediction("multi-turn-tag", semantic_output("act", "play", {"title": "Example"})),
+            make_prediction("ambiguity-tag", semantic_output("clarify", None, {}, True)),
+        ]
+
+        metrics = score_records(cases, predictions)["metrics"]
+
+        for metric_name in (
+            "negation_no_action_correctness",
+            "multi_turn_reference_resolution",
+            "difficult_ambiguous_requests",
+        ):
+            self.assertEqual(metrics[metric_name]["successes"], 2 if metric_name == "negation_no_action_correctness" else 1)
+            self.assertEqual(metrics[metric_name]["total"], 2 if metric_name == "negation_no_action_correctness" else 1)
+
     def test_invalid_decision_type_counts_as_invalid_instead_of_raising(self):
         case = make_case("invalid-decision")
         prediction = make_prediction(
