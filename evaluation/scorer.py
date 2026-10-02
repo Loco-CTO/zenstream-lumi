@@ -513,6 +513,85 @@ def _evaluate_prediction(raw_output: str) -> tuple[dict[str, Any] | None, str | 
     return parsed, None
 
 
+def _clarification_precision_recall(
+    cases: list[dict[str, Any]],
+    decoded: dict[str, dict[str, Any] | None],
+    confidence: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    gold_clarifications = {
+        case["case_id"] for case in cases if case["gold"]["decision"] == "clarify"
+    }
+    predicted_clarifications = {
+        case["case_id"]
+        for case in cases
+        if decoded[case["case_id"]] is not None
+        and decoded[case["case_id"]]["decision"] == "clarify"
+    }
+    true_positives = len(gold_clarifications & predicted_clarifications)
+    return (
+        _rate(true_positives, len(predicted_clarifications), confidence),
+        _rate(true_positives, len(gold_clarifications), confidence),
+    )
+
+
+def _argument_slot_scores(
+    cases: list[dict[str, Any]],
+    decoded: dict[str, dict[str, Any] | None],
+    confidence: float,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    true_positives = 0
+    predicted_count = 0
+    gold_count = 0
+    per_action_slot_counts: dict[str, dict[str, dict[str, int]]] = {}
+
+    for case in cases:
+        gold = case["gold"]
+        prediction = decoded[case["case_id"]]
+        gold_slots = {
+            (gold["action"], slot): value
+            for slot, value in gold["arguments"].items()
+        } if gold["decision"] == "act" else {}
+        predicted_slots = {
+            (prediction["action"], slot): value
+            for slot, value in prediction["arguments"].items()
+        } if prediction is not None and prediction["decision"] == "act" else {}
+
+        for action, slot in sorted(set(gold_slots) | set(predicted_slots)):
+            counts = per_action_slot_counts.setdefault(action, {}).setdefault(
+                slot, {"true_positives": 0, "predicted": 0, "gold": 0}
+            )
+            if (action, slot) in predicted_slots:
+                predicted_count += 1
+                counts["predicted"] += 1
+            if (action, slot) in gold_slots:
+                gold_count += 1
+                counts["gold"] += 1
+            if (
+                (action, slot) in predicted_slots
+                and (action, slot) in gold_slots
+                and _normalise(predicted_slots[(action, slot)])
+                == _normalise(gold_slots[(action, slot)])
+            ):
+                true_positives += 1
+                counts["true_positives"] += 1
+
+    per_action_slot: dict[str, dict[str, Any]] = {}
+    for action, slots in sorted(per_action_slot_counts.items()):
+        per_action_slot[action] = {}
+        for slot, counts in sorted(slots.items()):
+            per_action_slot[action][slot] = {
+                **counts,
+                "precision": _rate(counts["true_positives"], counts["predicted"], confidence),
+                "recall": _rate(counts["true_positives"], counts["gold"], confidence),
+            }
+
+    return (
+        _rate(true_positives, predicted_count, confidence),
+        _rate(true_positives, gold_count, confidence),
+        per_action_slot,
+    )
+
+
 def score_records(
     cases: list[dict[str, Any]],
     prediction_records: list[dict[str, Any]],
@@ -591,6 +670,18 @@ def score_records(
             exact,
         ),
     }
+
+    clarification_precision, clarification_recall = _clarification_precision_recall(
+        all_cases, decoded, confidence
+    )
+    metrics["clarification_precision"] = clarification_precision
+    metrics["clarification_recall"] = clarification_recall
+    slot_precision, slot_recall, per_action_slot = _argument_slot_scores(
+        all_cases, decoded, confidence
+    )
+    metrics["argument_slot_precision"] = slot_precision
+    metrics["argument_slot_recall"] = slot_recall
+    metrics["argument_slots_by_action"] = per_action_slot
 
     non_action_gold_cases = [case for case in all_cases if case["gold"]["decision"] != "act"]
     false_actions = sum(

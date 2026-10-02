@@ -40,6 +40,15 @@ def make_prediction(case_id, output, grounding_review=None):
     return record
 
 
+def semantic_output(decision, action, arguments, requires_clarification=False):
+    return json.dumps({
+        "decision": decision,
+        "action": action,
+        "arguments": arguments,
+        "requires_clarification": requires_clarification,
+    }, ensure_ascii=False, separators=(",", ":"))
+
+
 def score_records(cases, predictions, **kwargs):
     provenance = [make_record(case) for case in cases]
     return _score_records(
@@ -272,6 +281,84 @@ class EvaluationScorerTests(unittest.TestCase):
         self.assertEqual(report["invalid_response_count"], 1)
         self.assertEqual(report["metrics"]["structured_response_validity"]["rate"], 0.0)
         self.assertEqual(report["metrics"]["overall_semantic_exact_match"]["rate"], 0.0)
+
+    def test_clarification_precision_and_recall_count_false_and_missed_clarifications(self):
+        clarify_gold = {
+            "decision": "clarify", "action": None, "arguments": {},
+            "requires_clarification": True,
+        }
+        respond_gold = {
+            "decision": "respond", "action": None, "arguments": {},
+            "requires_clarification": False,
+        }
+        action_gold = {
+            "decision": "act", "action": "catalog.search", "arguments": {"query": "Jazz"},
+            "requires_clarification": False,
+        }
+        cases = [
+            make_case("clarify-hit", gold=clarify_gold),
+            make_case("clarify-miss", gold=clarify_gold),
+            make_case("clarify-false-positive", gold=action_gold),
+            make_case("respond-correct", gold=respond_gold),
+        ]
+        predictions = [
+            make_prediction("clarify-hit", semantic_output("clarify", None, {}, True)),
+            make_prediction("clarify-miss", semantic_output("respond", None, {})),
+            make_prediction("clarify-false-positive", semantic_output("clarify", None, {}, True)),
+            make_prediction("respond-correct", semantic_output("respond", None, {})),
+        ]
+
+        metrics = score_records(cases, predictions)["metrics"]
+
+        self.assertEqual(metrics["clarification_precision"]["successes"], 1)
+        self.assertEqual(metrics["clarification_precision"]["total"], 2)
+        self.assertEqual(metrics["clarification_precision"]["rate"], 0.5)
+        self.assertEqual(metrics["clarification_recall"]["successes"], 1)
+        self.assertEqual(metrics["clarification_recall"]["total"], 2)
+        self.assertEqual(metrics["clarification_recall"]["rate"], 0.5)
+
+    def test_argument_slot_precision_recall_reports_each_action_slot(self):
+        cases = [
+            make_case("search-slots", gold={
+                "decision": "act", "action": "catalog.search",
+                "arguments": {"query": "Show", "type": "movie"},
+                "requires_clarification": False,
+            }),
+            make_case("playback-slot", gold={
+                "decision": "act", "action": "playback.start",
+                "arguments": {"target_text": "play the new album"},
+                "requires_clarification": False,
+            }),
+        ]
+        predictions = [
+            make_prediction("search-slots", semantic_output("act", "catalog.search", {
+                "query": " show ", "type": "series", "unexpected": True,
+            })),
+            make_prediction("playback-slot", semantic_output("no_action", None, {})),
+        ]
+
+        metrics = score_records(cases, predictions)["metrics"]
+
+        self.assertEqual(metrics["argument_slot_precision"]["successes"], 1)
+        self.assertEqual(metrics["argument_slot_precision"]["total"], 3)
+        self.assertAlmostEqual(metrics["argument_slot_precision"]["rate"], 1 / 3)
+        self.assertEqual(metrics["argument_slot_recall"]["successes"], 1)
+        self.assertEqual(metrics["argument_slot_recall"]["total"], 3)
+        self.assertAlmostEqual(metrics["argument_slot_recall"]["rate"], 1 / 3)
+
+        slots = metrics["argument_slots_by_action"]
+        self.assertEqual(
+            slots["catalog.search"]["query"]["precision"]["rate"], 1.0
+        )
+        self.assertEqual(
+            slots["catalog.search"]["type"]["recall"]["rate"], 0.0
+        )
+        self.assertEqual(
+            slots["catalog.search"]["unexpected"]["precision"]["rate"], 0.0
+        )
+        self.assertEqual(
+            slots["playback.start"]["target_text"]["recall"]["rate"], 0.0
+        )
 
     def test_invalid_decision_type_counts_as_invalid_instead_of_raising(self):
         case = make_case("invalid-decision")
