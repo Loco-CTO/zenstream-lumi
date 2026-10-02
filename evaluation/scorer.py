@@ -27,9 +27,14 @@ from provenance.validate import (  # noqa: E402
     validate_bundle as validate_provenance_bundle,
     validate_files as validate_provenance_files,
 )
+from evaluation.capability_registry import (  # noqa: E402
+    CapabilityRegistryError,
+    validate_registry as validate_capability_registry,
+)
 
 
 THRESHOLDS_PATH = Path(__file__).with_name("thresholds.json")
+CAPABILITY_REGISTRY_PATH = Path(__file__).with_name("capabilities.json")
 DECISIONS = {"act", "no_action", "clarify", "respond"}
 OUTPUT_KEYS = {"decision", "action", "arguments", "requires_clarification"}
 OPTIONAL_OUTPUT_KEYS = {"message"}
@@ -343,6 +348,122 @@ def _event_rate(events: int, total: int, confidence: float = 0.95) -> dict[str, 
     }
 
 
+def _load_capability_registry(
+    registry: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], str]:
+    raw_registry: bytes | None = None
+    if registry is None:
+        try:
+            raw_registry = CAPABILITY_REGISTRY_PATH.read_bytes()
+            registry = json.loads(raw_registry)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise EvaluationInputError(f"cannot load capability registry: {exc}") from exc
+    try:
+        validate_capability_registry(registry)
+    except CapabilityRegistryError as exc:
+        raise EvaluationInputError(f"invalid capability registry: {exc}") from exc
+    if raw_registry is None:
+        try:
+            raw_registry = json.dumps(
+                registry,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise EvaluationInputError(
+                "capability registry must contain only JSON-compatible values"
+            ) from exc
+    return registry, hashlib.sha256(raw_registry).hexdigest()
+
+
+def _not_measured_capability_metric(
+    registry: dict[str, Any], reason: str
+) -> dict[str, Any]:
+    return {
+        "status": "not_measured",
+        "reason": reason,
+        "registry_id": registry["registry_id"],
+        "registry_review_status": registry["review_status"],
+        "events": None,
+        "total": None,
+        "rate": None,
+        "wilson_95": None,
+        "one_sided_95_event_upper": None,
+    }
+
+
+def _capability_action_metrics(
+    cases: list[dict[str, Any]],
+    decoded: dict[str, dict[str, Any] | None],
+    registry: dict[str, Any],
+    confidence: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if registry["review_status"] != "approved":
+        reason = "capability registry is not approved"
+        return (
+            _not_measured_capability_metric(registry, reason),
+            _not_measured_capability_metric(registry, reason),
+        )
+
+    capabilities = {
+        capability["id"]: capability for capability in registry["capabilities"]
+    }
+    state_changing_ids = {
+        capability_id
+        for capability_id, capability in capabilities.items()
+        if capability["effect"] == "state_changing"
+        and capability["review_status"] == "approved"
+    }
+    predicted_actions = [
+        (case, decoded[case["case_id"]])
+        for case in cases
+        if decoded[case["case_id"]] is not None
+        and decoded[case["case_id"]]["decision"] == "act"
+    ]
+    unclassified_actions = sum(
+        1 for _, prediction in predicted_actions
+        if prediction["action"] not in capabilities
+    )
+    unclassified_action_metric = _event_rate(
+        unclassified_actions, len(predicted_actions), confidence
+    )
+    unclassified_action_metric.update({
+        "status": "measured",
+        "registry_id": registry["registry_id"],
+        "registry_review_status": registry["review_status"],
+        "denominator": "valid predicted act decisions",
+    })
+
+    if not state_changing_ids:
+        false_state_changing_metric = _not_measured_capability_metric(
+            registry,
+            "approved capability registry contains no state-changing capabilities",
+        )
+        return false_state_changing_metric, unclassified_action_metric
+
+    false_state_changes = sum(
+        1
+        for case, prediction in predicted_actions
+        if prediction["action"] in state_changing_ids
+        and not (
+            case["gold"]["decision"] == "act"
+            and prediction["action"] == case["gold"]["action"]
+        )
+    )
+    false_state_changing_metric = _event_rate(
+        false_state_changes, len(cases), confidence
+    )
+    false_state_changing_metric.update({
+        "status": "measured",
+        "registry_id": registry["registry_id"],
+        "registry_review_status": registry["review_status"],
+        "state_changing_capability_ids": sorted(state_changing_ids),
+        "denominator": "all selected cases",
+    })
+    return false_state_changing_metric, unclassified_action_metric
+
+
 def select_evaluation_cases(
     cases: list[dict[str, Any]],
     split: str = "development",
@@ -403,12 +524,14 @@ def score_records(
     allow_final_holdout: bool = False,
     candidate_version: str | None = None,
     confidence: float = 0.95,
+    capability_registry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     selected = select_evaluation_cases(cases, split, allow_final_holdout)
     try:
         validate_provenance_bundle(source_manifest, generation_manifest, provenance_records, selected)
     except ProvenanceError as exc:
         raise EvaluationInputError(str(exc)) from exc
+    registry, registry_digest = _load_capability_registry(capability_registry)
     available = {case["case_id"]: case for case in selected}
     predictions: dict[str, dict[str, Any]] = {}
     for index, record in enumerate(prediction_records, start=1):
@@ -476,6 +599,11 @@ def score_records(
         and prediction["decision"] == "act"
     )
     metrics["false_action_rate"] = _event_rate(false_actions, len(non_action_gold_cases), confidence)
+    false_state_changing_metric, unclassified_action_metric = _capability_action_metrics(
+        all_cases, decoded, registry, confidence
+    )
+    metrics["false_state_changing_action_rate"] = false_state_changing_metric
+    metrics["unclassified_action_rate"] = unclassified_action_metric
 
     reviewed_predictions = [
         predictions[case_id]["grounding_review"]
@@ -532,6 +660,13 @@ def score_records(
         "prediction_count": len(prediction_records),
         "missing_prediction_count": missing_count,
         "invalid_response_count": sum(value is None for value in decoded.values()),
+        "capability_registry": {
+            "registry_id": registry["registry_id"],
+            "review_status": registry["review_status"],
+            "sha256": "sha256:" + registry_digest,
+            "source_repository": registry["source_snapshot"]["repository"],
+            "source_commit": registry["source_snapshot"]["commit"],
+        },
         "invalid_response_examples": {
             case_id: error for case_id, error in output_errors.items() if error is not None
         },
@@ -559,6 +694,7 @@ def score_files(
     candidate_version: str | None = None,
     source_manifest_path: Path = PROJECT_ROOT / "provenance" / "data_sources.json",
     generation_manifest_path: Path = PROJECT_ROOT / "provenance" / "synthetic_data.json",
+    capability_registry_path: Path = CAPABILITY_REGISTRY_PATH,
 ) -> dict[str, Any]:
     cases = _read_jsonl(cases_path)
     predictions = _read_jsonl(predictions_path)
@@ -571,6 +707,10 @@ def score_files(
     )
     source_manifest = load_json_document(source_manifest_path)
     generation_manifest = load_json_document(generation_manifest_path)
+    try:
+        capability_registry = json.loads(capability_registry_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise EvaluationInputError(f"cannot load capability registry: {exc}") from exc
     report = score_records(
         cases,
         predictions,
@@ -580,12 +720,14 @@ def score_files(
         split=split,
         allow_final_holdout=allow_final_holdout,
         candidate_version=candidate_version,
+        capability_registry=capability_registry,
     )
     report["case_manifest_sha256"] = _sha256(cases_path)
     report["prediction_file_sha256"] = _sha256(predictions_path)
     report["provenance_records_sha256"] = _sha256(provenance_records_path)
     report["source_manifest_sha256"] = _sha256(source_manifest_path)
     report["synthetic_manifest_sha256"] = _sha256(generation_manifest_path)
+    report["capability_registry"]["sha256"] = _sha256(capability_registry_path)
     return report
 
 
@@ -596,6 +738,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--provenance-records", required=True, type=Path, help="sample-level provenance JSONL for the evaluation cases")
     parser.add_argument("--sources", type=Path, default=PROJECT_ROOT / "provenance" / "data_sources.json", help="data-source manifest JSON")
     parser.add_argument("--generations", type=Path, default=PROJECT_ROOT / "provenance" / "synthetic_data.json", help="synthetic-generation manifest JSON")
+    parser.add_argument("--capabilities", type=Path, default=CAPABILITY_REGISTRY_PATH, help="versioned capability registry JSON")
     parser.add_argument("--split", choices=sorted(SPLITS), default="development")
     parser.add_argument("--final-audit", action="store_true", help="explicitly authorize scoring the sealed final holdout")
     parser.add_argument("--candidate-version", help="candidate identifier written into the report")
@@ -613,8 +756,15 @@ def main(argv: list[str] | None = None) -> int:
             candidate_version=args.candidate_version,
             source_manifest_path=args.sources,
             generation_manifest_path=args.generations,
+            capability_registry_path=args.capabilities,
         )
-    except (OSError, EvaluationInputError, ProvenanceError, json.JSONDecodeError) as exc:
+    except (
+        OSError,
+        EvaluationInputError,
+        ProvenanceError,
+        CapabilityRegistryError,
+        json.JSONDecodeError,
+    ) as exc:
         parser.error(str(exc))
     serialized = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
     if args.output:

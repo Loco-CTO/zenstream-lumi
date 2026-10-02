@@ -1,4 +1,7 @@
+import hashlib
+import json
 import unittest
+from pathlib import Path
 
 from evaluation.scorer import EvaluationInputError, _one_sided_error_upper, score_records as _score_records
 from test_provenance_validator import make_generation_manifest, make_record, make_source_manifest
@@ -49,6 +52,15 @@ def score_records(cases, predictions, **kwargs):
     )
 
 
+def approved_capability_registry():
+    path = Path(__file__).resolve().parents[1] / "evaluation" / "capabilities.json"
+    registry = json.loads(path.read_text(encoding="utf-8"))
+    registry["review_status"] = "approved"
+    for capability in registry["capabilities"]:
+        capability["review_status"] = "approved"
+    return registry
+
+
 class EvaluationScorerTests(unittest.TestCase):
     def test_direct_scoring_enforces_source_manifest_permissions(self):
         case = make_case("unpermitted-source")
@@ -88,6 +100,15 @@ class EvaluationScorerTests(unittest.TestCase):
         self.assertEqual(metrics["overall_semantic_exact_match"]["successes"], 1)
         self.assertEqual(metrics["false_action_rate"]["rate"], 1.0)
         self.assertEqual(metrics["negation_no_action_correctness"]["rate"], 0.0)
+        registry_path = (
+            Path(__file__).resolve().parents[1]
+            / "evaluation"
+            / "capabilities.json"
+        )
+        registry_sha256 = hashlib.sha256(registry_path.read_bytes()).hexdigest()
+        self.assertEqual(
+            report["capability_registry"]["sha256"], "sha256:" + registry_sha256
+        )
 
     def test_accepts_a_versioned_trusted_context_fixture(self):
         case = make_case("context")
@@ -158,7 +179,89 @@ class EvaluationScorerTests(unittest.TestCase):
         self.assertEqual(metrics["false_action_rate"]["events"], 2)
         self.assertEqual(metrics["false_action_rate"]["total"], 3)
         self.assertAlmostEqual(metrics["false_action_rate"]["rate"], 2 / 3)
-        self.assertNotIn("false_state_changing_action_rate", metrics)
+        state_changing_metric = metrics["false_state_changing_action_rate"]
+        self.assertEqual(state_changing_metric["status"], "not_measured")
+        self.assertEqual(state_changing_metric["registry_review_status"], "draft")
+        self.assertIsNone(state_changing_metric["rate"])
+
+    def test_approved_registry_measures_false_mutations_and_unknown_actions(self):
+        state_change_gold = {
+            "decision": "act", "action": "playback.start", "arguments": {},
+            "requires_clarification": False,
+        }
+        read_only_gold = {
+            "decision": "act", "action": "catalog.search", "arguments": {},
+            "requires_clarification": False,
+        }
+        no_action_gold = {
+            "decision": "no_action", "action": None, "arguments": {},
+            "requires_clarification": False,
+        }
+        cases = [
+            make_case("false-on-no-action", categories=["no_action"], gold=no_action_gold),
+            make_case("false-on-read-only", gold=read_only_gold),
+            make_case("correct-mutation", gold=state_change_gold),
+            make_case("unknown-action", gold=no_action_gold),
+        ]
+        predictions = [
+            make_prediction("false-on-no-action", '{"decision":"act","action":"playback.start","arguments":{},"requires_clarification":false}'),
+            make_prediction("false-on-read-only", '{"decision":"act","action":"playback.start","arguments":{},"requires_clarification":false}'),
+            make_prediction("correct-mutation", '{"decision":"act","action":"playback.start","arguments":{},"requires_clarification":false}'),
+            make_prediction("unknown-action", '{"decision":"act","action":"unknown.mutate","arguments":{},"requires_clarification":false}'),
+        ]
+
+        report = score_records(
+            cases,
+            predictions,
+            capability_registry=approved_capability_registry(),
+        )
+        metrics = report["metrics"]
+
+        false_mutations = metrics["false_state_changing_action_rate"]
+        self.assertEqual(false_mutations["status"], "measured")
+        self.assertEqual(false_mutations["events"], 2)
+        self.assertEqual(false_mutations["total"], 4)
+        self.assertEqual(false_mutations["rate"], 0.5)
+        self.assertEqual(false_mutations["denominator"], "all selected cases")
+
+        unknown_actions = metrics["unclassified_action_rate"]
+        self.assertEqual(unknown_actions["status"], "measured")
+        self.assertEqual(unknown_actions["events"], 1)
+        self.assertEqual(unknown_actions["total"], 4)
+        self.assertEqual(unknown_actions["rate"], 0.25)
+        self.assertEqual(report["capability_registry"]["review_status"], "approved")
+        self.assertRegex(
+            report["capability_registry"]["sha256"], r"^sha256:[0-9a-f]{64}$"
+        )
+
+    def test_invalid_capability_registry_is_rejected(self):
+        registry = approved_capability_registry()
+        registry["capabilities"][0]["effect"] = "unknown"
+        case = make_case("invalid-registry")
+        prediction = make_prediction("invalid-registry", "{}")
+
+        with self.assertRaisesRegex(EvaluationInputError, "invalid capability registry"):
+            score_records([case], [prediction], capability_registry=registry)
+
+    def test_approved_read_only_registry_still_measures_unclassified_actions(self):
+        registry = approved_capability_registry()
+        for capability in registry["capabilities"]:
+            capability["effect"] = "read_only"
+        case = make_case("unclassified", gold={
+            "decision": "no_action", "action": None, "arguments": {},
+            "requires_clarification": False,
+        })
+        prediction = make_prediction(
+            "unclassified",
+            '{"decision":"act","action":"unknown.action","arguments":{},"requires_clarification":false}',
+        )
+
+        metrics = score_records(
+            [case], [prediction], capability_registry=registry
+        )["metrics"]
+
+        self.assertEqual(metrics["false_state_changing_action_rate"]["status"], "not_measured")
+        self.assertEqual(metrics["unclassified_action_rate"]["events"], 1)
 
     def test_invalid_json_counts_against_validity_and_semantics(self):
         cases = [make_case("invalid")]
