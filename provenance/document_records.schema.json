@@ -83,6 +83,7 @@
                 "permissions": {
                   "properties": {
                     "training_use": {"enum": ["permitted", "prohibited", "conditional", "not_applicable"]},
+                    "evaluation_use": {"enum": ["permitted", "prohibited", "conditional", "not_applicable"]},
                     "commercial_use": {"enum": ["permitted", "prohibited", "conditional", "not_applicable"]},
                     "modification": {"enum": ["permitted", "prohibited", "conditional", "not_applicable"]},
                     "redistribution": {"enum": ["permitted", "prohibited", "conditional", "not_applicable"]}
@@ -138,9 +139,10 @@
     "permissions": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["training_use", "commercial_use", "modification", "redistribution"],
+      "required": ["training_use", "evaluation_use", "commercial_use", "modification", "redistribution"],
       "properties": {
         "training_use": {"$ref": "#/$defs/permission"},
+        "evaluation_use": {"$ref": "#/$defs/permission"},
         "commercial_use": {"$ref": "#/$defs/permission"},
         "modification": {"$ref": "#/$defs/permission"},
         "redistribution": {"$ref": "#/$defs/permission"}

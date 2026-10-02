@@ -46,6 +46,13 @@
 - Ray. 2026. [The Constraint Tax: Measuring Validity-Correctness Tradeoffs in Structured Outputs for Small Language Models](https://arxiv.org/abs/2605.26128). Preprint; measures answer/executable accuracy alongside schema validity and wrong-valid outputs. Its experiments use pretrained models and commodity GPUs, so results are not direct evidence for Lumi's from-scratch CPU candidate.
 - Li et al. 2026. [Efficient Grammar-Constrained Decoding via Parser Stack Classification](https://arxiv.org/abs/2608.03065). Preprint; reports reduced mask-computation overhead for JSON and code grammars, with preprocessing cost and break-even conditions to consider if Lumi later adopts constrained decoding.
 
+## Benchmark integrity, synthetic data, and code-switching
+
+- Li et al. 2025. [C²LEVA: Toward Comprehensive and Contamination-Free Language Model Evaluation](https://aclanthology.org/2025.findings-acl.116/). Findings of ACL 2025; introduces a multi-task evaluation with contamination prevention, protected test data, and renewal controls.
+- Chen et al. 2025. [Benchmarking Large Language Models Under Data Contamination: A Survey from Static to Dynamic Evaluation](https://aclanthology.org/2025.emnlp-main.511/). EMNLP 2025; surveys static and dynamic contamination controls and their limitations.
+- Kim et al. 2025. [Evaluating Language Models as Synthetic Data Generators](https://aclanthology.org/2025.acl-long.320/). ACL 2025; reports that generator quality varies by task and does not necessarily track the generator model's problem-solving ability.
+- Zeng et al. 2026. [Code-Switching Information Retrieval: Benchmarks, Analysis, and the Limits of Current Retrievers](https://aclanthology.org/2026.findings-acl.636/). Findings of ACL 2026; CSR-L uses human annotation to target natural mixed-language queries. It is retrieval research, not direct evidence about Lumi intent classification.
+
 ## Inference, quantization, and deployment documentation
 
 - [llama.cpp official repository and supported backends](https://github.com/ggml-org/llama.cpp). Current cross-platform inference and quantization candidate; support for a future Lumi architecture is not yet established.

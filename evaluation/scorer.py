@@ -17,6 +17,18 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from provenance.validate import (  # noqa: E402
+    ProvenanceError,
+    load_json_document,
+    validate_bundle as validate_provenance_bundle,
+    validate_files as validate_provenance_files,
+)
+
+
 THRESHOLDS_PATH = Path(__file__).with_name("thresholds.json")
 DECISIONS = {"act", "no_action", "clarify", "respond"}
 OUTPUT_KEYS = {"decision", "action", "arguments", "requires_clarification"}
@@ -346,6 +358,9 @@ def _evaluate_prediction(raw_output: str) -> tuple[dict[str, Any] | None, str | 
 def score_records(
     cases: list[dict[str, Any]],
     prediction_records: list[dict[str, Any]],
+    provenance_records: list[dict[str, Any]],
+    source_manifest: dict[str, Any],
+    generation_manifest: dict[str, Any],
     *,
     split: str = "development",
     allow_final_holdout: bool = False,
@@ -353,6 +368,10 @@ def score_records(
     confidence: float = 0.95,
 ) -> dict[str, Any]:
     selected = _select_cases(cases, split, allow_final_holdout)
+    try:
+        validate_provenance_bundle(source_manifest, generation_manifest, provenance_records, selected)
+    except ProvenanceError as exc:
+        raise EvaluationInputError(str(exc)) from exc
     available = {case["case_id"]: case for case in selected}
     predictions: dict[str, dict[str, Any]] = {}
     for index, record in enumerate(prediction_records, start=1):
@@ -496,22 +515,40 @@ def _sha256(path: Path) -> str:
 def score_files(
     cases_path: Path,
     predictions_path: Path,
+    provenance_records_path: Path,
     *,
     split: str,
     allow_final_holdout: bool,
     candidate_version: str | None = None,
+    source_manifest_path: Path = PROJECT_ROOT / "provenance" / "data_sources.json",
+    generation_manifest_path: Path = PROJECT_ROOT / "provenance" / "synthetic_data.json",
 ) -> dict[str, Any]:
     cases = _read_jsonl(cases_path)
     predictions = _read_jsonl(predictions_path)
+    provenance_records = _read_jsonl(provenance_records_path)
+    validate_provenance_files(
+        source_manifest_path,
+        generation_manifest_path,
+        provenance_records_path,
+        cases_path,
+    )
+    source_manifest = load_json_document(source_manifest_path)
+    generation_manifest = load_json_document(generation_manifest_path)
     report = score_records(
         cases,
         predictions,
+        provenance_records,
+        source_manifest,
+        generation_manifest,
         split=split,
         allow_final_holdout=allow_final_holdout,
         candidate_version=candidate_version,
     )
     report["case_manifest_sha256"] = _sha256(cases_path)
     report["prediction_file_sha256"] = _sha256(predictions_path)
+    report["provenance_records_sha256"] = _sha256(provenance_records_path)
+    report["source_manifest_sha256"] = _sha256(source_manifest_path)
+    report["synthetic_manifest_sha256"] = _sha256(generation_manifest_path)
     return report
 
 
@@ -519,6 +556,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", required=True, type=Path, help="JSONL evaluation cases")
     parser.add_argument("--predictions", required=True, type=Path, help="JSONL raw prediction wrappers")
+    parser.add_argument("--provenance-records", required=True, type=Path, help="sample-level provenance JSONL for the evaluation cases")
+    parser.add_argument("--sources", type=Path, default=PROJECT_ROOT / "provenance" / "data_sources.json", help="data-source manifest JSON")
+    parser.add_argument("--generations", type=Path, default=PROJECT_ROOT / "provenance" / "synthetic_data.json", help="synthetic-generation manifest JSON")
     parser.add_argument("--split", choices=sorted(SPLITS), default="development")
     parser.add_argument("--final-audit", action="store_true", help="explicitly authorize scoring the sealed final holdout")
     parser.add_argument("--candidate-version", help="candidate identifier written into the report")
@@ -530,11 +570,14 @@ def main(argv: list[str] | None = None) -> int:
         report = score_files(
             args.cases,
             args.predictions,
+            args.provenance_records,
             split=args.split,
             allow_final_holdout=args.final_audit,
             candidate_version=args.candidate_version,
+            source_manifest_path=args.sources,
+            generation_manifest_path=args.generations,
         )
-    except (OSError, EvaluationInputError, json.JSONDecodeError) as exc:
+    except (OSError, EvaluationInputError, ProvenanceError, json.JSONDecodeError) as exc:
         parser.error(str(exc))
     serialized = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
     if args.output:

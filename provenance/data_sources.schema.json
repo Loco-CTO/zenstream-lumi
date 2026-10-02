@@ -59,12 +59,14 @@
         "permissions": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["commercial_use", "redistribution", "modification", "derivative_works"],
+          "required": ["commercial_use", "redistribution", "modification", "derivative_works", "training_use", "evaluation_use"],
           "properties": {
             "commercial_use": {"$ref": "#/$defs/permission"},
             "redistribution": {"$ref": "#/$defs/permission"},
             "modification": {"$ref": "#/$defs/permission"},
-            "derivative_works": {"$ref": "#/$defs/permission"}
+            "derivative_works": {"$ref": "#/$defs/permission"},
+            "training_use": {"$ref": "#/$defs/permission"},
+            "evaluation_use": {"$ref": "#/$defs/permission"}
           }
         },
         "lumi_uses": {
@@ -108,7 +110,9 @@
                   "commercial_use": {"enum": ["permitted", "prohibited", "conditional", "not_applicable"]},
                   "redistribution": {"enum": ["permitted", "prohibited", "conditional", "not_applicable"]},
                   "modification": {"enum": ["permitted", "prohibited", "conditional", "not_applicable"]},
-                  "derivative_works": {"enum": ["permitted", "prohibited", "conditional", "not_applicable"]}
+                  "derivative_works": {"enum": ["permitted", "prohibited", "conditional", "not_applicable"]},
+                  "training_use": {"enum": ["permitted", "prohibited", "conditional", "not_applicable"]},
+                  "evaluation_use": {"enum": ["permitted", "prohibited", "conditional", "not_applicable"]}
                 }
               }
             }

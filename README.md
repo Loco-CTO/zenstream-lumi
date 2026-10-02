@@ -24,7 +24,7 @@ Architecture, tokenizer, model size, runtime, training corpus, integration proto
 - [Research notes](RESEARCH_NOTES.md): current findings, limitations, open hypotheses, and proposed experiments.
 - [Research references](RESEARCH_REFERENCES.md): sources that influence design; these are not training data.
 - [Data sources](DATA_SOURCES.md): inclusion policy and human-readable provenance summary.
-- [Machine-readable provenance](provenance/data_sources.json): currently empty because no external data has been approved or used.
+- [Machine-readable provenance](provenance/data_sources.json): currently empty because no external data has been approved or used; [the validator](provenance/README.md#provenance-gate) checks source/sample joins and split-safe evaluation hashes.
 - [Synthetic-data provenance](provenance/synthetic_data.json): currently empty because no synthetic data has been generated or used.
 - [Model card](MODEL_CARD.md): pre-release placeholder; no model exists yet.
 - [Third-party notices](THIRD_PARTY_NOTICES.md): current code license and outstanding artifact-license research.

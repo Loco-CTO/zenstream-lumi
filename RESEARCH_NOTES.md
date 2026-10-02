@@ -52,6 +52,14 @@ JSONSchemaBench (2025, [Geng et al.](https://arxiv.org/abs/2501.10868)) evaluate
 
 Two 2026 structured-output studies reinforce that split. [StructureBench](https://www.ijcai.org/proceedings/2026/267) reports that constrained decoding guarantees syntactic validity in its evaluated setup but does not reliably improve semantic accuracy and can reduce it for smaller models or complex grammars. The arXiv preprint [*The Constraint Tax*](https://arxiv.org/abs/2605.26128) reports large validity/correctness trade-offs on pretrained SLMs; its numerical results do not transfer directly to a random-initialized Lumi model, but the measurement design is relevant. This supports retaining raw outputs and scoring structural validity, action correctness, executable correctness, and false valid actions independently. It does not select a Lumi decoding method.
 
+## Benchmark integrity and generated cases
+
+[C²LEVA](https://aclanthology.org/2025.findings-acl.116/) describes a contamination-prevention process with protected test data and systematic data renewal. This motivates immutable per-case content hashes, split-matched provenance records, and a separate sealed-holdout split; Lumi's current validator checks declared hashes and joins but cannot prove that no undisclosed copy exists elsewhere. The EMNLP 2025 [contamination survey](https://aclanthology.org/2025.emnlp-main.511/) describes limits of static and dynamic evaluation designs, so a hash gate is only one control in a broader process.
+
+[AgoraBench](https://aclanthology.org/2025.acl-long.320/) finds that a model's synthetic-data generation ability does not necessarily track its problem-solving ability. Generated Lumi evaluation cases therefore remain untrusted until they receive semantic and rights review; recording a generator, version, prompt-template hash, settings, and downstream use makes the generation reproducible but does not certify the labels. The 2026 [CSR-L code-switching benchmark](https://aclanthology.org/2026.findings-acl.636/) uses human annotation to target authentic mixed-language query naturalness. It studies information retrieval rather than intent parsing, but supports requiring human natural-language review before Japanese or code-switched Lumi cases become scoreable.
+
+**Lumi experiment result:** no benchmark cases, synthetic generations, or model runs exist yet. The provenance validator is tested only with inline software fixtures and does not constitute behavior evidence.
+
 **Hypothesis (untested):** A compact, versioned response schema with constrained decoding and server-side allow-list validation may reduce malformed responses and contain model errors. The schema, decoder, and response format remain open decisions until candidate runtimes are compared.
 
 ## Inference, quantization, and resource behavior

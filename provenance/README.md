@@ -7,3 +7,18 @@ The public repository contains provenance formats and research documentation, no
 Each training run must pin the source manifest, document-record artifact, transformation code/configuration, tokenizer inputs, and split manifests by revision and SHA-256. Keep development and final holdout records outside training, filtering, synthetic generation, and tokenizer input. When rights or privacy terms prohibit exposing an item-level ledger, retain the full ledger in controlled storage and publish its immutable hash plus a safe summary.
 
 No sample-level records exist yet because no data has been approved or processed.
+
+## Provenance gate
+
+Run the standard-library validation gate before building a dataset or scoring an evaluation set:
+
+```powershell
+python provenance/validate.py --records <document-records.jsonl>
+python provenance/validate.py --records <document-records.jsonl> --cases <evaluation-cases.jsonl>
+```
+
+The gate checks unique record IDs, source and generation references, source revisions, intended-use declarations, sample-level rights and review status, synthetic prompt/model provenance, split consistency, parent lineage, and evaluation case hashes. An approved evaluation item requires `evaluation_use: permitted` in both its source record and its item-level rights record. Training inputs separately require `training_use: permitted`. Conditional or unknown permission is not enough for the automated gate to pass an approved record.
+
+Evaluation records map `development` cases to the `development` provenance split and `final_holdout` cases to `sealed_holdout`. Each case record's sample hash is SHA-256 over canonical UTF-8 JSON containing its schema version, case and family IDs, split, language, categories, conversation turns, gold semantic output, and optional context ID. Review annotations and provenance metadata are excluded from that hash. Editing any evaluation content therefore requires updating its sample-level provenance hash.
+
+The gate verifies declared metadata and joins; it does not determine whether a license interpretation is legally correct, validate that an arbitrary training artifact's bytes match its declared hash, or replace native-language and subject-matter review. Keep the actual data-build artifacts and source evidence in controlled storage, and preserve their hashes with each run.

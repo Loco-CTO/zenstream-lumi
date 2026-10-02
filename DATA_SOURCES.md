@@ -6,9 +6,9 @@
 
 Do not use an external dataset, benchmark, corpus, tokenizer-training corpus, metadata set, filtering set, or other content until its origin, exact version, license, attribution, and permitted uses have been reviewed and recorded. Public accessibility alone is not evidence of permission. Exclude sources whose provenance or license cannot be determined with reasonable confidence.
 
-For each source, record its canonical URL/identifier, authors or organization, version/revision, release and access dates, license and license text URL, copyright/attribution terms, commercial/redistribution/modification/derivative permissions, Lumi uses, transformations, filters, deduplication, approximate documents/examples and token contribution, and direct/indirect inclusion. Preserve a checksum for the exact acquired source or derived shard when practical.
+For each source, record its canonical URL/identifier, authors or organization, version/revision, release and access dates, license and license text URL, copyright/attribution terms, commercial/redistribution/modification/derivative permissions, and separate `training_use` and `evaluation_use` permissions. Also record Lumi uses, transformations, filters, deduplication, approximate documents/examples and token contribution, and direct/indirect inclusion. Preserve a checksum for the exact acquired source or derived shard when practical.
 
-Separate and label each source's use as pretraining, instruction training, ZenStream-specific training, tokenizer training, evaluation, filtering, synthetic generation, or another declared purpose. Every production training run must point to a frozen manifest revision and the processing pipeline revisions used to produce its exact inputs.
+Separate and label each source's use as pretraining, instruction training, ZenStream-specific training, tokenizer training, evaluation, filtering, synthetic generation, or another declared purpose. Run `provenance/validate.py` before scoring or assembling an approved dataset; it rejects unresolved source/generator IDs, split mismatches, unapproved use permissions, and changed evaluation-case content hashes. Every production training run must also point to a frozen manifest revision and the processing pipeline revisions used to produce its exact inputs.
 
 ## Synthetic data
 

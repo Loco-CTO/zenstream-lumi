@@ -28,7 +28,8 @@
       "additionalProperties": false,
       "required": [
         "generation_id", "provider", "model_name", "model_version",
-        "generation_date", "purpose", "prompt_family", "settings",
+        "generation_date", "purpose", "prompt_family", "prompt_template_id",
+        "prompt_template_sha256", "settings",
         "example_count", "filtered", "filter_details", "deduplicated",
         "deduplication_details", "automatically_validated",
         "automatic_validation_details", "manually_reviewed",
@@ -43,6 +44,8 @@
         "generation_date": {"type": "string", "format": "date"},
         "purpose": {"type": "string", "minLength": 1},
         "prompt_family": {"type": "string", "minLength": 1},
+        "prompt_template_id": {"type": "string", "minLength": 1},
+        "prompt_template_sha256": {"type": "string", "pattern": "^sha256:[A-Fa-f0-9]{64}$"},
         "settings": {"type": "object"},
         "example_count": {"type": "integer", "minimum": 0},
         "filtered": {"type": "boolean"},
@@ -57,7 +60,7 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": {"enum": ["pretraining", "instruction_training", "zenstream_specific_training", "evaluation", "filtering", "other"]}
+          "items": {"enum": ["tokenizer_training", "pretraining", "instruction_training", "zenstream_specific_training", "evaluation", "filtering", "generation", "other"]}
         },
         "provider_terms_url": {"type": "string", "format": "uri"},
         "output_checksum": {"type": ["string", "null"], "pattern": "^sha256:[A-Fa-f0-9]{64}$"},

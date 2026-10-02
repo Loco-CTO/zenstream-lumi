@@ -1,6 +1,7 @@
 import unittest
 
-from evaluation.scorer import EvaluationInputError, _one_sided_error_upper, score_records
+from evaluation.scorer import EvaluationInputError, _one_sided_error_upper, score_records as _score_records
+from test_provenance_validator import make_generation_manifest, make_record, make_source_manifest
 
 
 def make_case(case_id, *, split="development", language="en", categories=None, gold=None, family_id=None, review=None):
@@ -35,7 +36,34 @@ def make_prediction(case_id, output, grounding_review=None):
     return record
 
 
+def score_records(cases, predictions, **kwargs):
+    provenance = [make_record(case) for case in cases]
+    return _score_records(
+        cases,
+        predictions,
+        provenance,
+        make_source_manifest(),
+        make_generation_manifest(),
+        **kwargs,
+    )
+
+
 class EvaluationScorerTests(unittest.TestCase):
+    def test_direct_scoring_enforces_source_manifest_permissions(self):
+        case = make_case("unpermitted-source")
+        provenance = make_record(case)
+        sources = make_source_manifest()
+        sources["sources"][0]["permissions"]["evaluation_use"] = "conditional"
+
+        with self.assertRaisesRegex(EvaluationInputError, "source manifest does not permit evaluation"):
+            _score_records(
+                [case],
+                [make_prediction(case["case_id"], "{}")],
+                [provenance],
+                sources,
+                make_generation_manifest(),
+            )
+
     def test_reports_semantics_and_false_actions_separately_from_validity(self):
         cases = [
             make_case("positive", gold={
