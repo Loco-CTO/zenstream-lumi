@@ -343,11 +343,22 @@ def _event_rate(events: int, total: int, confidence: float = 0.95) -> dict[str, 
     }
 
 
-def _select_cases(cases: list[dict[str, Any]], split: str, allow_final_holdout: bool) -> list[dict[str, Any]]:
+def select_evaluation_cases(
+    cases: list[dict[str, Any]],
+    split: str = "development",
+    allow_final_holdout: bool = False,
+) -> list[dict[str, Any]]:
+    """Validate case structure/readiness and select one authorized split.
+
+    This does not validate sample provenance; callers that expose cases to a
+    candidate must validate the provenance bundle separately.
+    """
     if split not in SPLITS:
         raise EvaluationInputError("split must be development or final_holdout")
     if split == "final_holdout" and not allow_final_holdout:
-        raise EvaluationInputError("final holdout scoring requires the explicit --final-audit flag")
+        raise EvaluationInputError(
+            "final holdout requires explicit --final-audit authorization or allow_final_holdout=True"
+        )
     case_ids: set[str] = set()
     family_splits: dict[str, str] = {}
     for index, case in enumerate(cases, start=1):
@@ -393,7 +404,7 @@ def score_records(
     candidate_version: str | None = None,
     confidence: float = 0.95,
 ) -> dict[str, Any]:
-    selected = _select_cases(cases, split, allow_final_holdout)
+    selected = select_evaluation_cases(cases, split, allow_final_holdout)
     try:
         validate_provenance_bundle(source_manifest, generation_manifest, provenance_records, selected)
     except ProvenanceError as exc:
