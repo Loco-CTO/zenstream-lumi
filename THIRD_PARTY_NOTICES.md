@@ -1,5 +1,5 @@
 # Third-party notices
 
-No third-party software dependencies, datasets, model weights, checkpoints, or generated data have been added to this repository. Research references are listed separately in [RESEARCH_REFERENCES.md](RESEARCH_REFERENCES.md) and are not incorporated training content.
+The local-only exploratory runner pins NumPy 2.3.5 in [experiments/requirements-exploratory.txt](experiments/requirements-exploratory.txt). NumPy's project license is BSD-3-Clause; use its [version-pinned license text](https://github.com/numpy/numpy/blob/v2.3.5/LICENSE.txt). This is a research dependency, not a Lumi production runtime dependency. No third-party datasets, model weights, checkpoints, or generated data have been added to this repository. Research references are listed separately in [RESEARCH_REFERENCES.md](RESEARCH_REFERENCES.md) and are not incorporated training content.
 
 The repository currently contains a `LICENSE` file with the GNU Affero General Public License version 3 text. That describes the repository's present code-license file; it does not settle the license for future model weights, datasets, tokenizer artifacts, generated data, or other training outputs. Their licenses and third-party obligations remain open research items and must be documented before distribution.
