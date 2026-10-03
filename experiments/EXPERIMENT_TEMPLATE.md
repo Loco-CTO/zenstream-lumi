@@ -5,13 +5,16 @@
 - Hypothesis:
 - Research basis and citations:
 - What changed relative to control:
+- Comparison view: compute-matched | source-exposure-matched | parameter-matched | other
+- Preregistered compute ceiling and profiled training FLOPs:
 - Random seed(s):
+- Initialization source (must be random; record seed and implementation):
 - Model architecture / parameter count:
 - Tokenizer and vocabulary:
 - Training data manifest revision/hash:
-- Training mixture and token count:
+- Training mixture, source bytes/documents, input/target tokens, padding, and token count:
 - Training configuration and code revision:
-- Compute ceiling, hardware, runtime versions, wall time, and cost:
+- Hardware identifiers, runtime/dependency versions, wall time, utilization, and cost:
 - Evaluation/scorer revision:
 - Holdout accessed? (must be no during tuning):
 

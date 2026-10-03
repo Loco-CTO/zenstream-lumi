@@ -25,6 +25,7 @@ Architecture, tokenizer, model size, runtime, training corpus, integration proto
 - [Research notes](RESEARCH_NOTES.md): current findings, limitations, open hypotheses, and proposed experiments.
 - [Research references](RESEARCH_REFERENCES.md): sources that influence design; these are not training data.
 - [Tokenizer pilot protocol](experiments/TOKENIZER_PILOT.md): a controlled EN/JA/code-switch tokenizer comparison, gated on approved text and reviewed development cases.
+- [Model formulation and architecture pilot](experiments/ARCHITECTURE_PILOT.md): a staged, compute-matched comparison of conditional-generation formulations and short-context sequence architectures, gated on rights, review, tokenizer, and hardware evidence.
 - [Data sources](DATA_SOURCES.md): inclusion policy and human-readable provenance summary.
 - [Machine-readable provenance](provenance/data_sources.json): currently empty because no external data has been approved or used; [the validator](provenance/README.md#provenance-gate) checks source/sample joins and split-safe evaluation hashes.
 - [Synthetic-data provenance](provenance/synthetic_data.json): currently empty because no synthetic data has been generated or used.
