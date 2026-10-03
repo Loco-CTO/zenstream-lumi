@@ -15,7 +15,7 @@ Do not make development-quality tokenizer comparisons until all of these are tru
 1. Every tokenizer-training item has pinned source identity, revision, content hash, and documented permission for tokenizer training. The source records and processing manifest pass `provenance/validate.py`.
 2. Tokenizer-training material is drawn only from an approved training split. No development, public-test, or sealed-holdout text, labels, reviewer notes, or answer-bearing material is used to fit or filter the vocabulary.
 3. The evaluation development inventory contains ready, independently reviewed English, Japanese, and both directions of English/Japanese code-switch cases, with Japanese language review complete. Any available final holdout stays separate and sealed, but completing it is not a level-2 entry gate.
-4. The unapproved Codex-generated 101-case draft inventory is excluded from tokenizer fitting and all tokenizer comparisons until its separate terms gate is resolved.
+4. The Codex-generated 101-case draft inventory is excluded from tokenizer fitting and all tokenizer comparisons by owner direction. Its exact serving model/build is unknown; do not use these drafts or derivatives.
 
 If any level-2 gate is missing, report the corpus-dependent comparison as blocked and make no tokenizer-quality claim. The missing final holdout and final distribution terms do not by themselves block a scoped level-1 probe.
 

@@ -1,6 +1,6 @@
 # Research references
 
-**Last reviewed:** 2026-10-03. These sources inform design research only. None of the linked datasets, models, checkpoints, weights, or corpus text has been used to train Lumi.
+**Last reviewed:** 2026-10-03. These sources inform design research; linked pretrained models, checkpoints, and weights have not been used to train Lumi. The separately licensed MASSIVE source has one tightly scoped, provenance-gated local intent/slot pilot; see the source audit and pilot report.
 
 ## Scaling, data, and scratch-trained small models
 
@@ -25,7 +25,7 @@
 
 ## Data provenance and candidate corpora
 
-- FitzGerald et al. 2023. [MASSIVE: A 1M-Example Multilingual Natural Language Understanding Dataset with 51 Typologically-Diverse Languages](https://aclanthology.org/2023.acl-long.235/). Reports professional localization of English SLURP assistant utterances to 50 languages and three per-item quality judgments; the 1.1 release adds Catalan. Relevant as a possible public EN/JA development diagnostic, not spontaneous Japanese, a ZenStream-specific gold set, or a sealed holdout. See the [pinned source audit](experiments/MASSIVE_AUDIT.md); no MASSIVE content is approved for use.
+- FitzGerald et al. 2023. [MASSIVE: A 1M-Example Multilingual Natural Language Understanding Dataset with 51 Typologically-Diverse Languages](https://aclanthology.org/2023.acl-long.235/). Reports professional localization of English SLURP assistant utterances to 50 languages and three per-item quality judgments; the 1.1 release adds Catalan. The bounded [local EN/JA intent/slot pilot](experiments/MASSIVE_INTENT_SLOT_PILOT.md) is diagnostic only; MASSIVE is not spontaneous Japanese, a ZenStream-specific gold set, or a sealed holdout. See the [pinned source audit](experiments/MASSIVE_AUDIT.md).
 - [Common Pile v0.1 project](https://www.commonpile.org/); Kandpal et al. 2025, [paper](https://papers.neurips.cc/paper_files/paper/2025/file/52acc050138d6f40dad6f12f91a4ce22-Paper-Datasets_and_Benchmarks_Track.pdf); and [curator notes on its open-license policy](https://huggingface.co/blog/stellaathena/common-pile). A substantial public-domain/openly licensed candidate with source-level curation, while its own materials document the difficulty of automated rights signals and public-domain proof. Audit constituent sources; do not treat the aggregate release as Lumi approval.
 - Palen-Michel et al. 2022. [Multilingual Open Text Release 1](https://aclanthology.org/2022.lrec-1.224/). VOA news corpus reporting public-domain source material and CC BY 4.0 for the collection; includes English but not Japanese.
 - [Business Scene Dialogue (BSD) author repository](https://github.com/tsuruoka-lab/BSD) and Rikters et al., [Document-aligned Japanese-English Conversation Parallel Corpus](https://aclanthology.org/2020.wmt-1.74/). The BSD README describes monolingual scenarios translated into the other language and declares CC BY-NC-SA; parallel translation is not natural within-message code-switching. No BSD text is admitted; see the [targeted audit](experiments/NATURAL_CODE_SWITCH_AUDIT.md).
