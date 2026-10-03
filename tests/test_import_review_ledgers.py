@@ -189,14 +189,18 @@ class ImportReviewLedgersTests(unittest.TestCase):
                     **provenance_arguments(root, make_case(language="en")),
                 )
 
-    def test_rejects_output_inside_a_sibling_lumi_worktree(self):
+    def test_rejects_output_inside_a_git_worktree(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             cases_path = root / "cases.jsonl"
             write_jsonl(cases_path, [make_case(language="en")])
             ledger = root / "empty.jsonl"
             ledger.write_text("", encoding="utf-8")
-            sibling_checkout = Path(__file__).resolve().parents[4] / "zenstream-lumi"
+            sibling_checkout = root / "sibling-lumi-worktree"
+            sibling_checkout.mkdir()
+            (sibling_checkout / ".git").write_text(
+                "gitdir: ../.git/worktrees/sibling", encoding="utf-8"
+            )
             with self.assertRaisesRegex(LedgerImportError, "outside the Git repository"):
                 import_ledgers(
                     cases_path,
