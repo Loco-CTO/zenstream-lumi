@@ -22,6 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from provenance.validate import (  # noqa: E402
+    AUTHOR_CONSENTS_DEFAULT,
     ProvenanceError,
     load_json_document,
     validate_bundle as validate_provenance_bundle,
@@ -817,6 +818,7 @@ def score_records(
     candidate_version: str | None = None,
     confidence: float = 0.95,
     capability_registry: dict[str, Any] | None = None,
+    author_consent_manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     selected = select_evaluation_cases(
         cases,
@@ -825,7 +827,13 @@ def score_records(
         allow_final_holdout=allow_final_holdout,
     )
     try:
-        validate_provenance_bundle(source_manifest, generation_manifest, provenance_records, selected)
+        validate_provenance_bundle(
+            source_manifest,
+            generation_manifest,
+            provenance_records,
+            selected,
+            author_consent_manifest,
+        )
     except ProvenanceError as exc:
         raise EvaluationInputError(str(exc)) from exc
     registry, registry_digest = _load_capability_registry(capability_registry)
@@ -1118,6 +1126,7 @@ def score_files(
     candidate_version: str | None = None,
     source_manifest_path: Path = PROJECT_ROOT / "provenance" / "data_sources.json",
     generation_manifest_path: Path = PROJECT_ROOT / "provenance" / "synthetic_data.json",
+    author_consents_path: Path = AUTHOR_CONSENTS_DEFAULT,
     capability_registry_path: Path = CAPABILITY_REGISTRY_PATH,
 ) -> dict[str, Any]:
     cases = _read_jsonl(cases_path)
@@ -1129,9 +1138,11 @@ def score_files(
         generation_manifest_path,
         provenance_records_path,
         cases_path,
+        author_consents_path,
     )
     source_manifest = load_json_document(source_manifest_path)
     generation_manifest = load_json_document(generation_manifest_path)
+    author_consent_manifest = load_json_document(author_consents_path)
     try:
         capability_registry = json.loads(capability_registry_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -1147,6 +1158,7 @@ def score_files(
         allow_final_holdout=allow_final_holdout,
         candidate_version=candidate_version,
         capability_registry=capability_registry,
+        author_consent_manifest=author_consent_manifest,
     )
     report["case_manifest_sha256"] = _sha256(cases_path)
     report["prediction_file_sha256"] = _sha256(predictions_path)
@@ -1154,6 +1166,7 @@ def score_files(
     report["review_records_sha256"] = _sha256(review_records_path)
     report["source_manifest_sha256"] = _sha256(source_manifest_path)
     report["synthetic_manifest_sha256"] = _sha256(generation_manifest_path)
+    report["author_consent_manifest_sha256"] = _sha256(author_consents_path)
     report["capability_registry"]["sha256"] = _sha256(capability_registry_path)
     return report
 
@@ -1166,6 +1179,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--review-records", required=True, type=Path, help="single-split independent review ledger JSONL")
     parser.add_argument("--sources", type=Path, default=PROJECT_ROOT / "provenance" / "data_sources.json", help="data-source manifest JSON")
     parser.add_argument("--generations", type=Path, default=PROJECT_ROOT / "provenance" / "synthetic_data.json", help="synthetic-generation manifest JSON")
+    parser.add_argument("--author-consents", type=Path, default=AUTHOR_CONSENTS_DEFAULT, help="metadata-only author-consent manifest JSON")
     parser.add_argument("--capabilities", type=Path, default=CAPABILITY_REGISTRY_PATH, help="versioned capability registry JSON")
     parser.add_argument("--split", choices=sorted(SPLITS), default="development")
     parser.add_argument("--final-audit", action="store_true", help="explicitly authorize scoring the sealed final holdout")
@@ -1183,6 +1197,7 @@ def main(argv: list[str] | None = None) -> int:
             args.review_records.resolve(),
             args.sources.resolve(),
             args.generations.resolve(),
+            args.author_consents.resolve(),
             args.capabilities.resolve(),
         }
         if output_path in protected_paths:
@@ -1198,6 +1213,7 @@ def main(argv: list[str] | None = None) -> int:
             candidate_version=args.candidate_version,
             source_manifest_path=args.sources,
             generation_manifest_path=args.generations,
+            author_consents_path=args.author_consents,
             capability_registry_path=args.capabilities,
         )
     except (

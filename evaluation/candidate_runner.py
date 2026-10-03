@@ -105,6 +105,7 @@ def run_candidate_cases(
     generation_manifest: dict[str, Any],
     *,
     review_records: list[dict[str, Any]],
+    author_consent_manifest: dict[str, Any] | None = None,
     split: str = "development",
     allow_final_holdout: bool = False,
 ) -> list[dict[str, Any]]:
@@ -123,7 +124,13 @@ def run_candidate_cases(
         allow_final_holdout=allow_final_holdout,
     )
     try:
-        validate_bundle(source_manifest, generation_manifest, provenance_records, selected)
+        validate_bundle(
+            source_manifest,
+            generation_manifest,
+            provenance_records,
+            selected,
+            author_consent_manifest,
+        )
     except ProvenanceError as exc:
         raise EvaluationInputError(str(exc)) from exc
 
