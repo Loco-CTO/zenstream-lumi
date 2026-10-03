@@ -6,6 +6,11 @@ from pathlib import Path
 from evaluation.import_review_ledgers import LedgerImportError, import_ledgers
 from evaluation.review_records import read_review_records, validate_case_review_records
 from evaluation.review_workbench import ReviewManager
+from test_provenance_validator import (
+    make_generation_manifest,
+    make_record,
+    make_source_manifest,
+)
 
 
 def make_case(*, language="ja", split="development"):
@@ -41,6 +46,23 @@ def write_jsonl(path, records):
         "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
         encoding="utf-8",
     )
+
+
+def provenance_arguments(root, case, *, approved=True):
+    sources_path = root / "sources.json"
+    generations_path = root / "generations.json"
+    records_path = root / "sample-records.jsonl"
+    sources_path.write_text(json.dumps(make_source_manifest()), encoding="utf-8")
+    generations_path.write_text(json.dumps(make_generation_manifest()), encoding="utf-8")
+    record = make_record(case)
+    if not approved:
+        record["decision"] = "review_pending"
+    write_jsonl(records_path, [record])
+    return {
+        "provenance_records_path": records_path,
+        "source_manifest_path": sources_path,
+        "generation_manifest_path": generations_path,
+    }
 
 
 def create_reviewer_ledger(case, path, reviewer_id, role):
@@ -84,7 +106,13 @@ class ImportReviewLedgersTests(unittest.TestCase):
 
             output_cases = root / "combined-cases.jsonl"
             output_ledger = root / "combined-reviews.jsonl"
-            summary = import_ledgers(cases_path, ledgers, output_cases, output_ledger)
+            summary = import_ledgers(
+                cases_path,
+                ledgers,
+                output_cases,
+                output_ledger,
+                **provenance_arguments(root, case),
+            )
 
             merged_case = json.loads(output_cases.read_text(encoding="utf-8"))
             merged_records = read_review_records(output_ledger)
@@ -120,6 +148,7 @@ class ImportReviewLedgersTests(unittest.TestCase):
                     [semantic, language],
                     root / "combined-cases.jsonl",
                     root / "combined-reviews.jsonl",
+                    **provenance_arguments(root, case),
                 )
 
     def test_refuses_holdout_cases_and_preserves_existing_outputs(self):
@@ -134,7 +163,13 @@ class ImportReviewLedgersTests(unittest.TestCase):
             output_cases.write_text("keep me", encoding="utf-8")
 
             with self.assertRaises(LedgerImportError):
-                import_ledgers(cases_path, [ledger], output_cases, output_ledger)
+                import_ledgers(
+                    cases_path,
+                    [ledger],
+                    output_cases,
+                    output_ledger,
+                    **provenance_arguments(root, make_case(split="final_holdout")),
+                )
             self.assertEqual(output_cases.read_text(encoding="utf-8"), "keep me")
             self.assertFalse(output_ledger.exists())
 
@@ -151,6 +186,7 @@ class ImportReviewLedgersTests(unittest.TestCase):
                     [ledger],
                     Path(__file__).resolve().parents[1] / "unsafe-output.jsonl",
                     root / "combined-reviews.jsonl",
+                    **provenance_arguments(root, make_case(language="en")),
                 )
 
     def test_rejects_output_inside_a_sibling_lumi_worktree(self):
@@ -167,7 +203,31 @@ class ImportReviewLedgersTests(unittest.TestCase):
                     [ledger],
                     sibling_checkout / "unsafe-output.jsonl",
                     root / "combined-reviews.jsonl",
+                    **provenance_arguments(root, make_case(language="en")),
                 )
+
+    def test_pending_rights_block_review_ledger_import_without_writing_outputs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            case = make_case()
+            cases_path = root / "cases.jsonl"
+            write_jsonl(cases_path, [case])
+            ledger = root / "reviewer.jsonl"
+            create_reviewer_ledger(case, ledger, "rev-semantic-01", "semantic")
+            output_cases = root / "combined-cases.jsonl"
+            output_ledger = root / "combined-reviews.jsonl"
+
+            with self.assertRaisesRegex(LedgerImportError, "provenance is not approved"):
+                import_ledgers(
+                    cases_path,
+                    [ledger],
+                    output_cases,
+                    output_ledger,
+                    **provenance_arguments(root, case, approved=False),
+                )
+
+            self.assertFalse(output_cases.exists())
+            self.assertFalse(output_ledger.exists())
 
 
 if __name__ == "__main__":

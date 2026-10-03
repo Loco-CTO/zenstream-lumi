@@ -11,6 +11,12 @@ from evaluation.review_workbench import (
     WorkbenchError,
     _safe_output_path,
     _read_cases,
+    _load_review_inventory,
+)
+from test_provenance_validator import (
+    make_generation_manifest,
+    make_record,
+    make_source_manifest,
 )
 
 
@@ -43,6 +49,23 @@ def make_case(*, language="en", split="development", tool_scenario=None):
             "review_record_ids": [],
         },
     }
+
+
+def write_provenance_bundle(root, case, *, approved=True, source_approved=True):
+    sources_path = root / "sources.json"
+    generations_path = root / "generations.json"
+    records_path = root / "sample-records.jsonl"
+    source_manifest = make_source_manifest()
+    if not source_approved:
+        source_manifest["status"] = "reviewing"
+        source_manifest["sources"][0]["decision"] = "review_pending"
+    sources_path.write_text(json.dumps(source_manifest), encoding="utf-8")
+    generations_path.write_text(json.dumps(make_generation_manifest()), encoding="utf-8")
+    record = make_record(case)
+    if not approved:
+        record["decision"] = "review_pending"
+    records_path.write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+    return records_path, sources_path, generations_path
 
 
 class ReviewWorkbenchTests(unittest.TestCase):
@@ -124,6 +147,31 @@ class ReviewWorkbenchTests(unittest.TestCase):
             path.write_text(json.dumps(make_case(tool_scenario=scenario)), encoding="utf-8")
             with self.assertRaisesRegex(WorkbenchError, "tool scenarios are not supported"):
                 _read_cases(path)
+
+    def test_review_inventory_requires_approved_sample_provenance_before_review(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            case = make_case()
+            cases_path = root / "cases.jsonl"
+            cases_path.write_text(json.dumps(case, ensure_ascii=False) + "\n", encoding="utf-8")
+            records_path, sources_path, generations_path = write_provenance_bundle(
+                root, case, approved=False
+            )
+
+            with self.assertRaisesRegex(WorkbenchError, "provenance is not approved"):
+                _load_review_inventory(cases_path, records_path, sources_path, generations_path)
+
+            records_path, sources_path, generations_path = write_provenance_bundle(root, case)
+            cases = _load_review_inventory(
+                cases_path, records_path, sources_path, generations_path
+            )
+            self.assertEqual([item["case_id"] for item in cases], [case["case_id"]])
+
+            records_path, sources_path, generations_path = write_provenance_bundle(
+                root, case, source_approved=False
+            )
+            with self.assertRaisesRegex(WorkbenchError, "source 'synthetic-source' is not approved"):
+                _load_review_inventory(cases_path, records_path, sources_path, generations_path)
 
     def test_review_ledger_path_must_not_be_inside_a_sibling_lumi_worktree(self):
         with tempfile.TemporaryDirectory() as temp_dir:
