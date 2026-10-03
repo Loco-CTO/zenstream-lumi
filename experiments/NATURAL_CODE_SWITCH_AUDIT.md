@@ -1,0 +1,34 @@
+# Natural Japanese-English code-switch text source audit
+
+**Reviewed:** 2026-10-03
+**Decision:** No source reviewed here is admitted for training, tokenizer fitting, development evaluation, or holdout use. BSD is parallel translation data under CC BY-NC-SA, not naturally mixed-language messages. Goh and Wu document real Japanese-English messaging but describe a small, private interpersonal sample without a separate public corpus-use grant. No dataset content was downloaded, copied, or added to Lumi records.
+
+## Scope
+
+Lumi needs English/Japanese switching in ordinary written conversation, including mixed-script spelling and context-sensitive media requests. This audit distinguishes a speaker switching languages inside written messages from bilingual conversations whose speakers use separate languages, and from parallel translations of monolingual utterances. Those data types can support different experiments and must not be presented as interchangeable.
+
+The review covered the BSD author repository and its linked paper, the SpeechBSD dataset card, and the publisher's article page for Goh and Wu. It did not inspect corpus files, contact authors, or request access. The previously reviewed JECS and CSR-L leads are summarized in the [candidate inventory](../DATASET_CANDIDATES.md) and [research references](../RESEARCH_REFERENCES.md); neither has been admitted.
+
+## Findings
+
+| Source | Evidence and relevance | Decision |
+|---|---|---|
+| [Business Scene Dialogue corpus (BSD)](https://github.com/tsuruoka-lab/BSD), [ACL Anthology paper record](https://aclanthology.org/2020.wmt-1.74/) | The author README says scenarios were written in one language and translated into the other, with balanced original languages. It reports 670 training scenarios / 20,000 sentence pairs, 69 development scenarios / 2,051 pairs, and 69 evaluation scenarios / 2,120 pairs. Each pair has an English sentence and a Japanese sentence. This is useful parallel business-dialogue material, but does not establish within-message Japanese-English switching. The README declares CC BY-NC-SA; non-commercial and ShareAlike terms need analysis against Lumi's still-undecided distribution before any use. | Not admitted. It does not fill the natural code-switch gap, and its current license terms are not cleared for Lumi's intended use or weights.
+| [SpeechBSD](https://huggingface.co/datasets/ku-nlp/speech-bsd-hf) | The Kyoto University lab dataset card describes an audio extension of BSD for dialogue translation between different-language speakers. Its instances carry one language's utterance and audio at a time; this is not a corpus of individual bilingual speakers naturally switching within text messages. The card declares CC BY-NC-SA 4.0 and gates file access on agreeing to share contact information. The audio modality is outside Lumi's current language-model data need. | Not admitted or accessed. The bilingual conversation framing does not make it a natural code-switch text source, and access / license / audio are unnecessary for this gap.
+| Goh and Wu (2024), [“Code-switching in computer-mediated communication by Gen Z Japanese Americans”](https://doi.org/10.1515/lingvan-2024-0031) | The publisher's article describes 1,561 original messages from two iMessage chats among three young adult Japanese-English bilingual women, ages 21–22 at collection; one participant is a co-author. The authors report consent from all three for message export and describe removing or anonymizing identifying details; the analyzed set has 1,198 messages. The study reports within-message and between-message switching, romanized Japanese, and mixed writing systems. This is a useful linguistic lead for reviewer guidance, not a representative or task-matched ZenStream set. The article page does not provide a separate public machine-readable corpus or a corpus-use grant for model training, evaluation, or artifact distribution. The article's publication license must not be treated as a license for its underlying private messages.
+| No admitted corpus | The sources reviewed provide either designed/read mixed utterances, translated parallel text, a narrow retrieval-query variant with unresolved added-data terms, or private messages without a public corpus grant. They do not supply a cleared, representative, ZenStream-intent code-switch corpus. This is a conclusion about the sources reviewed, not proof that no other dataset exists. | Keep the gap open. Do not infer training, tokenizer, evaluation, or distribution permission from article access, participant consent for research, repository visibility, or an adjacent project's license.
+
+## Data and evaluation gates
+
+Before any source text is admitted, record its exact revision and item lineage; the rights of the underlying messages and annotations; participant consent and privacy constraints; and permission for the specific use (training, tokenizer fitting, development evaluation, or holdout). Resolve the intended private or public weight distribution against those terms before training. Keep public material out of a sealed holdout, and split any participant-authored conversation data by conversation and contributor rather than randomly by message.
+
+The evaluation plan requires two independent semantic judgments and a separate qualified Japanese/bilingual review. Reviewer availability does not create annotation records: the controlled inventory still requires real independent judgments before any draft case can become ready. Reviewers must not receive source text whose access or redistribution terms are unresolved. No author or participant has been contacted for access or additional permission.
+
+The practical route for task-matched examples is a separately governed collection of original contributor-authored fictional media-request dialogues. Before collection, use the existing [contributor intake checklist](../provenance/AUTHOR_CONTRIBUTION_CHECKLIST.md) to capture scope, rights, privacy, withdrawal, and provenance. Keep semantic review independent, complete Japanese review separately, and preserve a speaker/conversation-grouped sealed holdout. These are prerequisites and recommendations; no new examples have been collected or generated by this audit.
+
+## Sources
+
+- [BSD author repository](https://github.com/tsuruoka-lab/BSD), README and license, reviewed 2026-10-03.
+- Rikters et al., [Document-aligned Japanese-English Conversation Parallel Corpus](https://aclanthology.org/2020.wmt-1.74/), ACL Anthology, reviewed 2026-10-03.
+- [SpeechBSD dataset card](https://huggingface.co/datasets/ku-nlp/speech-bsd-hf), reviewed 2026-10-03.
+- Goh and Wu, [Code-switching in computer-mediated communication by Gen Z Japanese Americans](https://doi.org/10.1515/lingvan-2024-0031), *Linguistics Vanguard* 10(1), 2024, reviewed 2026-10-03.
