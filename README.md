@@ -20,6 +20,7 @@ Architecture, tokenizer, model size, runtime, training corpus, integration proto
 ## Project records
 
 - [Evaluation plan](EVALUATION_PLAN.md): target thresholds, error categories, measurement, and holdout rules.
+- [Evaluation sample-size plan](evaluation/SAMPLE_SIZE_PLAN.md): statistical floors for estimating the current target thresholds, with the assumptions and annotation cost made explicit.
 - [Evaluation tools](evaluation/README.md): canonical case/output/prediction formats, a hash-bound independent-review ledger, a blind loopback review workbench and draft-only ledger importer, a candidate-input projection, provenance/review-gated runner, coverage audit, and standard-library scorer; the controlled draft inventory has no human review records or ready cases yet.
 - [Annotation guide](evaluation/ANNOTATION_GUIDE.md): draft labeling, response contracts and presentation intent, the controlled review ledger, Japanese/code-switch review, split grouping, and v4 coverage limits.
 - [Research notes](RESEARCH_NOTES.md): current findings, limitations, open hypotheses, and proposed experiments.
