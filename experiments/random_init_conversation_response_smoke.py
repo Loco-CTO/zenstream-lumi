@@ -42,6 +42,8 @@ PARAMETER_NAMES = (
     "output_weight",
     "output_bias",
 )
+RESPONSE_SMOKE_DATA_SHA256 = "sha256:974d45ea0a2b650a5246fbbaeea5f2d4edf0c1db933a511041456218517acaaa"
+RESPONSE_SMOKE_MANIFEST_SHA256 = "sha256:85b274a7a62a7d05b4ac5391dd4d949f446da25789fba5e1b666f2f8fb5e0ae3"
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -56,6 +58,15 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return "sha256:" + digest.hexdigest()
+
+
+def _require_frozen_hash(path: Path, expected: str, description: str) -> str:
+    digest = _sha256(path)
+    if digest != expected:
+        raise ValueError(
+            f"{description} does not match the frozen conversation-response smoke artifact"
+        )
+    return digest
 
 
 def _parameter_state_sha256(parameters: dict[str, np.ndarray]) -> str:
@@ -90,6 +101,12 @@ def read_dataset(path: Path, manifest_path: Path) -> tuple[list[dict[str, Any]],
         raise ValueError("controlled examples and their manifest must remain outside every Git worktree")
     if data_path == manifest_file:
         raise ValueError("the examples and source manifest must be separate files")
+    _require_frozen_hash(
+        manifest_file, RESPONSE_SMOKE_MANIFEST_SHA256, "source manifest"
+    )
+    data_sha256 = _require_frozen_hash(
+        data_path, RESPONSE_SMOKE_DATA_SHA256, "examples file"
+    )
 
     try:
         manifest = json.loads(
@@ -109,7 +126,7 @@ def read_dataset(path: Path, manifest_path: Path) -> tuple[list[dict[str, Any]],
         raise ValueError("source manifest does not declare the scoped exploratory use")
     if manifest.get("release_or_distribution_approval") is not False:
         raise ValueError("this smoke must not treat the local source as approved for distribution")
-    if manifest.get("data_sha256") != _sha256(data_path):
+    if manifest.get("data_sha256") != data_sha256:
         raise ValueError("source manifest data_sha256 does not match the examples file")
 
     rows: list[dict[str, Any]] = []

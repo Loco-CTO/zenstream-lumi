@@ -23,6 +23,7 @@ The single-layer recurrent encoder-decoder was selected only as the smallest pra
 - Local dataset: 4 training and 2 development prompt/response examples, divided by semantic family. The examples are illustrative, not a benchmark or a production response template.
 - Dataset SHA-256: 974d45ea0a2b650a5246fbbaeea5f2d4edf0c1db933a511041456218517acaaa.
 - Local manifest SHA-256: 85b274a7a62a7d05b4ac5391dd4d949f446da25789fba5e1b666f2f8fb5e0ae3.
+- The runner now requires both exact recorded hashes. It rejects replacement or derived input instead of acting as a general training entry point; the unknown-model 101-case draft and derivatives cannot be passed through this smoke.
 - The examples, manifest, generated responses, metrics, weights, and logs are in the local .lumi-data/experiments/conversation-response-smoke-v1 directory, outside the repository and every worktree. No external dataset, model generator, or pretrained asset was used.
 - Exact wording in the goal is explicitly illustrative. It must not be treated as the fixed wording of Lumi's product responses.
 
