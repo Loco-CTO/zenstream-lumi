@@ -35,6 +35,7 @@ from evaluation.review_records import (  # noqa: E402
 )
 from evaluation.scorer import EvaluationInputError, _validate_case  # noqa: E402
 from provenance.validate import (  # noqa: E402
+    AUTHOR_CONSENTS_DEFAULT,
     GENERATION_MANIFEST_DEFAULT,
     SOURCE_MANIFEST_DEFAULT,
     ProvenanceError,
@@ -133,6 +134,7 @@ def _load_review_inventory(
     provenance_records_path: Path,
     source_manifest_path: Path,
     generation_manifest_path: Path,
+    author_consents_path: Path = AUTHOR_CONSENTS_DEFAULT,
 ) -> list[dict[str, Any]]:
     """Load only development drafts whose rights and sample provenance are approved."""
     cases_input = _safe_controlled_input(cases_path, "case inventory")
@@ -144,6 +146,7 @@ def _load_review_inventory(
             generation_manifest_path.expanduser().resolve(),
             records_input,
             cases_input,
+            author_consents_path.expanduser().resolve(),
         )
     except (OSError, ProvenanceError) as exc:
         raise WorkbenchError(f"case provenance is not approved for human review: {exc}") from exc
@@ -735,6 +738,12 @@ def _parse_args() -> argparse.Namespace:
         default=GENERATION_MANIFEST_DEFAULT,
         help="Synthetic-generation manifest JSON.",
     )
+    parser.add_argument(
+        "--author-consents",
+        type=Path,
+        default=AUTHOR_CONSENTS_DEFAULT,
+        help="Metadata-only author-consent manifest JSON; keep non-empty manifests in controlled storage.",
+    )
     parser.add_argument("--output", type=Path, required=True, help="Controlled review ledger JSONL outside the Git repository.")
     parser.add_argument("--reviewer-id", required=True, help="Stable pseudonym in the form rev-example-01; do not use a name.")
     parser.add_argument("--role", choices=("semantic", "language"), required=True)
@@ -755,16 +764,18 @@ def main() -> int:
     )
     sources_path = args.sources.expanduser().resolve()
     generations_path = args.generations.expanduser().resolve()
+    author_consents_path = args.author_consents.expanduser().resolve()
     output_path = _safe_output_path(
         args.output,
         cases_path,
-        (provenance_records_path, sources_path, generations_path),
+        (provenance_records_path, sources_path, generations_path, author_consents_path),
     )
     cases = _load_review_inventory(
         cases_path,
         provenance_records_path,
         sources_path,
         generations_path,
+        author_consents_path,
     )
     manager = ReviewManager(cases, output_path, args.reviewer_id, args.role)
     with ReviewHTTPServer(("127.0.0.1", args.port), manager) as server:

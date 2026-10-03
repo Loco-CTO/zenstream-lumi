@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 import sys
+from datetime import date
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -16,6 +17,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_MANIFEST_DEFAULT = ROOT / "provenance" / "data_sources.json"
 GENERATION_MANIFEST_DEFAULT = ROOT / "provenance" / "synthetic_data.json"
+AUTHOR_CONSENTS_DEFAULT = ROOT / "provenance" / "author_consents.json"
 SHA256_PATTERN = re.compile(r"^sha256:[A-Fa-f0-9]{64}$")
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 USES = {
@@ -28,6 +30,7 @@ TRAINING_USES = {
 RECORD_SPLITS = {"unassigned", "train", "development", "public_test", "sealed_holdout", "excluded"}
 CASE_SPLIT_TO_RECORD = {"development": "development", "final_holdout": "sealed_holdout"}
 PERMISSIONS = {"permitted", "prohibited", "conditional", "unknown", "not_applicable"}
+CONSENT_STATUSES = {"pending", "approved", "withdrawn", "expired"}
 CASE_FINGERPRINT_FIELDS = (
     "schema_version", "case_id", "family_id", "split", "language", "categories", "turns",
     "trusted_context", "tool_scenario", "gold",
@@ -291,6 +294,103 @@ def _manifest_generations(manifest: Any) -> dict[str, dict[str, Any]]:
     return by_id
 
 
+def _manifest_author_consents(manifest: Any) -> dict[str, dict[str, Any]]:
+    """Validate metadata-only author grants and return them by opaque record ID."""
+    if not isinstance(manifest, dict) or set(manifest) != {"manifest_version", "status", "consents"}:
+        raise ProvenanceError("author-consent manifest must contain only manifest_version, status, and consents")
+    if manifest["manifest_version"] != 1 or isinstance(manifest["manifest_version"], bool):
+        raise ProvenanceError("unsupported author-consent manifest version")
+    consents = manifest["consents"]
+    if not isinstance(consents, list):
+        raise ProvenanceError("author-consent manifest consents must be a list")
+    status = manifest["status"]
+    if not isinstance(status, str) or status not in {"empty", "reviewing", "approved_grants_present"}:
+        raise ProvenanceError("invalid author-consent manifest status")
+    if (status == "empty") != (len(consents) == 0):
+        raise ProvenanceError("author-consent manifest status does not match its consent list")
+    if status == "approved_grants_present" and not any(
+        isinstance(consent, dict) and consent.get("status") == "approved" for consent in consents
+    ):
+        raise ProvenanceError("approved_grants_present requires at least one approved consent")
+
+    by_id: dict[str, dict[str, Any]] = {}
+    for index, consent in enumerate(consents, start=1):
+        prefix = f"author consent {index}"
+        if not isinstance(consent, dict):
+            raise ProvenanceError(f"{prefix} must be an object")
+        fields = {
+            "consent_record_id", "author_pseudonym", "source_id", "item_ids", "sample_sha256",
+            "granted_uses", "model_artifact_distribution", "status", "agreement_sha256",
+            "granted_date", "expires_date", "review",
+        }
+        if set(consent) != fields:
+            raise ProvenanceError(f"{prefix} does not match the author-consent record fields")
+        consent_id = consent.get("consent_record_id")
+        if not _nonempty(consent_id):
+            raise ProvenanceError(f"{prefix} needs a nonempty consent_record_id")
+        if consent_id in by_id:
+            raise ProvenanceError(f"duplicate consent_record_id {consent_id!r}")
+        for field in ("author_pseudonym", "source_id"):
+            if not _nonempty(consent.get(field)):
+                raise ProvenanceError(f"{prefix} needs a nonempty {field}")
+        item_ids = consent.get("item_ids")
+        if (
+            not isinstance(item_ids, list)
+            or not item_ids
+            or any(not _nonempty(item_id) for item_id in item_ids)
+            or len(set(item_ids)) != len(item_ids)
+        ):
+            raise ProvenanceError(f"{prefix} has invalid or duplicate item_ids")
+        if not _hash_string(consent.get("sample_sha256")):
+            raise ProvenanceError(f"{prefix} needs a sample SHA-256")
+        uses = consent.get("granted_uses")
+        if (
+            not isinstance(uses, list)
+            or any(not isinstance(use, str) or use not in USES for use in uses)
+            or len(set(uses)) != len(uses)
+        ):
+            raise ProvenanceError(f"{prefix} has invalid or duplicate granted_uses")
+        distribution = consent.get("model_artifact_distribution")
+        if not isinstance(distribution, str) or distribution not in PERMISSIONS:
+            raise ProvenanceError(f"{prefix} has invalid model_artifact_distribution")
+        consent_status = consent.get("status")
+        if not isinstance(consent_status, str) or consent_status not in CONSENT_STATUSES:
+            raise ProvenanceError(f"{prefix} has invalid status")
+        agreement_hash = consent.get("agreement_sha256")
+        if agreement_hash is not None and not _hash_string(agreement_hash):
+            raise ProvenanceError(f"{prefix} agreement_sha256 must be a SHA-256 or null")
+        if consent_status == "approved":
+            if not _hash_string(agreement_hash):
+                raise ProvenanceError(f"{prefix} approved consent needs a controlled agreement SHA-256")
+            if not _date_string(consent.get("granted_date")):
+                raise ProvenanceError(f"{prefix} approved consent needs a granted_date")
+            if not uses:
+                raise ProvenanceError(f"{prefix} approved consent needs at least one granted use")
+        elif consent.get("granted_date") is not None and not _date_string(consent["granted_date"]):
+            raise ProvenanceError(f"{prefix} has an invalid granted_date")
+        expires = consent.get("expires_date")
+        if expires is not None and not _date_string(expires):
+            raise ProvenanceError(f"{prefix} has an invalid expires_date")
+        review = consent.get("review")
+        if (
+            not isinstance(review, dict)
+            or set(review) != {"reviewed_by", "reviewed_date", "rationale"}
+            or not _nonempty(review.get("reviewed_by"))
+            or (review.get("reviewed_date") is not None and not _date_string(review["reviewed_date"]))
+            or not _nonempty(review.get("rationale"))
+        ):
+            raise ProvenanceError(f"{prefix} needs complete review metadata")
+        if consent_status == "approved":
+            if not _date_string(review.get("reviewed_date")):
+                raise ProvenanceError(f"{prefix} approved consent needs an independent review date")
+            if review.get("reviewed_by") == consent.get("author_pseudonym"):
+                raise ProvenanceError(f"{prefix} consent review must be performed by someone other than the author")
+            if expires is not None and date.fromisoformat(expires) < date.today():
+                raise ProvenanceError(f"{prefix} consent is expired")
+        by_id[consent_id] = consent
+    return by_id
+
+
 def _check_record_shape(record: Any, index: int) -> dict[str, Any]:
     prefix = f"sample record {index}"
     if not isinstance(record, dict):
@@ -401,6 +501,8 @@ def _check_record_shape(record: Any, index: int) -> dict[str, Any]:
         raise ProvenanceError(f"{prefix} manually authored record needs a consent record")
     if "author_consent_record_id" in record and not _nonempty(record["author_consent_record_id"]):
         raise ProvenanceError(f"{prefix} author_consent_record_id must be nonempty")
+    if record["sample_kind"] != "manually_authored" and "author_consent_record_id" in record:
+        raise ProvenanceError(f"{prefix} only manually authored records may reference author consent")
     return record
 
 
@@ -518,6 +620,77 @@ def _check_record_sources(
         raise ProvenanceError(f"sample record {record_id!r} mixes unrelated synthetic generation records")
 
 
+def _check_record_author_consent(
+    record: dict[str, Any],
+    sources: dict[str, dict[str, Any]],
+    consents: dict[str, dict[str, Any]],
+) -> None:
+    """Resolve a manually authored sample to an exact, independently reviewed grant."""
+    if record["sample_kind"] != "manually_authored":
+        return
+    record_id = record["record_id"]
+    consent_id = record["author_consent_record_id"]
+    consent = consents.get(consent_id)
+    if consent is None:
+        raise ProvenanceError(f"sample record {record_id!r} references unknown author consent {consent_id!r}")
+    if len(record["source_items"]) != 1:
+        raise ProvenanceError(f"manually authored sample record {record_id!r} must resolve to exactly one source item")
+    item = record["source_items"][0]
+    source_id = item["source_id"]
+    source = sources[source_id]
+    if source["source_type"] != "manually_authored" or source_id != consent["source_id"]:
+        raise ProvenanceError(f"sample record {record_id!r} consent source does not match its manually authored source")
+    if item["item_id"] not in consent["item_ids"]:
+        raise ProvenanceError(f"sample record {record_id!r} item is outside the author's consent scope")
+    if record["sample_sha256"] != consent["sample_sha256"]:
+        raise ProvenanceError(f"sample record {record_id!r} differs from the exact sample covered by author consent")
+    if record["decision"] != "approved_for_use":
+        return
+    if consent["status"] != "approved":
+        raise ProvenanceError(f"sample record {record_id!r} author consent is not approved")
+    if not set(record["lumi_uses"]).issubset(set(consent["granted_uses"])):
+        raise ProvenanceError(f"sample record {record_id!r} exceeds the author's granted uses")
+    if TRAINING_USES.intersection(record["lumi_uses"]):
+        if consent["model_artifact_distribution"] != "permitted":
+            raise ProvenanceError(
+                f"sample record {record_id!r} training consent does not permit model artifact distribution"
+            )
+
+
+def _check_lineage_author_consents(
+    records: dict[str, dict[str, Any]],
+    consents: dict[str, dict[str, Any]],
+) -> None:
+    """Carry author-use and model-distribution limits through every derived sample."""
+    for record in records.values():
+        if record["decision"] != "approved_for_use":
+            continue
+        uses = set(record["lumi_uses"])
+        pending = list(record["parent_record_ids"])
+        visited: set[str] = set()
+        while pending:
+            parent_id = pending.pop()
+            if parent_id in visited:
+                continue
+            visited.add(parent_id)
+            parent = records[parent_id]
+            if parent["sample_kind"] == "manually_authored":
+                consent = consents[parent["author_consent_record_id"]]
+                if consent["status"] != "approved":
+                    raise ProvenanceError(
+                        f"sample record {record['record_id']!r} derives from author material without approved consent"
+                    )
+                if not uses.issubset(set(consent["granted_uses"])):
+                    raise ProvenanceError(
+                        f"sample record {record['record_id']!r} exceeds an ancestor author's granted uses"
+                    )
+                if TRAINING_USES.intersection(uses) and consent["model_artifact_distribution"] != "permitted":
+                    raise ProvenanceError(
+                        f"sample record {record['record_id']!r} training consent does not permit model artifact distribution"
+                    )
+            pending.extend(parent["parent_record_ids"])
+
+
 def validate_evaluation_case_provenance(
     cases: list[dict[str, Any]],
     records: list[dict[str, Any]],
@@ -570,9 +743,14 @@ def validate_bundle(
     generation_manifest: Any,
     records: list[dict[str, Any]],
     cases: list[dict[str, Any]] | None = None,
+    author_consent_manifest: Any | None = None,
 ) -> dict[str, int | str]:
     sources = _manifest_sources(source_manifest)
     generations = _manifest_generations(generation_manifest)
+    empty_author_consents = {"manifest_version": 1, "status": "empty", "consents": []}
+    consents = _manifest_author_consents(
+        empty_author_consents if author_consent_manifest is None else author_consent_manifest
+    )
     for source in sources.values():
         if source["source_type"] != "synthetic":
             continue
@@ -591,9 +769,11 @@ def validate_bundle(
         record_by_id[record_id] = record
     for record in record_by_id.values():
         _check_record_sources(record, sources, generations)
+        _check_record_author_consent(record, sources, consents)
         for parent_id in record["parent_record_ids"]:
             if parent_id not in record_by_id:
                 raise ProvenanceError(f"sample record {record['record_id']!r} references missing parent {parent_id!r}")
+    _check_lineage_author_consents(record_by_id, consents)
     visiting: set[str] = set()
     visited: set[str] = set()
 
@@ -649,12 +829,20 @@ def validate_files(
     generation_manifest_path: Path,
     records_path: Path,
     cases_path: Path | None = None,
+    author_consents_path: Path = AUTHOR_CONSENTS_DEFAULT,
 ) -> dict[str, int | str]:
     source_manifest = load_json_document(source_manifest_path)
     generation_manifest = load_json_document(generation_manifest_path)
+    author_consent_manifest = load_json_document(author_consents_path)
     records = _read_jsonl(records_path)
     cases = _read_jsonl(cases_path) if cases_path is not None else None
-    return validate_bundle(source_manifest, generation_manifest, records, cases)
+    report = validate_bundle(source_manifest, generation_manifest, records, cases, author_consent_manifest)
+    consent_path = author_consents_path.expanduser().resolve()
+    if author_consent_manifest["consents"] and any(
+        (parent / ".git").exists() for parent in (consent_path, *consent_path.parents)
+    ):
+        raise ProvenanceError("non-empty author-consent manifests must be stored outside Git repositories")
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -663,10 +851,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cases", type=Path, help="optional evaluation case JSONL to verify record links and hashes")
     parser.add_argument("--sources", type=Path, default=SOURCE_MANIFEST_DEFAULT, help="source manifest JSON")
     parser.add_argument("--generations", type=Path, default=GENERATION_MANIFEST_DEFAULT, help="synthetic generation manifest JSON")
+    parser.add_argument("--author-consents", type=Path, default=AUTHOR_CONSENTS_DEFAULT, help="metadata-only author-consent manifest JSON")
     parser.add_argument("--output", type=Path, help="write validation report to this path; stdout if omitted")
     args = parser.parse_args(argv)
     try:
-        report = validate_files(args.sources, args.generations, args.records, args.cases)
+        report = validate_files(args.sources, args.generations, args.records, args.cases, args.author_consents)
     except (OSError, ProvenanceError) as exc:
         parser.error(str(exc))
     serialized = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"

@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lumi manually authored sample consent manifest",
+  "description": "Metadata-only consent references. Keep agreement documents, names, contact details, signatures, and the author-to-pseudonym mapping in controlled storage outside the repository.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest_version", "status", "consents"],
+  "properties": {
+    "manifest_version": {"const": 1},
+    "status": {"enum": ["empty", "reviewing", "approved_grants_present"]},
+    "consents": {"type": "array", "items": {"$ref": "#/$defs/consent"}}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "empty"}}, "required": ["status"]},
+      "then": {"properties": {"consents": {"maxItems": 0}}}
+    },
+    {
+      "if": {"properties": {"status": {"enum": ["reviewing", "approved_grants_present"]}}, "required": ["status"]},
+      "then": {"properties": {"consents": {"minItems": 1}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "approved_grants_present"}}, "required": ["status"]},
+      "then": {"properties": {"consents": {"contains": {"properties": {"status": {"const": "approved"}}, "required": ["status"]}}}}
+    }
+  ],
+  "$defs": {
+    "consent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "consent_record_id", "author_pseudonym", "source_id", "item_ids", "sample_sha256",
+        "granted_uses", "model_artifact_distribution", "status", "agreement_sha256",
+        "granted_date", "expires_date", "review"
+      ],
+      "properties": {
+        "consent_record_id": {"type": "string", "minLength": 1},
+        "author_pseudonym": {"type": "string", "minLength": 1},
+        "source_id": {"type": "string", "minLength": 1},
+        "item_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "sample_sha256": {"type": "string", "pattern": "^sha256:[A-Fa-f0-9]{64}$"},
+        "granted_uses": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["tokenizer_training", "pretraining", "instruction_training", "zenstream_specific_training", "evaluation", "filtering", "generation", "other"]}
+        },
+        "model_artifact_distribution": {"$ref": "#/$defs/permission"},
+        "status": {"enum": ["pending", "approved", "withdrawn", "expired"]},
+        "agreement_sha256": {"type": ["string", "null"], "pattern": "^sha256:[A-Fa-f0-9]{64}$"},
+        "granted_date": {"type": ["string", "null"], "format": "date"},
+        "expires_date": {"type": ["string", "null"], "format": "date"},
+        "review": {"$ref": "#/$defs/review"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "approved"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "granted_uses": {"minItems": 1},
+              "agreement_sha256": {"type": "string", "pattern": "^sha256:[A-Fa-f0-9]{64}$"},
+              "granted_date": {"type": "string", "format": "date"},
+              "review": {"properties": {"reviewed_date": {"type": "string", "format": "date"}}}
+            }
+          }
+        }
+      ]
+    },
+    "permission": {"enum": ["permitted", "prohibited", "conditional", "unknown", "not_applicable"]},
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewed_by", "reviewed_date", "rationale"],
+      "properties": {
+        "reviewed_by": {"type": "string", "minLength": 1},
+        "reviewed_date": {"type": ["string", "null"], "format": "date"},
+        "rationale": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

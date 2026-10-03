@@ -25,6 +25,7 @@ from evaluation.review_records import (  # noqa: E402
 )
 from evaluation.scorer import EvaluationInputError, _validate_case  # noqa: E402
 from provenance.validate import (  # noqa: E402
+    AUTHOR_CONSENTS_DEFAULT,
     GENERATION_MANIFEST_DEFAULT,
     SOURCE_MANIFEST_DEFAULT,
     ProvenanceError,
@@ -304,6 +305,7 @@ def import_ledgers(
     provenance_records_path: Path,
     source_manifest_path: Path = SOURCE_MANIFEST_DEFAULT,
     generation_manifest_path: Path = GENERATION_MANIFEST_DEFAULT,
+    author_consents_path: Path = AUTHOR_CONSENTS_DEFAULT,
     force: bool = False,
 ) -> dict[str, Any]:
     cases_input = _safe_controlled_input(cases_path, "case inventory")
@@ -312,6 +314,7 @@ def import_ledgers(
     )
     source_manifest_input = source_manifest_path.expanduser().resolve()
     generation_manifest_input = generation_manifest_path.expanduser().resolve()
+    author_consents_input = author_consents_path.expanduser().resolve()
     ledger_inputs = [
         _safe_controlled_input(path, "reviewer ledgers") for path in reviewer_ledger_paths
     ]
@@ -320,6 +323,7 @@ def import_ledgers(
         provenance_input,
         source_manifest_input,
         generation_manifest_input,
+        author_consents_input,
         *ledger_inputs,
     }
     output_cases = _safe_output_path(output_cases_path, input_paths)
@@ -334,6 +338,7 @@ def import_ledgers(
             generation_manifest_input,
             provenance_input,
             cases_input,
+            author_consents_input,
         )
     except (OSError, ProvenanceError) as exc:
         raise LedgerImportError(
@@ -386,6 +391,12 @@ def _parse_args() -> argparse.Namespace:
         help="Synthetic-generation manifest JSON.",
     )
     parser.add_argument(
+        "--author-consents",
+        type=Path,
+        default=AUTHOR_CONSENTS_DEFAULT,
+        help="Metadata-only author-consent manifest JSON; non-empty manifests should be kept in controlled storage.",
+    )
+    parser.add_argument(
         "--review-ledger",
         type=Path,
         action="append",
@@ -410,6 +421,7 @@ def main() -> int:
         provenance_records_path=args.provenance_records,
         source_manifest_path=args.sources,
         generation_manifest_path=args.generations,
+        author_consents_path=args.author_consents,
         force=args.force,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
