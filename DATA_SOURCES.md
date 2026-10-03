@@ -1,6 +1,6 @@
 # Lumi data sources and provenance
 
-**Current data status:** No external dataset content has been admitted or used for training, tokenizer development, or approved evaluation. An initial 101-case synthetic evaluation draft exists only in local controlled storage; it has no independent review, no resolved rights decision, and is not scoreable. Its metadata-only fingerprint is recorded in [the draft inventory manifest](evaluation/draft_inventory_manifest.json). The public [data-source manifest](provenance/data_sources.json) remains empty until source review. Synthetic generations have a separate [manifest](provenance/synthetic_data.json) and [schema](provenance/synthetic_data.schema.json). Research references are kept separately in [RESEARCH_REFERENCES.md](RESEARCH_REFERENCES.md) and are not training data.
+**Current data status:** One exact ASDC Japanese dialog is approved for a local public development diagnostic; its text and item-level provenance remain in controlled storage. No external content has been used for training or tokenizer development. MASSIVE 1.1 is pinned and audited as a candidate only; no MASSIVE text has been admitted. The separate 101-case synthetic evaluation draft remains in local controlled storage with unresolved rights, no independent review, and no scoring eligibility. Its metadata-only fingerprint is recorded in [the draft inventory manifest](evaluation/draft_inventory_manifest.json). The public [data-source manifest](provenance/data_sources.json) records the ASDC source; synthetic generations have a separate [manifest](provenance/synthetic_data.json) and [schema](provenance/synthetic_data.schema.json). Research references are kept separately in [RESEARCH_REFERENCES.md](RESEARCH_REFERENCES.md) and are not training data.
 
 ## Admission policy
 
@@ -22,4 +22,4 @@ Evaluation sources are provenance sources too. Keep development and final-holdou
 
 ## Release summary
 
-There are currently no approved training, tokenizer, or evaluation data sources to report. The controlled draft inventory is not an approved evaluation source and is not part of a release. Update this statement for each release from reviewed manifests, not from undocumented developer knowledge.
+There is one approved development-evaluation item: ASDC main dialog 001, as recorded in `provenance/data_sources.json` and its controlled item-level record. There are no approved training or tokenizer sources. MASSIVE is not yet admitted, and the controlled 101-case draft inventory is not an approved evaluation source or part of a release. Update this statement for each release from reviewed manifests, not from undocumented developer knowledge.
