@@ -173,9 +173,13 @@ class ReviewWorkbenchTests(unittest.TestCase):
             with self.assertRaisesRegex(WorkbenchError, "source 'synthetic-source' is not approved"):
                 _load_review_inventory(cases_path, records_path, sources_path, generations_path)
 
-    def test_review_ledger_path_must_not_be_inside_a_sibling_lumi_worktree(self):
+    def test_review_ledger_path_must_not_be_inside_a_git_worktree(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            sibling_checkout = Path(__file__).resolve().parents[4] / "zenstream-lumi"
+            sibling_checkout = Path(temp_dir) / "sibling-lumi-worktree"
+            sibling_checkout.mkdir()
+            (sibling_checkout / ".git").write_text(
+                "gitdir: ../.git/worktrees/sibling", encoding="utf-8"
+            )
             with self.assertRaisesRegex(WorkbenchError, "outside the Git repository"):
                 _safe_output_path(
                     sibling_checkout / "unsafe-review-output.jsonl",
