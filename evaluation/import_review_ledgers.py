@@ -24,11 +24,24 @@ from evaluation.review_records import (  # noqa: E402
     validate_case_review_records,
 )
 from evaluation.scorer import EvaluationInputError, _validate_case  # noqa: E402
-from provenance.validate import evaluation_case_sha256  # noqa: E402
+from provenance.validate import (  # noqa: E402
+    GENERATION_MANIFEST_DEFAULT,
+    SOURCE_MANIFEST_DEFAULT,
+    ProvenanceError,
+    evaluation_case_sha256,
+    validate_files,
+)
 
 
 class LedgerImportError(ValueError):
     """Raised when case and reviewer files cannot be safely combined."""
+
+
+def _safe_controlled_input(path: Path, description: str) -> Path:
+    resolved = path.expanduser().resolve()
+    if any((parent / ".git").exists() for parent in (resolved, *resolved.parents)):
+        raise LedgerImportError(f"{description} must be stored outside the Git repository")
+    return resolved
 
 
 def _validate_records(records: list[dict[str, Any]]) -> None:
@@ -136,7 +149,9 @@ def _read_cases(path: Path) -> list[dict[str, Any]]:
 def _read_reviewer_ledgers(paths: list[Path]) -> list[dict[str, Any]]:
     if not paths:
         raise LedgerImportError("provide at least one controlled reviewer ledger")
-    normalized_paths = [path.expanduser().resolve() for path in paths]
+    normalized_paths = [
+        _safe_controlled_input(path, "reviewer ledgers") for path in paths
+    ]
     if len(set(normalized_paths)) != len(normalized_paths):
         raise LedgerImportError("the same reviewer ledger was supplied more than once")
 
@@ -286,17 +301,44 @@ def import_ledgers(
     output_cases_path: Path,
     output_ledger_path: Path,
     *,
+    provenance_records_path: Path,
+    source_manifest_path: Path = SOURCE_MANIFEST_DEFAULT,
+    generation_manifest_path: Path = GENERATION_MANIFEST_DEFAULT,
     force: bool = False,
 ) -> dict[str, Any]:
-    cases_input = cases_path.expanduser().resolve()
-    ledger_inputs = [path.expanduser().resolve() for path in reviewer_ledger_paths]
-    input_paths = {cases_input, *ledger_inputs}
+    cases_input = _safe_controlled_input(cases_path, "case inventory")
+    provenance_input = _safe_controlled_input(
+        provenance_records_path, "sample provenance records"
+    )
+    source_manifest_input = source_manifest_path.expanduser().resolve()
+    generation_manifest_input = generation_manifest_path.expanduser().resolve()
+    ledger_inputs = [
+        _safe_controlled_input(path, "reviewer ledgers") for path in reviewer_ledger_paths
+    ]
+    input_paths = {
+        cases_input,
+        provenance_input,
+        source_manifest_input,
+        generation_manifest_input,
+        *ledger_inputs,
+    }
     output_cases = _safe_output_path(output_cases_path, input_paths)
     output_ledger = _safe_output_path(output_ledger_path, input_paths)
     if output_cases == output_ledger:
         raise LedgerImportError("case output and combined-ledger output must be different files")
 
     cases = _read_cases(cases_input)
+    try:
+        validate_files(
+            source_manifest_input,
+            generation_manifest_input,
+            provenance_input,
+            cases_input,
+        )
+    except (OSError, ProvenanceError) as exc:
+        raise LedgerImportError(
+            f"case provenance is not approved for human review: {exc}"
+        ) from exc
     records = _read_reviewer_ledgers(ledger_inputs)
     _validate_records(records)
     _validate_existing_case_references(cases, records)
@@ -329,6 +371,21 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--cases", type=Path, required=True, help="Controlled development draft JSONL.")
     parser.add_argument(
+        "--provenance-records",
+        type=Path,
+        required=True,
+        help="Controlled sample-level provenance JSONL for every case.",
+    )
+    parser.add_argument(
+        "--sources", type=Path, default=SOURCE_MANIFEST_DEFAULT, help="Collection-level source manifest JSON."
+    )
+    parser.add_argument(
+        "--generations",
+        type=Path,
+        default=GENERATION_MANIFEST_DEFAULT,
+        help="Synthetic-generation manifest JSON.",
+    )
+    parser.add_argument(
         "--review-ledger",
         type=Path,
         action="append",
@@ -350,6 +407,9 @@ def main() -> int:
         args.review_ledger,
         args.output_cases,
         args.output_ledger,
+        provenance_records_path=args.provenance_records,
+        source_manifest_path=args.sources,
+        generation_manifest_path=args.generations,
         force=args.force,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))

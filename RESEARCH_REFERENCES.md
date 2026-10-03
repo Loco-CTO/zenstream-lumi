@@ -75,6 +75,15 @@
 - [TorchAO quantized inference workflows](https://docs.pytorch.org/ao/stable/workflows/inference.html). Current quantization options include CPU-oriented x86 and accelerator paths; hardware-specific support and accuracy must be measured.
 - Xia et al. 2026. [Efficient INT8 Inference of Small NLP Models on Server CPUs with PyTorch Native Stack](https://arxiv.org/abs/2608.18182). Reports CPU INT8 results for BERT-family encoders on Xeon; adjacent evidence only, not autoregressive Lumi benchmark evidence.
 
+## Provider terms and synthetic-output review
+
+These official terms pages were reviewed on 2026-10-03 because the current development evaluation inventory was generated through Codex. They inform the rights gate only; they are not Lumi training or evaluation content. Account-specific applicability and the scope of any model-competition restriction remain unresolved.
+
+- OpenAI Help Center, [Using Codex with your ChatGPT plan](https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan). States that ChatGPT Terms/Privacy apply to Codex data for ChatGPT accounts, with the corresponding online services agreement applying to API and Business, Education, or Enterprise users.
+- OpenAI, [Europe Terms of Use](https://openai.com/policies/eu-terms-of-use/), updated 2026-01-16. Applies to UK/EEA/Swiss individual users; assigns output ownership between the parties while prohibiting use of output to develop models that compete with OpenAI and noting output may not be unique.
+- OpenAI, [Services Agreement](https://openai.com/policies/services-agreement/), effective 2026-01-01. Applies to business/developer services and has a stated exception for models primarily intended to categorize, classify, or organize data only when those models are not distributed or commercially available to third parties. Do not assume that exception applies to Lumi or a release without checking the exact agreement and release plan.
+- OpenAI, [Service Terms](https://openai.com/policies/service-terms/), updated 2026-09-29. Section 4 says output from Codex/code-generation features may be subject to third-party licenses; this is tracked specifically for code-generation output and is not treated as a general license statement for dialogue text.
+
 ## 2025–2026 short-context, bilingual evaluation, and deployment update
 
 These additional references were reviewed on 2026-10-02. They inform Lumi research only; their weights, datasets, and text have not been used by Lumi.

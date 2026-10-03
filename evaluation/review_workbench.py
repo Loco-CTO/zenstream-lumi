@@ -34,7 +34,13 @@ from evaluation.review_records import (  # noqa: E402
     validate_case_review_records,
 )
 from evaluation.scorer import EvaluationInputError, _validate_case  # noqa: E402
-from provenance.validate import evaluation_case_sha256  # noqa: E402
+from provenance.validate import (  # noqa: E402
+    GENERATION_MANIFEST_DEFAULT,
+    SOURCE_MANIFEST_DEFAULT,
+    ProvenanceError,
+    evaluation_case_sha256,
+    validate_files,
+)
 
 
 REVIEWER_ID_PATTERN = re.compile(r"^rev-[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -115,6 +121,35 @@ def _read_cases(path: Path) -> list[dict[str, Any]]:
     return cases
 
 
+def _safe_controlled_input(path: Path, description: str) -> Path:
+    resolved = path.expanduser().resolve()
+    if any((parent / ".git").exists() for parent in (resolved, *resolved.parents)):
+        raise WorkbenchError(f"{description} must be stored outside the Git repository")
+    return resolved
+
+
+def _load_review_inventory(
+    cases_path: Path,
+    provenance_records_path: Path,
+    source_manifest_path: Path,
+    generation_manifest_path: Path,
+) -> list[dict[str, Any]]:
+    """Load only development drafts whose rights and sample provenance are approved."""
+    cases_input = _safe_controlled_input(cases_path, "case inventory")
+    records_input = _safe_controlled_input(provenance_records_path, "sample provenance records")
+    cases = _read_cases(cases_input)
+    try:
+        validate_files(
+            source_manifest_path.expanduser().resolve(),
+            generation_manifest_path.expanduser().resolve(),
+            records_input,
+            cases_input,
+        )
+    except (OSError, ProvenanceError) as exc:
+        raise WorkbenchError(f"case provenance is not approved for human review: {exc}") from exc
+    return cases
+
+
 def _active_records(case: dict[str, Any], records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     case_hash = evaluation_case_sha256(case)
     superseded = {
@@ -155,11 +190,14 @@ def _validate_ledger(cases: list[dict[str, Any]], records: list[dict[str, Any]])
     validate_case_review_records(copies, records)
 
 
-def _safe_output_path(path: Path, cases_path: Path) -> Path:
+def _safe_output_path(
+    path: Path, cases_path: Path, protected_paths: tuple[Path, ...] = ()
+) -> Path:
     output = path.expanduser().resolve()
     cases = cases_path.expanduser().resolve()
-    if output == cases:
-        raise WorkbenchError("review records must be written to a separate file")
+    protected = {cases, *(item.expanduser().resolve() for item in protected_paths)}
+    if output in protected:
+        raise WorkbenchError("review records must be written to a separate file from all inputs")
     if any((parent / ".git").exists() for parent in (output, *output.parents)):
         raise WorkbenchError("review records must be stored outside the Git repository")
     if output.suffix.lower() != ".jsonl":
@@ -682,6 +720,21 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Collect blind Lumi development-case annotations on loopback only.")
     parser.add_argument("--cases", type=Path, required=True, help="Controlled development cases JSONL.")
+    parser.add_argument(
+        "--provenance-records",
+        type=Path,
+        required=True,
+        help="Controlled sample-level provenance JSONL for every case.",
+    )
+    parser.add_argument(
+        "--sources", type=Path, default=SOURCE_MANIFEST_DEFAULT, help="Collection-level source manifest JSON."
+    )
+    parser.add_argument(
+        "--generations",
+        type=Path,
+        default=GENERATION_MANIFEST_DEFAULT,
+        help="Synthetic-generation manifest JSON.",
+    )
     parser.add_argument("--output", type=Path, required=True, help="Controlled review ledger JSONL outside the Git repository.")
     parser.add_argument("--reviewer-id", required=True, help="Stable pseudonym in the form rev-example-01; do not use a name.")
     parser.add_argument("--role", choices=("semantic", "language"), required=True)
@@ -696,9 +749,23 @@ def main() -> int:
         raise WorkbenchError("reviewer ID must be a stable pseudonym like rev-reviewer-01")
     if not 0 <= args.port <= 65535:
         raise WorkbenchError("port must be between 0 and 65535")
-    cases_path = args.cases.expanduser().resolve()
-    output_path = _safe_output_path(args.output, cases_path)
-    cases = _read_cases(cases_path)
+    cases_path = _safe_controlled_input(args.cases, "case inventory")
+    provenance_records_path = _safe_controlled_input(
+        args.provenance_records, "sample provenance records"
+    )
+    sources_path = args.sources.expanduser().resolve()
+    generations_path = args.generations.expanduser().resolve()
+    output_path = _safe_output_path(
+        args.output,
+        cases_path,
+        (provenance_records_path, sources_path, generations_path),
+    )
+    cases = _load_review_inventory(
+        cases_path,
+        provenance_records_path,
+        sources_path,
+        generations_path,
+    )
     manager = ReviewManager(cases, output_path, args.reviewer_id, args.role)
     with ReviewHTTPServer(("127.0.0.1", args.port), manager) as server:
         url = f"http://127.0.0.1:{server.server_address[1]}/"

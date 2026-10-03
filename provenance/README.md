@@ -6,11 +6,11 @@ The public repository contains provenance formats and research documentation, no
 
 Each training run must pin the source manifest, document-record artifact, transformation code/configuration, tokenizer inputs, and split manifests by revision and SHA-256. Keep development and final holdout records outside training, filtering, synthetic generation, and tokenizer input. When rights or privacy terms prohibit exposing an item-level ledger, retain the full ledger in controlled storage and publish its immutable hash plus a safe summary.
 
-No sample-level records are committed. The local 101-case draft evaluation bundle has matching case and sample hashes, but all records remain review_pending, with unknown rights, unchecked contamination, and unreviewed privacy. It is not an approved source and must not be scored or used for training.
+No sample-level records are committed. The local 101-case draft evaluation bundle has matching case and sample hashes, but all records remain review_pending, with unknown rights, unchecked contamination, and unreviewed privacy. It is not an approved source and must not be shown to human reviewers, scored, or used for training. The blind review workbench and ledger importer both validate the full source, generation, and sample-record bundle before allowing review data to be collected or joined.
 
 ## Provenance gate
 
-Run the standard-library validation gate before building a dataset or scoring an evaluation set:
+Run the standard-library validation gate before building a dataset, exposing evaluation cases for human review, importing review ledgers, or scoring an evaluation set:
 
 ```powershell
 python provenance/validate.py --records <document-records.jsonl>

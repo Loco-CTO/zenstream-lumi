@@ -27,15 +27,21 @@
   "generation": {
     "provider": "OpenAI",
     "model": "Codex assistant; exact serving model ID and build not exposed",
-    "terms_reference": "https://openai.com/policies/",
-    "rights_status": "pending; permissions unknown"
+    "terms_reference": "https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan",
+    "rights_status": "unresolved; applicable account agreement, exact serving model/version, and scoped assessment of Lumi use and release are not recorded",
+    "review_gate": "blocked before human annotation, scoring, and training until the applicable terms review is complete",
+    "terms_evidence": [
+      "https://openai.com/policies/eu-terms-of-use/",
+      "https://openai.com/policies/services-agreement/",
+      "https://openai.com/policies/service-terms/"
+    ]
   },
   "review_status": {
-    "semantic": "no independent reviews",
-    "japanese_and_code_switch_language": "pending for all 67 ja and en_ja cases"
+    "semantic": "no independent reviews; reviewers available but annotation has not started",
+    "japanese_and_code_switch_language": "pending for all 67 ja and en_ja cases; qualified reviewer available but annotation has not started"
   },
   "sample_size_adequacy": "not assessed; one draft case per required slice-language pair does not establish threshold-level statistical evidence",
-  "use_status": "draft only; not approved, not scoreable, and excluded from training",
+  "use_status": "draft only; blocked before human review and scoring, not approved, and excluded from training",
   "final_holdout_status": "not yet created",
   "limitations": [
     "The capability registry remains draft; explicit genre, year, runtime, and watched-state search filters are not implemented, and no Lumi playback gateway exists.",
