@@ -58,7 +58,7 @@ The raw text, sample records, reports, and fitted tokenizer files remain in `.lu
 | Training text | `a581559384f9ac222e1e81574beb36b0f94790ff6342af83606e6c825a778940` |
 | Experiment runner | `f1fcc5cc3d805002ca720567f3a0c891d981a5a3721a78550b5b26684bce89a0` |
 | SentencePiece native module | `6fb545d1295cb7a4e87ae1884ea0eb3775d8261caed4132d1db5266b113bb781` |
-| Requirements file | `4e9d76444e7769ecb231c8496881195413276072c80edd3868f67a3a3156fc32` |
+| Requirements file | `88ab32ce3a3dc695157977c2bf180248bc6b40e414ae136dec3246d1c308a539` |
 
 Pinned source members: `transcripts_ja.txt` `20551876ae990563b2fda3b107fb3c5249e485d5b01847452f26a2f7956d2b5e`; `transcripts_en.txt` `a4d2e8980d42e8747e2e670c9d112953bd8298da292ba43c1bd2ffa6f8ffc083`; `transcripts_cs.txt` `7c26eea872f3099e205035973c0784fcaa473c89f26018a5b4a1a6d72a2e468c`; `README.md` `4d68ea0502e58698e245f104098f4dd9679e07398a4d44bc95b586732536f10d`.
 
