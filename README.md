@@ -4,7 +4,7 @@ Lumi is a proposed optional, local natural-language capability for ZenStream. It
 
 ## Project status
 
-This repository currently contains the research, evaluation, and provenance foundation only. No Lumi model, inference service, training pipeline, approved training corpus, or runtime dependency has been created or selected. A 101-case draft evaluation inventory exists in local controlled storage, but no case is ready or approved and its text is not checked into this repository. No pretrained model weights are permitted for Lumi's runtime model; any eventual Lumi model must start from random initialization.
+This repository contains Lumi's research, evaluation, and provenance foundation plus a first level-1 exploratory random-init structured-prediction smoke. The smoke proves a small local train/save/reload/infer loop, not a product model: its five-example development result is poor and it has no ZenStream service or playback integration. No release candidate, production inference service, approved production-quality training corpus, or selected runtime exists. The temporary examples, model artifacts, and logs remain in local controlled storage and are not checked in. No pretrained model weights are permitted for Lumi; any eventual model must start from random initialization.
 
 Architecture, tokenizer, model size, runtime, training corpus, integration protocol, and artifact licensing remain open research decisions. Research claims are not Lumi measurements. See [RESEARCH_NOTES.md](RESEARCH_NOTES.md) for the initial evidence review and its limitations.
 
@@ -12,10 +12,19 @@ Architecture, tokenizer, model size, runtime, training corpus, integration proto
 
 - Lumi is opt-in. A disabled installation must not download a model, start an inference process, reserve meaningful RAM or VRAM, or create AI-specific CPU/GPU work.
 - Lumi interprets language and can suggest structured intent. ZenStream remains authoritative for media, permissions, playback, metadata, user state, and all state-changing validation.
+- Lumi must also provide concise, natural English, Japanese, and appropriate English/Japanese code-switch responses for greetings, acknowledgements, harmless conversation, media comments, capability questions, ambiguity, uncertainty, and unsupported requests. An intent classifier by itself is not a complete Lumi system.
 - Lumi must not emit executable application code, SQL, shell commands, or arbitrary system commands as part of normal interaction.
 - CPU inference is required. GPU use is optional and must show a measurable benefit on supported hardware.
 - Initial language targets are English, Japanese, and English/Japanese code-switching. Japanese evaluation must be natural Japanese and reviewed by competent speakers.
 - Data provenance, licensing, benchmark integrity, and reproducibility are release requirements.
+
+## Evidence levels
+
+- **Level 1 — exploratory:** small local experiments may use temporary material with a clearly recorded permission scope and a separate exploratory development split. Keep data and model artifacts local. These runs answer engineering questions and cannot support product-quality claims.
+- **Level 2 — development:** compare reproducible candidates using permitted, provenance-recorded training material and a frozen, independently reviewed development set, including qualified Japanese review. The final holdout and final statistical power are not prerequisites for this stage.
+- **Level 3 — release/final:** require admitted training sources, qualified reviewed evaluation, a sequestered and statistically suitable holdout, resolved artifact-distribution terms, production hardware measurements, and complete release provenance.
+
+Level-3 requirements must not block clearly scoped level-1 work. The current smoke is described in [its experiment record](experiments/RANDOM_INIT_INTENT_SMOKE.md); it is not admitted as production training or benchmark data.
 
 ## Project records
 
@@ -27,6 +36,8 @@ Architecture, tokenizer, model size, runtime, training corpus, integration proto
 - [Research references](RESEARCH_REFERENCES.md): sources that influence design; these are not training data.
 - [Tokenizer pilot protocol](experiments/TOKENIZER_PILOT.md): a controlled EN/JA/code-switch tokenizer comparison, gated on approved text and reviewed development cases.
 - [Model formulation and architecture pilot](experiments/ARCHITECTURE_PILOT.md): a staged, compute-matched comparison of conditional-generation formulations and short-context sequence architectures, gated on rights, review, tokenizer, and hardware evidence.
+- [Random-init intent smoke](experiments/RANDOM_INIT_INTENT_SMOKE.md): first executable CPU train/save/reload/infer evidence, with its tiny local data scope, measured failures, and limits.
+- [Exploratory experiment dependencies](experiments/requirements-exploratory.txt): pinned NumPy dependency for local prototype experiments only.
 - [Data sources](DATA_SOURCES.md): inclusion policy and human-readable provenance summary.
 - [MASSIVE 1.1 source audit](experiments/MASSIVE_AUDIT.md): pinned archive, file hashes, count reconciliation, licensing evidence, quality signals, and limits; the source remains unadmitted.
 - [Common Pile v0.1 source audit](experiments/COMMON_PILE_AUDIT.md): release-level review of the 30 reported source groups, rights caveats, English-focused filtering, and lack of demonstrated Japanese/code-switch coverage; no content is admitted.
@@ -43,10 +54,10 @@ Architecture, tokenizer, model size, runtime, training corpus, integration proto
 
 ## Initial sequence
 
-1. Build and review a semantically diverse English/Japanese/code-switch evaluation set, with a sequestered final holdout and expert review for Japanese.
-2. Audit candidate public and synthetic data for provenance, permitted use, and contamination risk before any dataset is admitted.
-3. Compare task-focused model formulations, tokenizer candidates, and sequence architectures using small, compute-matched experiments.
-4. Train from random initialization only after the evaluation gates and data manifests are ready.
+1. Grow the executable level-1 path through small experiments that diagnose observed failures, using only clearly scoped local data and keeping artifacts outside Git.
+2. Build and review a semantically diverse English/Japanese/code-switch development set; qualify Japanese review before using results for development decisions. Build and seal the final holdout for level-3 claims.
+3. Audit candidate public and generated data for provenance, permitted use, and contamination risk before admitting it to development-quality or release training.
+4. Compare task-focused formulations, tokenizers, sequence architectures, and training methods with controlled, compute-matched level-2 experiments once the reviewed development set is ready; do not wait for the final holdout to run small exploratory tests.
 5. Benchmark model quality and user-visible latency, cold start, memory, unload, and wake-up behavior on each target hardware class.
 6. Select the smallest candidate that passes the behavioral targets and has the best measured product experience; retain evidence and rejected alternatives.
 

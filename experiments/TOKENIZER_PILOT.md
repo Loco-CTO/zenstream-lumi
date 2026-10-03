@@ -1,6 +1,6 @@
 # Tokenizer pilot protocol
 
-**Status:** Planned; blocked until approved training text and reviewed Lumi development cases are available. No tokenizer corpus has been admitted, no tokenizer has been trained or benchmarked, and no candidate is selected.
+**Status:** The level-1 random-init smoke used fixed hashed Unicode character n-gram features and no learned tokenizer. No tokenizer candidate has been selected. A development-quality tokenizer comparison still requires permitted training-only text and reviewed Lumi development cases.
 
 ## Question
 
@@ -10,14 +10,14 @@ Tokenizer compression alone is not the selection target. TokLens reports that in
 
 ## Entry gates
 
-Do not begin corpus-dependent measurement or tokenizer training until all of these are true:
+Do not make development-quality tokenizer comparisons until all of these are true. Small level-1 tokenizer or feature-shape probes may use temporary text with a clearly recorded local-use scope, a predeclared budget, and disjoint exploratory train/development families; they cannot establish tokenizer quality or satisfy any release gate.
 
 1. Every tokenizer-training item has pinned source identity, revision, content hash, and documented permission for tokenizer training. The source records and processing manifest pass `provenance/validate.py`.
 2. Tokenizer-training material is drawn only from an approved training split. No development, public-test, or sealed-holdout text, labels, reviewer notes, or answer-bearing material is used to fit or filter the vocabulary.
-3. The evaluation development inventory contains ready, independently reviewed English, Japanese, and both directions of English/Japanese code-switch cases, with Japanese language review complete. The final holdout is separate and sealed.
+3. The evaluation development inventory contains ready, independently reviewed English, Japanese, and both directions of English/Japanese code-switch cases, with Japanese language review complete. Any available final holdout stays separate and sealed, but completing it is not a level-2 entry gate.
 4. The unapproved Codex-generated 101-case draft inventory is excluded from tokenizer fitting and all tokenizer comparisons until its separate terms gate is resolved.
 
-If any gate is missing, report the pilot as blocked and make no tokenizer-quality claim from unapproved text.
+If any level-2 gate is missing, report the corpus-dependent comparison as blocked and make no tokenizer-quality claim. The missing final holdout and final distribution terms do not by themselves block a scoped level-1 probe.
 
 ## Candidate set
 

@@ -62,7 +62,7 @@ The 2026 [SSM-Scope study](https://sapmitra.github.io/ssm-scope/) compares Trans
 
 The August 2026 [Daedalus-150M preprint](https://arxiv.org/abs/2608.20210) is a closer scratch-training example: it reports a same-size, same-data comparison between a convolution/attention hybrid and an all-attention baseline, with the winning condition written down before either model was scored. The author reports that the hybrid's decode advantage grows with context length and is near zero at an empty context. It is a single-author preprint, uses a general five-task benchmark, and does not establish bilingual intent quality or independent reproducibility. Treat its matched-comparison design as useful; reproduce its result on Lumi's workload before adopting its architecture.
 
-**Current conclusion:** No model formulation, sequence architecture, or parameter count is selected. First compare decoder-only and encoder-decoder conditional generation, with a structured-output predictor included only if it can preserve exact open-text constraints and reviewed Japanese responses. Then compare an all-attention control with one pre-registered short-convolution/attention hybrid inside the viable formulation. Use the same approved text, selected pilot tokenizer, and paired seeds; report both measured-compute-matched and source-exposure-matched results. Add a recurrent/SSM candidate only if the reviewed development workload shows meaningful long-context or state-retention needs. Measure the actual request-length distribution and CPU latency separately from any GPU result. The [model formulation and architecture pilot](experiments/ARCHITECTURE_PILOT.md) defines the gates and comparison protocol. No candidate has been trained or measured.
+**Current conclusion:** No model formulation, sequence architecture, or parameter count is selected. A level-1 structured predictor smoke is measured, but it neither compares architectures nor supplies conversational responses. Any structured-output predictor remains conditional on the complete Lumi system also meeting the user-facing conversation, clarification, uncertainty, and unsupported-request requirements. First compare decoder-only and encoder-decoder conditional generation, with a structured-output predictor included only if it can preserve exact open-text constraints and reviewed Japanese responses. Then compare an all-attention control with one pre-registered short-convolution/attention hybrid inside the viable formulation. Use the same permitted training text, selected pilot tokenizer, and paired seeds; report both measured-compute-matched and source-exposure-matched results. Add a recurrent/SSM candidate only if the reviewed development workload shows meaningful long-context or state-retention needs. Measure the actual request-length distribution and CPU latency separately from any GPU result. The [model formulation and architecture pilot](experiments/ARCHITECTURE_PILOT.md) defines the gates and comparison protocol. No quality-bearing candidate has been trained or selected.
 
 The Mamba comparison, RWKV-7, and Gated DeltaNet are evidence that alternatives deserve a fair small-scale comparison, not evidence that one will win. A non-neural deterministic baseline is also useful as a lower-cost reference, not as Lumi's chosen model.
 
@@ -164,7 +164,9 @@ These remain open; no method below has been accepted or rejected for Lumi, and n
 
 ### Lumi experimental findings
 
-None yet.
+#### Level-1 random-init intent smoke (2026-10-03)
+
+A tiny NumPy predictor trained from random initialization completed 120 epochs, saved and reloaded its artifact, and produced schema-shaped output on CPU. Its 12 training examples fit almost perfectly, while exact semantic match was only 2/5 on the separate five-example exploratory split; it made two false actions on future-intent cases and missed a code-switched title. These measurements show that the training and artifact path works, while the current representation and data do not generalize reliably. The dataset was copied from examples in the user-provided goal, remained outside Git, and was scoped to this local smoke only. See [the reproducibility record](experiments/RANDOM_INIT_INTENT_SMOKE.md).
 
 ### Hypotheses awaiting measurement
 
@@ -175,8 +177,8 @@ None yet.
 
 ## Next research gates
 
-1. Finalize a behavior taxonomy, annotation guide, development set, and sealed holdout before substantial model training.
+1. Use the available reviewer roles to build and freeze a reviewed development set before quality-bearing model comparisons; do not wait for the sealed final holdout before small level-1 experiments.
 2. Complete a rights and availability audit for candidate English and Japanese corpora and benchmarks; admit none by default.
-3. Run tokenizer and small-model architecture pilots under a declared compute ceiling.
+3. Run tokenization and small-model architecture comparisons on the reviewed development set under a declared compute ceiling; keep exploratory smoke work separate from selection evidence.
 4. Review teacher-generated-data methods and their diversity, factual validation, licensing, and contamination risks before generating any data.
 5. Compare runtime and quantization options on representative 4 GB, 8 GB, 16+ GB, and GPU systems.
