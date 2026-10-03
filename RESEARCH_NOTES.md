@@ -1,7 +1,7 @@
 # Lumi research notes
 
 - Research snapshot: 2026-10-03
-- Status: Two level-1 random-initialization smokes and a four-seed response follow-up are complete; no candidate architecture or runtime has been selected.
+- Status: Level-1 evidence now includes random-init intent and response smokes, a four-seed response follow-up, two JMultiWOZ state/response runs, a MASSIVE EN/JA intent/slot diagnostic, and a JECS text-only code-switch loss ablation. These are narrow engineering/source diagnostics, not matched candidate comparisons or product-quality evidence; no candidate architecture or runtime has been selected.
 - Lumi experiments: See the exploratory findings below and their reproducibility records. They verify execution paths only and do not establish product quality. Literature statements remain attributed to their sources, not presented as Lumi results.
 
 ## Workload and evidence boundary
@@ -120,9 +120,9 @@ Recent ACL work on [multilingual synthetic pretraining data](https://aclantholog
 
 **Hypothesis (untested):** Carefully validated teacher-generated examples may efficiently cover rare negation, ambiguity, correction, and code-switch cases. Test a small, manually audited set first; count semantic families, preserve hard negatives, compare multiple generators if permitted, and reject data that harms human-written slices or safety-critical behavior.
 
-Only the narrow ASDC diagnostic item, scoped JMultiWOZ pilots, and scoped MASSIVE pilot recorded in `provenance/data_sources.json` have been admitted. No broad pretraining or tokenizer corpus, synthetic training example, or public model artifact has been admitted. References in this document inform research only; they are not training sources. Before further use, each source needs a recorded version/revision, access date, license and permissions, transformations, filters, deduplication, split use, and measured contribution. Synthetic examples require generator provenance and automated plus human validation. Unknown or unclear rights mean exclusion until resolved.
+Only the narrow ASDC diagnostic item and the exact local-use scopes for the JMultiWOZ, MASSIVE, and JECS pilots recorded in `provenance/data_sources.json` have been admitted. No broad pretraining or tokenizer corpus, synthetic training example, or public model artifact has been admitted. References in this document inform research only; they are not training sources. Before further use, each source needs a recorded version/revision, access date, license and permissions, transformations, filters, deduplication, split use, and measured contribution. Synthetic examples require generator provenance and automated plus human validation. Unknown or unclear rights mean exclusion until resolved.
 
-The first source-rights scan is recorded in [DATASET_CANDIDATES.md](DATASET_CANDIDATES.md). At that time it found narrow English, Japanese, and designed/read EN/JA code-switching candidates, plus a human-annotated retrieval-query benchmark lead; the later scoped ASDC, JMultiWOZ, and MASSIVE admissions are listed above. The review still found no cleared source for natural conversational EN/JA media requests. The collection-level source manifest is paired with [sample-level provenance records](provenance/README.md), which preserve item lineage without storing text in this public repository.
+The first source-rights scan is recorded in [DATASET_CANDIDATES.md](DATASET_CANDIDATES.md). At that time it found narrow English, Japanese, and designed/read EN/JA code-switching candidates, plus a human-annotated retrieval-query benchmark lead; the later scoped ASDC, JMultiWOZ, MASSIVE, and JECS admissions are listed above. The review still found no cleared source for natural conversational EN/JA media requests. The collection-level source manifest is paired with [sample-level provenance records](provenance/README.md), which preserve item lineage without storing text in this public repository.
 
 A follow-up Japanese-dialogue scan identified CEJC as the closest natural-conversation language source, but only as a paid licensing lead: NINJAL's commercial contract specimen includes trained models and their outputs as derived products, while requiring an approved stated purpose and imposing strict limits on corpus-like redistribution, privacy, and identifiable face or voice generation. Its published unlimited-term, unlimited-user tier is JPY 10,000,000 plus tax. ASDC offers CC BY 4.0 role-play lodging dialogs; only the exact item recorded in the provenance manifest is approved for a local public development diagnostic, and it cannot provide a sealed holdout. MRMP offers more informal Japanese conversation under CC BY-SA 4.0, but model-artifact ShareAlike compatibility and residual privacy risks need review. These additional sources remain unapproved; the CEJC and MRMP scans did not download or use dialogue examples.
 
@@ -134,11 +134,11 @@ The 2026-10-03 source refresh identified the [NINJAL Chat Communication Corpus](
 
 The project owner confirms that the existing 101-case draft was generated through Codex using a personal ChatGPT account, but no reliable exact serving model ID/build is available. The intended end state includes public distribution of trained model artifacts. Given that uncertainty and distribution scope, the owner has directed that these cases and their derivatives remain excluded from training, tokenizer fitting, development or final evaluation, filtering, and release evidence. This is a corpus-specific exclusion, not a reason to stop local experiments using separately permitted material. Reviewer availability is confirmed, but no annotations have started. Do not copy or lightly rewrite the excluded drafts into a replacement set. Any new human-authored set must follow the normal consent, rights, privacy, contamination, and source-record review path. OpenAI's Service Terms separately warn that Codex code-generation output may be subject to third-party licenses; that clause is tracked for code output and is not treated here as a blanket statement about ordinary dialogue text.
 
-The training-data manifest is no longer empty: it admits the exact item scopes recorded for the JMultiWOZ and MASSIVE exploratory runs, not broad pretraining or tokenizer fitting. Every future run must consume a frozen manifest and preserve the exact manifest and data-processing revisions used. Development evaluation and final holdout material must remain separate from every training, generation, and filtering input.
+The data manifest admits only the exact JMultiWOZ state/response, MASSIVE intent/slot, and JECS byte-LM pilot scopes, alongside the single ASDC evaluation diagnostic; it does not admit broad pretraining, tokenizer fitting, or a production-quality dataset. Every future run must consume a frozen manifest and preserve the exact manifest and data-processing revisions used. Development evaluation and final holdout material must remain separate from every training, generation, and filtering input.
 
 ## Research areas not yet assessed
 
-These remain open; no method below has been accepted or rejected for Lumi. The completed level-1 experiments are engineering diagnostics, not architecture comparisons or product-quality results.
+These remain open; no method below has been accepted or rejected for Lumi. The completed level-1 experiments are engineering and source diagnostics, not architecture comparisons or product-quality results.
 
 | Area | Initial relevance to Lumi | Main risk or uncertainty | Next evidence needed |
 |---|---|---|---|
@@ -174,6 +174,18 @@ An 18,321-parameter byte-level tanh encoder-decoder trained from random initiali
 
 Three additional random-initialization seeds were run with the same four user-provided training examples, two family-disjoint illustrative development examples, 18,321-parameter byte RNN, Adam recipe, 300 epochs, and 1,200 updates. Together with seed 1729 from the original smoke, all four runs reached byte-level training cross-entropy below 0.008 and produced EOS-terminated valid UTF-8. None produced both intended behaviors: the media comment received an unrelated training response, and the ambiguous playback request received either generic uncertainty or an unsupported-capability refusal instead of a useful playback clarification. Seed 29 also produced a malformed greeting. No exact-match metric or human quality review was performed; these are inspected failure examples, not a quality score. Warm generation p95 ranged from 0.780 to 1.685 ms and process peak working set from 37.59 to 37.71 MB on this Windows/Python environment. This is evidence that the observed failure is not specific to one seed, but the tiny development set cannot identify whether the cause is data coverage, formulation, or both. Do not scale this candidate. See [the seed-sweep record](experiments/CONVERSATION_RESPONSE_SEED_SWEEP.md).
 
+#### Level-1 Japanese JMultiWOZ state/response pilots (2026-10-03)
+
+The first 64-train/24-development run produced valid UTF-8, EOS, JSON, and required output shape on all 24 development dialogues, but exact domain match was 7/24 and exact argument match was 0/24. The 512-train/64-fresh-development follow-up produced valid output shape on all 64 items, exact domain match on 17/64 (26.6%), and exact argument-object match on 0/64. Neither run received human review of Japanese response quality. The follow-up's sample differs from the first pilot's sample, so the scores do not isolate the effect of increased training size. Both are travel-domain diagnostics, not ZenStream behavior evidence; see the [original pilot](experiments/JMULTIWOZ_PILOT.md) and [scale follow-up](experiments/JMULTIWOZ_SCALE_PILOT.md).
+
+#### Level-1 MASSIVE EN/JA intent/slot pilot (2026-10-03)
+
+The random-init byte RNN emitted valid JSON and UTF-8 for all 128 public-development rows, but exact intent was 0/128 and slot-value micro-F1 was 0.000 in both locales. The small one-seed candidate is rejected as a useful structured predictor. MASSIVE's professionally translated voice-assistant text does not establish natural Japanese dialogue or code-switch ability, and this public sample is not a qualified Lumi development set. See the [pilot report](experiments/MASSIVE_INTENT_SLOT_PILOT.md).
+
+#### Level-1 JECS text-only code-switch ablation (2026-10-03)
+
+On 235 held-out Japanese, 235 English, and 96 designed code-switch transcript rows, a random-init byte language model trained with code-switch rows reduced mean byte loss on the JECS code-switch slice from 5.4271 to 3.1414 versus a JA+EN-only baseline; English remained approximately 3.441, and Japanese changed from 2.7661 to 2.7422. The model saw those code-switch examples during training, the mixture comparison does not hold per-language exposure constant, and the corpus is acted/read parallel speech. This is a narrow next-byte prediction result, not evidence of spontaneous code-switch responses or ZenStream task behavior. See the [JECS report](experiments/JECS_CODE_SWITCH_PILOT.md).
+
 ### Hypotheses awaiting measurement
 
 - A task-focused model may be much smaller than a general-purpose conversational model while meeting action and slot targets.
@@ -183,8 +195,8 @@ Three additional random-initialization seeds were run with the same four user-pr
 
 ## Next research gates
 
-1. Use the available reviewer roles to build and freeze a reviewed development set before quality-bearing model comparisons; do not wait for the sealed final holdout before small level-1 experiments.
-2. Complete a rights and availability audit for candidate English and Japanese corpora and benchmarks; admit none by default.
+1. Route the independent reviewers and build a new semantically diverse English/Japanese/code-switch development set that is independent of the excluded 101-case draft; freeze it only after two semantic reviews and qualified Japanese/bilingual review. Do not wait for the sealed final holdout before small level-1 experiments.
+2. Close rights, privacy, task-fit, and artifact-distribution review for suitable English/Japanese/code-switch training sources; current admissions are narrow pilot scopes only.
 3. Run tokenization and small-model architecture comparisons on the reviewed development set under a declared compute ceiling; keep exploratory smoke work separate from selection evidence.
 4. Review teacher-generated-data methods and their diversity, factual validation, licensing, and contamination risks before generating any data.
 5. Compare runtime and quantization options on representative 4 GB, 8 GB, 16+ GB, and GPU systems.
