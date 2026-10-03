@@ -1,5 +1,50 @@
 {
   "manifest_version": 1,
-  "status": "empty",
-  "generations": []
+  "status": "records_present",
+  "generations": [
+    {
+      "generation_id": "lumi-unified-synthetic-smoke-v1",
+      "provider": "Hand-authored local deterministic template generator",
+      "model_name": "None; no LLM teacher used",
+      "model_version": "v1",
+      "generation_date": "2026-10-03",
+      "purpose": "One Level 1 local exploratory unified-model training and exploratory development smoke; not a formal evaluation set or release evidence",
+      "prompt_family": "English, Japanese, and English-Japanese Lumi interaction templates derived from the user-provided product objective",
+      "prompt_template_id": "lumi-unified-synthetic-smoke-templates-v1",
+      "prompt_template_sha256": "sha256:3bbfb41e068e75ed57c450dc371c94598e33020d70ba673d110f4f71b78f3ef3",
+      "settings": {
+        "base_commit": "039b54310921a7aa32cdacd505f8fa7f1391db2e",
+        "generator_path": "historical template-builder source not included in the repository",
+        "generator_sha256": "sha256:3bbfb41e068e75ed57c450dc371c94598e33020d70ba673d110f4f71b78f3ef3",
+        "goal_objective_sha256": "sha256:fc1bc61d354a9534a7a6692646c52d42c2cb2c5a5413025f0b48fbe461e5232c",
+        "training_examples": 42,
+        "training_families": 21,
+        "exploratory_development_examples": 42,
+        "exploratory_development_families": 21,
+        "family_disjoint": true,
+        "combined_packet_sha256": "sha256:02790c733a85a76bb4be63a3f23413b1bbe13e6bdd06272ef77ded0e2e5bdaca",
+        "training_packet_sha256": "sha256:1a28bb3abc9be316d46f6e3e0c7cced4e55a16d7f9fe3512818a725626d15247",
+        "exploratory_development_packet_sha256": "sha256:88c7cd5614f589543838ccb15b545821b320de9397e33eaaabe4ffec4bc306fe",
+        "local_run_id": "lumi-unified-synthetic-smoke-20261003-a2",
+        "distribution_approval": false,
+        "formal_evaluation_case_registration": false
+      },
+      "example_count": 84,
+      "filtered": false,
+      "filter_details": "No examples were filtered; generation validation errors abort the run.",
+      "deduplicated": false,
+      "deduplication_details": "No post-generation deduplication pass; duplicate IDs or input strings cause generation validation to abort.",
+      "automatically_validated": true,
+      "automatic_validation_details": "The runner checks required output fields, allowed decisions and presentation intents, action/clarification consistency, canonical JSON serialization, unique IDs and input strings, and disjoint train and exploratory-development family IDs. These checks do not establish semantic correctness or language quality.",
+      "manually_reviewed": false,
+      "manual_review_details": "No independent semantic annotation or qualified Japanese/bilingual review was performed.",
+      "downstream_uses": [
+        "zenstream_specific_training",
+        "evaluation"
+      ],
+      "provider_terms_url": "urn:lumi:local-generator:unified-synthetic-smoke-v1",
+      "output_checksum": "sha256:02790c733a85a76bb4be63a3f23413b1bbe13e6bdd06272ef77ded0e2e5bdaca",
+      "review_notes": "Local Level 1 exploratory use only. The evaluation use means the generated exploratory-development smoke measurement only; examples are not entered in the formal evaluation inventory. This packet contains no data from the excluded 101-case Codex draft or its derivatives and has no lineage to JECS, JMultiWOZ, or MASSIVE. No model or data distribution permission is granted. The frozen example JSONL and all trained artifacts and reports remain in controlled local .lumi-data storage outside Git. The historical template-builder source (hash recorded above) is not included in the current tracked tree."
+    }
+  ]
 }
