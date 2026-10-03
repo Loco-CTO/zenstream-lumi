@@ -224,6 +224,62 @@
         "rationale": "The author-hosted source page identifies a CC BY 3.0 text license; the upstream JEC resource and JAIST catalog provide separate attribution context. Only four individually hashed text/evidence members were acquired by validated ZIP byte ranges. The Japanese and English IDs align across 1,219 families, the 539 code-switch rows are drawn from those families, and the train/development partition keeps each family together. Exact duplicate-hash and privacy-pattern checks are recorded by the pilot. These are structural checks only: this acted/read parallel speech corpus is not spontaneous ZenStream conversation, and qualified semantic or native-speaker quality review is not claimed."
       },
       "generation_record_id": null
+    },
+    {
+      "source_id": "csr-l-humaneval-ja-en-public-test-transfer-probe",
+      "source_type": "external_dataset",
+      "name": "CSR-L Japanese-English HumanEval public-test query slice",
+      "canonical_identifier": "https://huggingface.co/datasets/UTokyo-Yokoya-Lab/HumanEvalRetrieval-CSR-L",
+      "authors_or_organization": "CSR-L authors Qingcheng Zeng, Yuheng Lu, Zeqi Zhou, Heli Qi, Puxuan Yu, Fuheng Zhao, Hitomi Yanaka, Weihao Xuan, and Naoto Yokoya; UTokyo-Yokoya-Lab; underlying HumanEvalRetrieval authors",
+      "version": "158 Japanese-English HumanEval retrieval queries in the public test split",
+      "revision": "d7634f8e08cf9249cdb2169fb153b0de85d705c8",
+      "release_date": null,
+      "access_date": "2026-10-03",
+      "license": {
+        "identifier": "MIT",
+        "url": "https://opensource.org/license/mit/",
+        "copyright_notice": "The README at the pinned Hugging Face revision declares MIT for this dataset. It identifies the underlying mteb/HumanEvalRetrieval source as MIT.",
+        "attribution_requirement": "Retain the MIT copyright and permission notice and cite the CSR-L paper and dataset, plus the underlying HumanEval source as requested by the dataset card. Identify the exact Japanese-English public-test slice and describe transformations.",
+        "terms_review": "The exact Hugging Face dataset revision, README, and Japanese-English test member were pinned. The README declares MIT and identifies the underlying HumanEvalRetrieval source as MIT. The ACL paper states that the paper authors rewrote queries, with a second bilingual annotator validating or editing/discarding each rewrite, and lists the Japanese-English HumanEval slice as 158 queries. This record approves only evaluation of the exact Japanese-English HumanEval public-test queries in a local next-byte transfer probe. It does not admit the corpus, qrels, Chinese queries, other CSR-L tasks, any training/tokenizer/filtering/generation use, a sealed holdout, or public model-artifact distribution. No raw query text, predictions, or weights are committed. Re-review all data and exact artifact lineage before any model release. This is a scoped source review, not legal advice."
+      },
+      "permissions": {
+        "commercial_use": "permitted",
+        "redistribution": "permitted",
+        "modification": "permitted",
+        "derivative_works": "permitted",
+        "training_use": "permitted",
+        "evaluation_use": "permitted"
+      },
+      "lumi_uses": [
+        "evaluation"
+      ],
+      "decision": "approved_for_use",
+      "direct_or_indirect": "direct",
+      "transformations": [
+        "Select only config queries_ja_en, split test, from the pinned HumanEvalRetrieval-CSR-L revision; preserve each query text exactly as published.",
+        "Encode query text as UTF-8 bytes with the existing code-switch language tag, BOS, and EOS for next-byte evaluation of already-trained JECS checkpoints.",
+        "Do not read or use corpus documents, relevance judgments, Chinese-English queries, other task configurations, answers, or retrieved results."
+      ],
+      "filters": [
+        "Use all and only the 158 unique Japanese-English HumanEval public-test query rows in queries_ja_en/test-00000-of-00001.parquet at revision d7634f8e08cf9249cdb2169fb153b0de85d705c8.",
+        "Use the public test as an external diagnostic, not as a sealed holdout or a training/development source.",
+        "Keep the raw dataset, normalized query text, item records, predictions, and model weights outside Git; commit metadata and aggregate results only.",
+        "The 101-case Codex draft and all derivatives remain excluded from training, tokenizer fitting, evaluation, filtering, prompt construction, and release evidence."
+      ],
+      "deduplication": [
+        "Require one unique source query ID and one unique UTF-8 text hash per row.",
+        "Compare exact UTF-8 text hashes against all 2,977 eligible JECS training/development samples; reject any overlap."
+      ],
+      "document_count": 1,
+      "example_count": 158,
+      "token_count": null,
+      "checksum": "sha256:e1dc7284c97c0d4e6dfd7eae7ab2dd1f5af223523b9dad23f0b41c40e2f6aba0",
+      "review": {
+        "reviewed_by": "Codex-assisted primary-source, pin, rights, and sample-scope review",
+        "reviewed_date": "2026-10-03",
+        "rationale": "The immutable revision, README license declaration, test member size and LFS SHA-256, ACL description of human rewriting and validation, 158-row Japanese-English HumanEval scope, unique IDs/text, privacy-pattern flags, and exact-hash overlap against eligible JECS records were checked. Two rows match a generic phone-like digit pattern, but manual inspection shows only code/date examples, not contact details. The slice is admitted solely for one local next-byte transfer measurement; the public-test status and retrieval-query domain limit any quality claim."
+      },
+      "generation_record_id": null
     }
   ]
 }
