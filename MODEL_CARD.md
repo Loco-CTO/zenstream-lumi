@@ -21,7 +21,7 @@ When a candidate passes the evaluation gates, Lumi is intended to interpret opti
 - Initialization: Any eventual Lumi runtime model must start from random initialization; pretrained checkpoints and derived adapters are prohibited.
 - Training stages and token counts: No product training plan or token count is established. One 120-epoch level-1 smoke run is recorded in the experiment note.
 - Training data: No production-quality or release training data is admitted. The smoke used 12 local user-brief examples; see [DATA_SOURCES.md](DATA_SOURCES.md) and `provenance/data_sources.json`.
-- English/Japanese data composition: Not established.
+- English/Japanese data composition: No product training mix is established. One local JECS text-only byte-LM ablation used 984 training families and 235 public development families; the [pilot report](experiments/JECS_CODE_SWITCH_PILOT.md) documents the mixture and limits.
 
 ### Exploratory conversation response component
 
@@ -31,10 +31,18 @@ When a candidate passes the evaluation gates, Lumi is intended to interpret opti
 - Development behavior: generated valid UTF-8 for two illustrative prompts, but reused an unrelated response and gave a generic rather than task-specific clarification. No human review or quality score was performed.
 - Scope: English only; not integrated with the structured predictor or ZenStream. Details are in [the conversation response smoke](experiments/CONVERSATION_RESPONSE_SMOKE.md).
 
+### Exploratory JECS byte-LM ablation
+
+- Architecture: random-initialized, one-layer tanh recurrent UTF-8 byte language model with fixed language tags and no learned tokenizer.
+- Training: 18,086 parameters; one CPU-only, single-seed comparison of Japanese/English training rows against Japanese/English/code-switch rows from a small, text-only JECS v1 scope.
+- Development result: the code-switch-augmented run lowered bits per UTF-8 byte on 96 held-out JECS code-switch rows; English was effectively unchanged and Japanese moved slightly. This is a public development result on acted/read text, not evidence of natural conversational ability or product quality.
+- Weights: approximately 68 KB each, kept in controlled local storage. The source license and data lineage do not by themselves clear either artifact for public distribution.
+- Details and exact metrics: [JECS pilot report](experiments/JECS_CODE_SWITCH_PILOT.md).
+
 ## Evaluation and limitations
 
 - Development/release evaluation: Not run. The 5-example intent smoke and 2-example response smoke are too small, illustrative, and unreviewed for product claims.
-- English, Japanese, code-switching, action reliability, grounding, and structured-output results: None.
+- English, Japanese, code-switching, action reliability, grounding, and structured-output task results: None. JECS byte-level held-out text losses are recorded as a narrow language-model diagnostic; they are not task or response-quality results.
 - Known prototype weaknesses: two false actions on future-intent examples, failure to extract one code-switched title, and no genre/year/runtime/watched-state extraction. These are five-example exploratory findings only; do not use them as population estimates or readiness evidence.
 - Natural conversation, unsupported-request handling, and low-confidence behavior were not evaluated by the structured-prediction smoke. A classifier or slot extractor alone does not satisfy Lumi's user-facing conversation requirement.
 - The response smoke emitted nonempty valid UTF-8 on both illustrative development prompts, but reused an unrelated training reply for a media comment and used generic uncertainty wording for an ambiguous playback request. This is a qualitative diagnostic from two unreviewed examples, not a score. It has no Japanese or code-switch evidence.

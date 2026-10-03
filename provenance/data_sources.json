@@ -166,6 +166,64 @@
         "rationale": "The official 1.1 archive and English/Japanese member hashes are pinned. The two locale files have matching row IDs and train/dev/test splits, with 60 aligned intent labels. A deterministic 256/64 family selection was inspected: all selected annotation brackets parse, all paired labels agree, and no selected text or slot value matched the email or phone scan. The dataset is localized device-assistant language, not spontaneous Japanese or English/Japanese code-switching; no qualified Lumi language review is claimed."
       },
       "generation_record_id": null
+    },
+    {
+      "source_id": "jecs-v1-neutral-text-only",
+      "source_type": "external_dataset",
+      "name": "JECS Japanese-English code-switching speech corpus v1 neutral transcript text",
+      "canonical_identifier": "https://sites.google.com/site/shinnnosuketakamichi/research-topics/jecs_corpus",
+      "authors_or_organization": "Shinnosuke Takamichi, Yoshifumi Nakano, Ai Morimatsu, Takaaki Saeki, and Hiroshi Saruwatari; underlying JEC Basic Sentence Data credited to the Kurohashi-Kawahara Laboratory at Kyoto University and the NICT MASTAR Project Multilingual Translation Laboratory",
+      "version": "JECS v1; only the Japanese, English, and code-switched transcript text members plus the upstream README",
+      "revision": "jecs_ver1.zip; Google Drive file id 1fkqANFinsVJcD4GXmQXgent9ImyiWUZB",
+      "release_date": null,
+      "access_date": "2026-10-03",
+      "license": {
+        "identifier": "CC-BY-3.0",
+        "url": "https://creativecommons.org/licenses/by/3.0/",
+        "copyright_notice": "The JECS author page identifies the transcript text as CC BY 3.0 and treats the speech audio separately. JECS describes its text as based on JEC Basic Sentence Data, which JAIST catalogs as CC BY 3.0.",
+        "attribution_requirement": "Credit the JECS authors, identify the JEC Basic Sentence Data and its credited laboratories, link the source and CC BY 3.0 terms, describe transformations, and do not imply endorsement.",
+        "terms_review": "The JECS author page, README, Creative Commons deed, upstream JEC resource page, and JAIST language-resource catalog were reviewed. This local admission covers only the three exact neutral transcript text members and README, totaling 2,977 rows. Audio files and the other archive members were not acquired or used; the author page states distinct restrictions for audio. Text reuse and adaptation require attribution and other CC BY 3.0 conditions. This source review permits the bounded text-only pretraining and public-development measurement recorded here, but does not decide whether resulting weights are derivative works or clear those weights for public distribution. Reassess the exact artifact, all data lineage, and applicable third-party rights before any release. This is a scoped research review, not legal advice."
+      },
+      "permissions": {
+        "commercial_use": "permitted",
+        "redistribution": "permitted",
+        "modification": "permitted",
+        "derivative_works": "conditional",
+        "training_use": "permitted",
+        "evaluation_use": "permitted"
+      },
+      "lumi_uses": [
+        "pretraining",
+        "evaluation",
+        "filtering"
+      ],
+      "decision": "approved_for_use",
+      "direct_or_indirect": "direct",
+      "transformations": [
+        "Read only the exact transcripts_ja.txt, transcripts_en.txt, transcripts_cs.txt, and README.md files whose individual SHA-256 hashes are recorded below; do not acquire or process audio or other archive members.",
+        "Parse JECSNNNN_LANG transcript rows, remove utterance identifiers, and remove the paired asterisk delimiters from code-switch examples while retaining their text.",
+        "Assign all language rows sharing a JECS numeric family ID to one deterministic training or development partition; record source-line and normalized-sample hashes in controlled local provenance files.",
+        "Apply email, URL, and phone-like sequence scans. Use fixed UTF-8 byte codes and language tags; no tokenizer is learned."
+      ],
+      "filters": [
+        "Use only the three neutral transcript text members and their matching README; the full 374,577,780-byte ZIP and its audio were not downloaded or opened.",
+        "Pin the exact acquired member hashes: transcripts_ja.txt 20551876ae990563b2fda3b107fb3c5249e485d5b01847452f26a2f7956d2b5e; transcripts_en.txt a4d2e8980d42e8747e2e670c9d112953bd8298da292ba43c1bd2ffa6f8ffc083; transcripts_cs.txt 7c26eea872f3099e205035973c0784fcaa473c89f26018a5b4a1a6d72a2e468c; README.md 4d68ea0502e58698e245f104098f4dd9679e07398a4d44bc95b586732536f10d.",
+        "Keep raw text, item-level records, predictions, and trained weights in controlled local storage outside Git. The short pilot is exploratory and is not a conversational-quality or public-release approval."
+      ],
+      "deduplication": [
+        "Group aligned language rows by numeric JECS utterance family before assigning the deterministic split.",
+        "Reject duplicate text within a language and any identical normalized sample that crosses the training/development boundary; the pilot also audits exact cross-language duplicate hashes."
+      ],
+      "document_count": 3,
+      "example_count": 2977,
+      "token_count": null,
+      "checksum": null,
+      "review": {
+        "reviewed_by": "Codex-assisted primary-source, rights, and structural audit",
+        "reviewed_date": "2026-10-03",
+        "rationale": "The author-hosted source page identifies a CC BY 3.0 text license; the upstream JEC resource and JAIST catalog provide separate attribution context. Only four individually hashed text/evidence members were acquired by validated ZIP byte ranges. The Japanese and English IDs align across 1,219 families, the 539 code-switch rows are drawn from those families, and the train/development partition keeps each family together. Exact duplicate-hash and privacy-pattern checks are recorded by the pilot. These are structural checks only: this acted/read parallel speech corpus is not spontaneous ZenStream conversation, and qualified semantic or native-speaker quality review is not claimed."
+      },
+      "generation_record_id": null
     }
   ]
 }
