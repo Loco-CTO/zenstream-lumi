@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "artifact_id": "lumi-evaluation-draft-2026-10-03",
+  "artifact_storage": "local controlled data-build storage outside the repository",
+  "case_text_checked_in": false,
+  "split": "development",
+  "case_count": 101,
+  "family_count": 43,
+  "language_counts": {
+    "en": 34,
+    "ja": 36,
+    "en_ja": 31
+  },
+  "required_slice_language_pairs": 101,
+  "draft_slice_language_pairs_present": 101,
+  "ready_slice_language_pairs": 0,
+  "missing_slice_language_pairs": 0,
+  "ready_cases": 0,
+  "review_records": 0,
+  "sample_provenance_records": 101,
+  "case_file_sha256": "sha256:9ffc8552dd99c799b185a0db02fcf92f916c33cc90d18bed84dcfe571bc4b5ee",
+  "sample_provenance_sha256": "sha256:3df5abd9e1b763033a45279281062ea36c6c066a5539ee9e7acbffdc2c90408d",
+  "coverage_report_sha256": "sha256:d13e6a302c6d01b5caa84f897f43785679d0aa4db8e259695f1eb58f3d260f66",
+  "review_ledger_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "generation_brief_sha256": "sha256:3446ebe27ad218d233da804e573f256dacaf853d9e5b05b1ee038e8ac6e5d28a",
+  "generation_specs_sha256": "sha256:17263651d334ffda9add8d5fb73ecf432e7d3b7007af2255ca0111bad538c1f3",
+  "generation": {
+    "provider": "OpenAI",
+    "model": "Codex assistant; exact serving model ID and build not exposed",
+    "terms_reference": "https://openai.com/policies/",
+    "rights_status": "pending; permissions unknown"
+  },
+  "review_status": {
+    "semantic": "no independent reviews",
+    "japanese_and_code_switch_language": "pending for all 67 ja and en_ja cases"
+  },
+  "sample_size_adequacy": "not assessed; one draft case per required slice-language pair does not establish threshold-level statistical evidence",
+  "use_status": "draft only; not approved, not scoreable, and excluded from training",
+  "final_holdout_status": "not yet created",
+  "limitations": [
+    "The capability registry remains draft; explicit genre, year, runtime, and watched-state search filters are not implemented, and no Lumi playback gateway exists.",
+    "The current draft does not settle how prompt-specific semantic discovery should map onto the available catalog operations.",
+    "Coverage presence does not establish Japanese naturalness, semantic label correctness, rights, contamination status, reviewer qualification, or sufficient sample size."
+  ]
+}

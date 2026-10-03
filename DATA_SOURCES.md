@@ -1,6 +1,6 @@
 # Lumi data sources and provenance
 
-**Current training-data status:** No external dataset content has been admitted or used for training, tokenizer development, or evaluation. The machine-readable [data-source manifest](provenance/data_sources.json) has an empty source list and is described by [its JSON Schema](provenance/data_sources.schema.json). Synthetic generations have a separate [manifest](provenance/synthetic_data.json) and [schema](provenance/synthetic_data.schema.json). Research references are kept separately in [RESEARCH_REFERENCES.md](RESEARCH_REFERENCES.md) and are not training data.
+**Current data status:** No external dataset content has been admitted or used for training, tokenizer development, or approved evaluation. An initial 101-case synthetic evaluation draft exists only in local controlled storage; it has no independent review, no resolved rights decision, and is not scoreable. Its metadata-only fingerprint is recorded in [the draft inventory manifest](evaluation/draft_inventory_manifest.json). The public [data-source manifest](provenance/data_sources.json) remains empty until source review. Synthetic generations have a separate [manifest](provenance/synthetic_data.json) and [schema](provenance/synthetic_data.schema.json). Research references are kept separately in [RESEARCH_REFERENCES.md](RESEARCH_REFERENCES.md) and are not training data.
 
 ## Admission policy
 
@@ -12,7 +12,7 @@ Separate and label each source's use as pretraining, instruction training, ZenSt
 
 ## Synthetic data
 
-No synthetic training or evaluation data has been generated. Before any use, record the provider, model and dated version, generation date, purpose, prompt family/method, important settings, number of examples, filtering, deduplication, automatic validation, manual review, downstream split/use, and relevant provider terms in [the synthetic-data manifest](provenance/synthetic_data.json). Treat generated text as untrusted: validate semantics, rights, privacy, diversity, contamination, and label correctness before inclusion.
+The local draft bundle records one interactive assistant-generation event and per-case sample hashes, while leaving permissions unknown and all rows unapproved. No synthetic content has been admitted for training, tokenizer development, or scoring. Before any use, record the provider, model and dated version, generation date, purpose, prompt family/method, important settings, number of examples, filtering, deduplication, automatic validation, manual review, downstream split/use, and relevant provider terms in [the synthetic-data manifest](provenance/synthetic_data.json). Treat generated text as untrusted: validate semantics, rights, privacy, diversity, contamination, and label correctness before inclusion.
 
 ## Evaluation and contamination
 
@@ -20,4 +20,4 @@ Evaluation sources are provenance sources too. Keep development and final-holdou
 
 ## Release summary
 
-There are currently no training, tokenizer, or evaluation data sources to report. This statement must be updated for each release from the reviewed manifest, not from undocumented developer knowledge.
+There are currently no approved training, tokenizer, or evaluation data sources to report. The controlled draft inventory is not an approved evaluation source and is not part of a release. Update this statement for each release from reviewed manifests, not from undocumented developer knowledge.
