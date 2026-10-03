@@ -6,11 +6,11 @@
 
 ## Revisions inspected
 
-- Orchestrator: `Loco-CTO/zenstream-orchestrator` PR #261 head `59cebf8cca31b0ad08a399f08d81dc8b1527ded0`; `contracts/openapi.json` SHA-256 `bc179aa6857a062630d2fb1551aa887816711e56613342fdd7b737b49f0c403c`; `orchestrator/api/zenstream/client_routes.py` SHA-256 `2dcc411882c2ba2779655ab0006f7c75a9e090a65c0c77985cd4a2bdef33a5df`.
+- Orchestrator: `Loco-CTO/zenstream-orchestrator` merged PR #261 at commit `d07c1d1e8d74dc870570f1ac7b5cbc3f14d94f1c`; `contracts/openapi.json` SHA-256 `3b157408028b8d2053fc4e85e36f06a0d799c60c4c221a5eb94eba4226b722aa`; `orchestrator/api/zenstream/openapi.py` SHA-256 `d728070e52612e0315d921cb430e60d18d885a66b9203972734383a9f9c89da7`; `orchestrator/api/zenstream/client_routes.py` SHA-256 `2dcc411882c2ba2779655ab0006f7c75a9e090a65c0c77985cd4a2bdef33a5df`; `orchestrator/app/catalog.py` SHA-256 `16e4f9da57b4bfd3e3b1ca4917677a3b07ee107b965683d2d995658e95864486`.
 - Web client: `Loco-CTO/zenstream` `origin/main` ref `ff37bb4543be73f2203704959dd34f0f80546b0b`. The local `main` checkout was three commits behind; the relevant playback files had no diff against that local `origin/main` ref. Audited files: `lib/syncplay-playback.ts` SHA-256 `6c9e507aa3b9563d0777007acba96885734ace754a8725276a7cd8790d42586a`, `components/pages/player-page.tsx` SHA-256 `d36e1bc05d792801603803ca50db44b3ed435fc0a4a55a4a4f0368457c019b90`, and `components/audio/audio-player-provider.tsx` SHA-256 `22bb3d28e3e6b7aa1414e81b669ddef0385b188e2d81d623d8b5cac214792c2c`.
 - Android client: `Loco-CTO/zenstream-mobile` commit `e47ef524f7925da2760ad9587fd6e6653ba2b99b`. Audited files: `app/src/main/java/com/zenstream/zenstreammobile/data/CatalogApi.kt` SHA-256 `2eac061c8b3b293883cdad70535716a3d254dc9c622d5a05d2c9752dbd125b49` and `app/src/main/java/com/zenstream/zenstreammobile/audio/AudioPlaybackService.kt` SHA-256 `b3b6896ab02cfd43c9fed32e72061968dc629a6e90770417894bc6a1d66465f`.
 
-These pins identify the source snapshots inspected for this audit; they do not imply a Lumi integration or an approved capability contract. PR #261 corrects the OpenAPI play-start request to match the live audio client payload and includes a regression test for the required request ID.
+These pins identify the source snapshots inspected for this audit; they do not imply a Lumi integration or an approved capability contract. Merged PR #261 corrects the OpenAPI play-start request to match the live audio client payload and includes a regression test for the required request ID.
 
 ## What the current service contract does
 
