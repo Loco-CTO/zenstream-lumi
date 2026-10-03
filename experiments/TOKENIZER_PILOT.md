@@ -1,6 +1,6 @@
 # Tokenizer pilot protocol
 
-**Status:** The level-1 random-init smoke used fixed hashed Unicode character n-gram features and no learned tokenizer. No tokenizer candidate has been selected. A development-quality tokenizer comparison still requires permitted training-only text and reviewed Lumi development cases.
+**Status:** The level-1 random-init smoke used fixed hashed Unicode character n-gram features and no learned tokenizer. A separate [JECS tokenizer intrinsic pilot](JECS_TOKENIZER_INTRINSIC_PILOT.md) compared a byte baseline with small BPE and Unigram vocabularies on a narrowly scoped source. It measures tokenization only; no candidate was selected. A development-quality tokenizer comparison still requires suitable permitted training text and reviewed Lumi development cases.
 
 ## Question
 
@@ -27,7 +27,7 @@ Begin with a byte-level baseline and two learned subword families:
 - BPE subwords with byte fallback, trained on the approved tokenizer-training split.
 - Unigram subwords with byte fallback, trained on the same approved split.
 
-For the first small pilot, compare candidate vocabularies of 4k, 8k, and 16k entries where the implementation supports those sizes. Revisit these pilot settings against actual corpus size and the model parameter budget before running; they are comparison points, not chosen deployment values. Pin the tokenizer implementation, version, normalization, pre-tokenization, byte fallback, special tokens, and training seed for every run.
+For a first small pilot, compare candidate vocabularies of 4k, 8k, and 16k entries where the implementation supports those sizes. Revisit the sizes against actual corpus and parameter budgets before running; they are comparison points, not deployment values. The JECS intrinsic pilot instead used 2k and 4k because full character coverage of its much smaller train split required more than 1,500 characters plus byte-fallback symbols. Pin implementation, version, normalization, pre-tokenization, byte fallback, special tokens, and seed behavior. If the pinned runtime does not accept a seed override, record its documented default and the exact artifacts; treat repeated identical hashes as a reproducibility check for that runtime/build, not as a controllable random-seed comparison.
 
 ## Intrinsic and systems measurements
 
@@ -66,4 +66,4 @@ Use `EXPERIMENT_TEMPLATE.md` for every run and attach the tokenizer artifacts, t
 - what remains a hypothesis;
 - whether each candidate is accepted, rejected, or inconclusive and why.
 
-Do not promote an intrinsic-metric winner to the selected tokenizer unless it improves or preserves reviewed target behavior under the measured size and CPU constraints. No run in this protocol currently exists.
+Do not promote an intrinsic-metric winner to the selected tokenizer unless it improves or preserves reviewed target behavior under the measured size and CPU constraints. The JECS intrinsic pilot is not a development-quality tokenizer comparison and selects no candidate.
