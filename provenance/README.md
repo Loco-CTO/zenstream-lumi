@@ -10,6 +10,8 @@ Manually authored material also requires an entry in the metadata-only `author_c
 
 No sample-level records are committed. The local 101-case draft evaluation bundle has matching case and sample hashes, but all records remain review_pending, with unknown rights, unchecked contamination, and unreviewed privacy. It is not an approved source and must not be shown to human reviewers, scored, or used for training. The blind review workbench and ledger importer both validate the full source, generation, and sample-record bundle before allowing review data to be collected or joined.
 
+Before collecting new author-written cases or training examples, follow the [human contributor intake checklist](AUTHOR_CONTRIBUTION_CHECKLIST.md). It is an operational checklist, not a consent agreement or legal determination. Record training uses and model artifact distribution only when the reviewed grant covers the exact intended scope; evaluation-only permission must not be reused for training.
+
 ## Provenance gate
 
 Run the standard-library validation gate before building a dataset, exposing evaluation cases for human review, importing review ledgers, or scoring an evaluation set:

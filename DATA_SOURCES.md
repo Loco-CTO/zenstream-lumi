@@ -14,6 +14,8 @@ Separate and label each source's use as pretraining, instruction training, ZenSt
 
 The local draft bundle records one interactive assistant-generation event and per-case sample hashes, while leaving permissions unknown and all rows unapproved. No synthetic content has been admitted for training, tokenizer development, or scoring. Before any use, record the provider, model and dated version, generation date, purpose, prompt family/method, important settings, number of examples, filtering, deduplication, automatic validation, manual review, downstream split/use, and relevant provider terms in [the synthetic-data manifest](provenance/synthetic_data.json). Treat generated text as untrusted: validate semantics, rights, privacy, diversity, contamination, and label correctness before inclusion.
 
+For any new human-written material, use the [human contributor intake checklist](provenance/AUTHOR_CONTRIBUTION_CHECKLIST.md) to settle use scope and artifact-distribution disclosures before collection. An internal evaluation-only grant is distinct from permission to train or distribute model weights; do not widen one into the other.
+
 ## Evaluation and contamination
 
 Evaluation sources are provenance sources too. Keep development and final-holdout access and use explicit; neither holdout examples nor their answers may enter training, generation prompts, filtering, or tuning. Preserve source and license records even for data that is used only to score a model.
