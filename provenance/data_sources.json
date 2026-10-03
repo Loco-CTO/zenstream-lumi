@@ -182,7 +182,7 @@
         "url": "https://creativecommons.org/licenses/by/3.0/",
         "copyright_notice": "The JECS author page identifies the transcript text as CC BY 3.0 and treats the speech audio separately. JECS describes its text as based on JEC Basic Sentence Data, which JAIST catalogs as CC BY 3.0.",
         "attribution_requirement": "Credit the JECS authors, identify the JEC Basic Sentence Data and its credited laboratories, link the source and CC BY 3.0 terms, describe transformations, and do not imply endorsement.",
-        "terms_review": "The JECS author page, README, Creative Commons deed, upstream JEC resource page, and JAIST language-resource catalog were reviewed. This local admission covers only the three exact neutral transcript text members and README, totaling 2,977 rows. Audio files and the other archive members were not acquired or used; the author page states distinct restrictions for audio. Text reuse and adaptation require attribution and other CC BY 3.0 conditions. This source review permits the bounded text-only pretraining and public-development measurement recorded here, but does not decide whether resulting weights are derivative works or clear those weights for public distribution. Reassess the exact artifact, all data lineage, and applicable third-party rights before any release. This is a scoped research review, not legal advice."
+        "terms_review": "The JECS author page, README, Creative Commons deed, upstream JEC resource page, and JAIST language-resource catalog were reviewed. This local admission covers only the three exact neutral transcript text members and README, totaling 2,977 rows. Audio files and the other archive members were not acquired or used; the author page states distinct restrictions for audio. Text reuse and adaptation require attribution and other CC BY 3.0 conditions. This source review permits the recorded bounded text-only pretraining and public-development measurement plus one local tokenizer-intrinsic comparison using SentencePiece BPE and Unigram vocabulary sizes 2,048 and 4,096. The tokenizer comparison fits only the existing 984-family training split and measures intrinsic tokenization statistics only on its disjoint 235-family public-development split; it does not fit vocabularies, filter, or select data from development text. Raw samples and tokenizer artifacts remain local. This scoped review does not decide whether any resulting model or vocabulary artifacts are derivative works or clear them for public distribution. Reassess the exact artifact, all data lineage, and applicable third-party rights before any release. This is a scoped research review, not legal advice."
       },
       "permissions": {
         "commercial_use": "permitted",
@@ -193,6 +193,7 @@
         "evaluation_use": "permitted"
       },
       "lumi_uses": [
+        "tokenizer_training",
         "pretraining",
         "evaluation",
         "filtering"
@@ -203,12 +204,12 @@
         "Read only the exact transcripts_ja.txt, transcripts_en.txt, transcripts_cs.txt, and README.md files whose individual SHA-256 hashes are recorded below; do not acquire or process audio or other archive members.",
         "Parse JECSNNNN_LANG transcript rows, remove utterance identifiers, and remove the paired asterisk delimiters from code-switch examples while retaining their text.",
         "Assign all language rows sharing a JECS numeric family ID to one deterministic training or development partition; record source-line and normalized-sample hashes in controlled local provenance files.",
-        "Apply email, URL, and phone-like sequence scans. Use fixed UTF-8 byte codes and language tags; no tokenizer is learned."
+        "Apply email, URL, and phone-like sequence scans. The JECS byte-LM pilot uses fixed UTF-8 byte codes and language tags. The separately recorded tokenizer-intrinsic pilot learns candidate vocabularies from training-family text only."
       ],
       "filters": [
         "Use only the three neutral transcript text members and their matching README; the full 374,577,780-byte ZIP and its audio were not downloaded or opened.",
         "Pin the exact acquired member hashes: transcripts_ja.txt 20551876ae990563b2fda3b107fb3c5249e485d5b01847452f26a2f7956d2b5e; transcripts_en.txt a4d2e8980d42e8747e2e670c9d112953bd8298da292ba43c1bd2ffa6f8ffc083; transcripts_cs.txt 7c26eea872f3099e205035973c0784fcaa473c89f26018a5b4a1a6d72a2e468c; README.md 4d68ea0502e58698e245f104098f4dd9679e07398a4d44bc95b586732536f10d.",
-        "Keep raw text, item-level records, predictions, and trained weights in controlled local storage outside Git. The short pilot is exploratory and is not a conversational-quality or public-release approval."
+        "Keep raw text, item-level records, predictions, trained weights, and tokenizer artifacts in controlled local storage outside Git. These short pilots are exploratory and are not conversational-quality or public-release approval."
       ],
       "deduplication": [
         "Group aligned language rows by numeric JECS utterance family before assigning the deterministic split.",
