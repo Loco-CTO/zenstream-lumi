@@ -2,9 +2,9 @@
 
 **Reviewed:** 2026-10-03
 
-**Decision:** Pinned and audited as a public development-diagnostic candidate; no text has been admitted.
+**Decision:** The exact pinned source was admitted for a bounded local English/Japanese structured intent/slot pilot; no broader use is approved.
 
-This is a source and benchmark audit, not a legal opinion or a Japanese-language approval. The archived files are in workspace-level controlled storage under `.lumi-data/massive/1.1/`; they are not checked into Git. No MASSIVE text has entered Lumi training, tokenizer fitting, filtering, generation, tuning, or evaluation.
+This is a source and benchmark audit plus a scoped pilot record, not a legal opinion or a Japanese-language approval. The archived files are in workspace-level controlled storage under `.lumi-data/massive/1.1/`; they are not checked into Git. Only the 256 official-train and 64 disjoint public-dev aligned ID families listed by the local selection manifest entered the structured-output pilot. No MASSIVE text entered tokenizer fitting, broad pretraining, conversational generation, or tuning.
 
 ## Pinned artifact
 
@@ -24,7 +24,7 @@ Each pinned locale file contains 16,521 rows: 11,514 train, 2,033 dev, and 2,974
 
 The pinned repository [README](https://github.com/alexa/massive/blob/f966f21846043aabef9b0f974fa7970027f43738/README.md), archive `LICENSE`, and [NOTICE](https://github.com/alexa/massive/blob/f966f21846043aabef9b0f974fa7970027f43738/NOTICE.md) declare MASSIVE under CC BY 4.0. The NOTICE also identifies the English source text as SLURP and says SLURP text is CC BY 4.0. CC BY 4.0 allows reuse and adaptation, including commercial use, subject to its attribution, license-link, change-indication, and no-endorsement conditions. Preserve attribution to Amazon and the named MASSIVE and SLURP authors, the source links, the license link, and any modifications with any later distribution of covered material.
 
-This review covers the source's stated license for the pinned archive. It does not prove rights outside that grant, determine whether trained weights reproduce protected material, or approve use of the archive to train or distribute Lumi weights. Any future training or model-artifact distribution needs a separate rights and attribution review. This stage approves no text for any Lumi use.
+This review covers the source's stated license for the pinned archive. It does not prove rights outside that grant, determine whether trained weights reproduce protected material, or approve public distribution of Lumi weights. The item-level provenance manifest approves only the exact training/development families in the local pilot. Any future training or public model-artifact distribution needs a separate rights, attribution, and exact-artifact lineage review.
 
 ## Quality and fit
 
@@ -34,9 +34,11 @@ An archive-level review of all 2,033 Japanese dev rows and their three judgments
 
 The source can potentially support a limited comparison of language/intent/slot behavior on public, single-turn, device-directed utterances after exact sample selection and item-level provenance. It is localized from English, not spontaneous Japanese conversation. Its multilingual judgments that include English are a lead for manual inspection, not validated coverage of meaningful Japanese-English code-switching. The dataset covers generic voice-assistant tasks rather than ZenStream's authoritative catalog state, permissions, playback negotiation, multi-turn corrections, or low-false-action policy. It cannot establish Lumi's overall product quality or its confidence thresholds.
 
-## Use gate and next evidence
+## Pilot admission and results
 
-The controlled archive was acquired for this audit only. Before creating a reviewable diagnostic subset:
+The audit led to one bounded local pilot using the exact family selection described above. The runner checked source and member hashes and validated all 640 item-level records before training. The tiny 18,321-parameter random-init byte-level RNN encoder-decoder produced required JSON shape for 128/128 public-dev rows, but exact intent accuracy was 0/128 and slot-value micro F1 was 0.000 (TP 0, FP 0, FN 130). It is rejected as a Lumi candidate. Training loss falling from 5.5509 to 0.6359 does not offset that failed development result. See [the reproducible pilot report](MASSIVE_INTENT_SLOT_PILOT.md) for all hashes and local measurements; no raw rows or weights are committed.
+
+This experiment supports only a structured-output diagnostic on a small public sample. Before promoting any source item to a ready Lumi evaluation case:
 
 1. Select exact development rows and preserve the file, item ID, locale, original split, and item hash. Do not mix the English source and Japanese localization as separate independent semantic families.
 2. Keep every selected item in the public development diagnostic split. Exclude all train rows from evaluation and all public data from the final holdout.
@@ -44,7 +46,7 @@ The controlled archive was acquired for this audit only. Before creating a revie
 4. Obtain independent annotation and a separate qualified Japanese/bilingual naturalness and meaning review before an item becomes a ready Lumi case. Preserve disagreement and reject or revise unclear translations.
 5. Map source intents into Lumi's reviewed capability registry only where the fit is exact. Do not treat a MASSIVE intent label as a ZenStream action authorization.
 
-Until those steps are completed, MASSIVE remains a candidate only. No model weights, checkpoints, tokenizers, or code from the upstream repository are admissible for Lumi's random-initialized runtime model.
+The source rows outside the exact approved pilot scope remain excluded. No model weights, checkpoints, tokenizers, or code from the upstream repository are admissible for Lumi's random-initialized runtime model. The pilot's trained weight artifact stays local until its exact lineage and public distribution implications are separately reviewed.
 
 ## Sources
 

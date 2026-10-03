@@ -2,7 +2,7 @@
 
 **Reviewed:** 2026-10-03
 
-**Status:** Current public terms reviewed; the 101-case assistant-generated draft inventory remains blocked.
+**Status:** Current public terms reviewed; the existing 101-case draft remains excluded by owner direction because its exact historical serving model/build is unknown.
 
 This is a provenance and project-use review, not legal advice. It records current public OpenAI terms that may be relevant to the draft inventory. It does not determine which agreement governed the historical generations or whether Lumi legally competes with an OpenAI product.
 
