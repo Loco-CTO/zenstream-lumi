@@ -1,8 +1,8 @@
 # Lumi research notes
 
 - Research snapshot: 2026-10-03
-- Status: Initial literature and tooling scan; no candidate architecture or runtime selected.
-- Lumi experiments: None. Every performance or quality statement below is attributed to its source and is not a Lumi result.
+- Status: Two level-1 random-initialization smokes and a four-seed response follow-up are complete; no candidate architecture or runtime has been selected.
+- Lumi experiments: See the exploratory findings below and their reproducibility records. They verify execution paths only and do not establish product quality. Literature statements remain attributed to their sources, not presented as Lumi results.
 
 ## Workload and evidence boundary
 
@@ -132,9 +132,7 @@ The 2026-10-03 source refresh identified the [NINJAL Chat Communication Corpus](
 
 ### OpenAI/Codex-generated evaluation drafts (reviewed 2026-10-03)
 
-The local 101-case draft inventory records OpenAI as provider but does not expose the exact serving model ID/build or the applicable account agreement. OpenAI's Codex help page says ChatGPT Terms apply to data shared through Codex for ChatGPT accounts, while the corresponding services agreement applies to API and Business/Education/Enterprise users. The current UK/Europe individual Terms both assign output ownership between the parties and prohibit using output to develop models that compete with OpenAI; the current Services Agreement has a narrower exception for models primarily used to categorize/classify/organize data only when they are not distributed or commercially offered to third parties. Those pages do not determine whether Lumi, its intended distribution, or this specific output/use falls within a restriction or exception. The model/version and contract therefore remain unresolved; this is not a conclusion that Lumi competes or that the output is unusable.
-
-Until the project owner records the exact applicable agreement, serving model/version and a scoped assessment of Lumi's intended use and release, the 101 Codex-generated drafts stay blocked before human annotation as well as scoring and training. Reviewer availability is confirmed, but no annotations have started. Do not copy or lightly rewrite these drafts into a replacement set. A new human-authored set can follow the normal consent, rights, privacy, contamination, and source-record review path. OpenAI's Service Terms separately warn that Codex code-generation output may be subject to third-party licenses; that clause is tracked for code output and is not treated here as a blanket statement about ordinary dialogue text.
+The project owner confirms that the existing 101-case draft was generated through Codex using a personal ChatGPT account, but no reliable exact serving model ID/build is available. The intended end state includes public distribution of trained model artifacts. Given that uncertainty and distribution scope, the owner has directed that these cases and their derivatives remain excluded from training, tokenizer fitting, development or final evaluation, filtering, and release evidence. This is a corpus-specific exclusion, not a reason to stop local experiments using separately permitted material. Reviewer availability is confirmed, but no annotations have started. Do not copy or lightly rewrite the excluded drafts into a replacement set. Any new human-authored set must follow the normal consent, rights, privacy, contamination, and source-record review path. OpenAI's Service Terms separately warn that Codex code-generation output may be subject to third-party licenses; that clause is tracked for code output and is not treated here as a blanket statement about ordinary dialogue text.
 
 The training-data manifest is currently empty. A future training run must consume a frozen manifest and preserve the exact manifest and data-processing revisions used for that run. Development evaluation and final holdout material must remain separate from every training, generation, and filtering input.
 
@@ -171,6 +169,10 @@ A tiny NumPy predictor trained from random initialization completed 120 epochs, 
 #### Level-1 random-init conversation response smoke (2026-10-03)
 
 An 18,321-parameter byte-level tanh encoder-decoder trained from random initialization on four illustrative English prompt/response examples, saved and reloaded its artifact, and generated bounded UTF-8 text on CPU. Training loss fell from 5.5718 to 0.00410 in 300 epochs. A two-example, family-disjoint illustrative development pass emitted text for both inputs but reused the weather response for a media comment and returned generic uncertainty wording instead of the specific playback clarification. No exact-match or human quality score was used. Repeated same-seed runs produced the same 69,972-byte artifact (sha256:a0d53170c9f4c34e383d88b9fc1fc8cc431327306acfc07aeab2fb58b315fe77). This demonstrates a minimal generation path, not conversational quality or a selected architecture. The research compares flat byte recurrence with ByT5 and the more recent hierarchical byte AU-Net; neither literature result transfers to this tiny data regime. See [the experiment record](experiments/CONVERSATION_RESPONSE_SMOKE.md).
+
+#### Level-1 multi-seed response follow-up (2026-10-03)
+
+Three additional random-initialization seeds were run with the same four user-provided training examples, two family-disjoint illustrative development examples, 18,321-parameter byte RNN, Adam recipe, 300 epochs, and 1,200 updates. Together with seed 1729 from the original smoke, all four runs reached byte-level training cross-entropy below 0.008 and produced EOS-terminated valid UTF-8. None produced both intended behaviors: the media comment received an unrelated training response, and the ambiguous playback request received either generic uncertainty or an unsupported-capability refusal instead of a useful playback clarification. Seed 29 also produced a malformed greeting. No exact-match metric or human quality review was performed; these are inspected failure examples, not a quality score. Warm generation p95 ranged from 0.780 to 1.685 ms and process peak working set from 37.59 to 37.71 MB on this Windows/Python environment. This is evidence that the observed failure is not specific to one seed, but the tiny development set cannot identify whether the cause is data coverage, formulation, or both. Do not scale this candidate. See [the seed-sweep record](experiments/CONVERSATION_RESPONSE_SEED_SWEEP.md).
 
 ### Hypotheses awaiting measurement
 
