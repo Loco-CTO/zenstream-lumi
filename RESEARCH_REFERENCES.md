@@ -86,7 +86,7 @@ These official terms pages were reviewed on 2026-10-03 because the current devel
 
 ## 2025–2026 short-context, bilingual evaluation, and deployment update
 
-These additional references were reviewed on 2026-10-02. They inform Lumi research only; their weights, datasets, and text have not been used by Lumi.
+This section was refreshed on 2026-10-03. These references inform Lumi research only; their weights, datasets, and text have not been used by Lumi.
 
 ### Architecture and inference
 
@@ -99,6 +99,7 @@ These additional references were reviewed on 2026-10-02. They inform Lumi resear
 
 ### Tokenization and bilingual evaluation
 
+- Altıntaş et al. 2026. [TokSuite: Measuring the Impact of Tokenizer Choice on Language Model Behavior](https://proceedings.mlr.press/v306/altintas26a.html). ICML 2026; provides fourteen otherwise-identical pretrained models varying the tokenizer and a multilingual robustness benchmark for English, Chinese, Farsi, Italian, and Turkish. Useful for controlled-comparison design; pretrained weights are not Lumi candidates, and Japanese is absent.
 - Chiu. 2026. [TokLens: A Multilingual Lens on Tokenizer Quality for LLMs](https://aclanthology.org/2026.acl-srw.18/). ACL Student Research Workshop 2026; evaluates tokenizer metrics across 15 languages and reports multilingual associations, with confounding and limited causal evidence. Relevant to measuring English/Japanese fertility and parity.
 - Dussolle et al. 2025. [M-IFEval: Multilingual Instruction-Following Evaluation](https://aclanthology.org/2025.findings-naacl.344/). Findings of NAACL 2025; includes Japanese-specific instruction checks and reports variation by language and instruction type. General instruction following, not conversational media intent.
 - Yang and Chai. 2025. [CodeMixBench: Evaluating Code-Mixing Capabilities of LLMs Across 18 Languages](https://aclanthology.org/2025.emnlp-main.109/). EMNLP 2025; broad code-mixing task suite and reported weaknesses across mixed-language settings. Check its exact language-pair coverage and dataset rights before reuse.

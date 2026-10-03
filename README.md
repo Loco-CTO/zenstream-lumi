@@ -24,6 +24,7 @@ Architecture, tokenizer, model size, runtime, training corpus, integration proto
 - [Annotation guide](evaluation/ANNOTATION_GUIDE.md): draft labeling, response contracts and presentation intent, the controlled review ledger, Japanese/code-switch review, split grouping, and v4 coverage limits.
 - [Research notes](RESEARCH_NOTES.md): current findings, limitations, open hypotheses, and proposed experiments.
 - [Research references](RESEARCH_REFERENCES.md): sources that influence design; these are not training data.
+- [Tokenizer pilot protocol](experiments/TOKENIZER_PILOT.md): a controlled EN/JA/code-switch tokenizer comparison, gated on approved text and reviewed development cases.
 - [Data sources](DATA_SOURCES.md): inclusion policy and human-readable provenance summary.
 - [Machine-readable provenance](provenance/data_sources.json): currently empty because no external data has been approved or used; [the validator](provenance/README.md#provenance-gate) checks source/sample joins and split-safe evaluation hashes.
 - [Synthetic-data provenance](provenance/synthetic_data.json): currently empty because no synthetic data has been generated or used.
