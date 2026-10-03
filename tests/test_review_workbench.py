@@ -9,6 +9,7 @@ from evaluation.review_workbench import (
     ReviewHTTPServer,
     ReviewManager,
     WorkbenchError,
+    _safe_output_path,
     _read_cases,
 )
 
@@ -123,6 +124,15 @@ class ReviewWorkbenchTests(unittest.TestCase):
             path.write_text(json.dumps(make_case(tool_scenario=scenario)), encoding="utf-8")
             with self.assertRaisesRegex(WorkbenchError, "tool scenarios are not supported"):
                 _read_cases(path)
+
+    def test_review_ledger_path_must_not_be_inside_a_sibling_lumi_worktree(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            sibling_checkout = Path(__file__).resolve().parents[4] / "zenstream-lumi"
+            with self.assertRaisesRegex(WorkbenchError, "outside the Git repository"):
+                _safe_output_path(
+                    sibling_checkout / "unsafe-review-output.jsonl",
+                    Path(temp_dir) / "cases.jsonl",
+                )
 
     def test_http_projection_is_blind_and_cross_origin_submission_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp_dir:
