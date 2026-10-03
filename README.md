@@ -4,7 +4,7 @@ Lumi is a proposed optional, local natural-language capability for ZenStream. It
 
 ## Project status
 
-This repository contains Lumi's research, evaluation, and provenance foundation plus two level-1 exploratory random-init experiments: a structured-prediction smoke and a byte-level conversational-response smoke. The second experiment proves that a tiny local model can train, save, reload, and generate bounded UTF-8 text on CPU; its two illustrative development generations show clear response-selection failures and have no human quality review. Neither experiment is a product model. No release candidate, production inference service, approved production-quality training corpus, or selected runtime exists. Temporary examples, model artifacts, and logs remain in local controlled storage and are not checked in. No pretrained model weights are permitted for Lumi; any eventual model must start from random initialization.
+This repository contains Lumi's research, evaluation, and provenance foundation plus several level-1 random-init diagnostics: a structured-intent smoke; a conversational-response smoke and four-seed follow-up; Japanese travel-dialog state/response runs at 64/24 and 512/64 dialogues; a small paired English/Japanese MASSIVE intent/slot pilot; and a text-only JECS Japanese/English/code-switch byte-language-model ablation. These runs use different tasks and data scopes, are not matched candidate comparisons, and do not establish product quality. The structured and dialogue pilots found substantial generalization failures; JECS measured byte prediction on acted/read transcripts, not natural responses. Reports record their exact limits. Level 2 has not started because no independently reviewed development set is ready. No release candidate, production inference service, approved production-quality training corpus, or selected runtime exists. Temporary examples, model artifacts, and logs remain in local controlled storage and are not checked in. No pretrained model weights are permitted for Lumi; any eventual model must start from random initialization.
 
 Architecture, tokenizer, model size, runtime, training corpus, integration protocol, and artifact licensing remain open research decisions. Research claims are not Lumi measurements. See [RESEARCH_NOTES.md](RESEARCH_NOTES.md) for the initial evidence review and its limitations.
 
@@ -24,7 +24,7 @@ Architecture, tokenizer, model size, runtime, training corpus, integration proto
 - **Level 2 — development:** compare reproducible candidates using permitted, provenance-recorded training material and a frozen, independently reviewed development set, including qualified Japanese review. The final holdout and final statistical power are not prerequisites for this stage.
 - **Level 3 — release/final:** require admitted training sources, qualified reviewed evaluation, a sequestered and statistically suitable holdout, resolved artifact-distribution terms, production hardware measurements, and complete release provenance.
 
-Level-3 requirements must not block clearly scoped level-1 work. The [structured intent smoke](experiments/RANDOM_INIT_INTENT_SMOKE.md) and [conversation response smoke](experiments/CONVERSATION_RESPONSE_SMOKE.md) are engineering evidence only; their examples are not admitted as production training data or formal benchmark cases.
+Level-3 requirements must not block clearly scoped level-1 work. The intent, response, JMultiWOZ, MASSIVE, and JECS reports are narrow engineering or source diagnostics; none is the formal independently reviewed Lumi evaluation set or evidence that the product targets pass.
 
 ## Project records
 
@@ -39,7 +39,7 @@ Level-3 requirements must not block clearly scoped level-1 work. The [structured
 - [Random-init intent smoke](experiments/RANDOM_INIT_INTENT_SMOKE.md): first executable CPU train/save/reload/infer evidence, with its tiny local data scope, measured failures, and limits.
 - [Exploratory experiment dependencies](experiments/requirements-exploratory.txt): pinned NumPy dependency for local prototype experiments only.
 - [Data sources](DATA_SOURCES.md): inclusion policy and human-readable provenance summary.
-- [MASSIVE 1.1 source audit](experiments/MASSIVE_AUDIT.md): pinned archive, file hashes, count reconciliation, licensing evidence, quality signals, and limits; the source remains unadmitted.
+- [MASSIVE 1.1 source audit](experiments/MASSIVE_AUDIT.md): pinned archive, file hashes, count reconciliation, licensing evidence, quality signals, and limits; its only admitted use is the separately scoped local diagnostic described in [the intent/slot pilot](experiments/MASSIVE_INTENT_SLOT_PILOT.md).
 - [Common Pile v0.1 source audit](experiments/COMMON_PILE_AUDIT.md): release-level review of the 30 reported source groups, rights caveats, English-focused filtering, and lack of demonstrated Japanese/code-switch coverage; no content is admitted.
 - [JMRD and RecomMind Japanese dialogue source audit](experiments/JMRD_RECOMMIND_AUDIT.md): comparison of two Japanese human-human movie recommendation releases, their task fit, repository/paper count discrepancy, upstream metadata and review lineage, CC-BY-SA declarations, and unresolved participant/privacy gates; neither source is admitted.
 - [Natural Japanese-English code-switch source audit](experiments/NATURAL_CODE_SWITCH_AUDIT.md): distinguishes parallel translations from real mixed-language messages, records BSD's CC BY-NC-SA terms, the privacy limits of a small iMessage study, and a 2025 pseudo-code-switch method-only lead; no reviewed source is admitted.
@@ -47,20 +47,22 @@ Level-3 requirements must not block clearly scoped level-1 work. The [structured
 - [CodeMixBench coverage and provenance audit](experiments/CODEMIXBENCH_AUDIT.md): checks the 2025 benchmark's language-pair table and synthetic-data method; none of its listed pairs is Japanese-English and no benchmark data is admitted.
 - [Capability and playback boundary audit](experiments/CAPABILITY_BOUNDARY_AUDIT.md): pinned Orchestrator and client source evidence for grant-filtered resolution, playback negotiation, and client-owned execution; the registry remains draft.
 - [Human contributor intake checklist](provenance/AUTHOR_CONTRIBUTION_CHECKLIST.md): separates evaluation-only contributions from training grants and records exact model-distribution scope before collection.
-- [Machine-readable provenance](provenance/data_sources.json): records the single approved ASDC diagnostic item; MASSIVE remains a candidate without admitted content. [The validator](provenance/README.md#provenance-gate) checks source/sample joins and split-safe evaluation hashes.
+- [Machine-readable provenance](provenance/data_sources.json): records the exact ASDC evaluation item and the narrowly scoped JMultiWOZ, MASSIVE, and JECS local pilots; none is a broad pretraining or tokenizer corpus. [The validator](provenance/README.md#provenance-gate) checks source/sample joins and split-safe evaluation hashes.
 - [Synthetic-data provenance](provenance/synthetic_data.json): currently empty because no synthetic data has been generated or used.
 - [Model card](MODEL_CARD.md): pre-release status and limitations; no complete Lumi model has been selected.
 - [Third-party notices](THIRD_PARTY_NOTICES.md): current code license and outstanding artifact-license research.
 - [Experiment record template](experiments/EXPERIMENT_TEMPLATE.md): reproducibility and comparison fields.
 - [Conversation response smoke](experiments/CONVERSATION_RESPONSE_SMOKE.md): a random-init byte-level sequence-generation pilot, its two held-out illustrative outputs, and the reasons it is not a quality-bearing candidate.
+- [JMultiWOZ state/response pilots](experiments/JMULTIWOZ_PILOT.md) and [scale follow-up](experiments/JMULTIWOZ_SCALE_PILOT.md): two local Japanese travel-dialog diagnostics, neither a ZenStream task benchmark.
+- [MASSIVE intent/slot pilot](experiments/MASSIVE_INTENT_SLOT_PILOT.md): a local EN/JA structured-output diagnostic with negative semantic results.
+- [JECS text-only pilot](experiments/JECS_CODE_SWITCH_PILOT.md): a narrow Japanese/English/code-switch byte-loss ablation on acted/read transcripts, not spontaneous conversation.
 
-## Initial sequence
+## Next development sequence
 
-1. Grow the executable level-1 path through small experiments that diagnose observed failures, using only clearly scoped local data and keeping artifacts outside Git.
-2. Build and review a semantically diverse English/Japanese/code-switch development set; qualify Japanese review before using results for development decisions. Build and seal the final holdout for level-3 claims.
-3. Audit candidate public and generated data for provenance, permitted use, and contamination risk before admitting it to development-quality or release training.
-4. Compare task-focused formulations, tokenizers, sequence architectures, and training methods with controlled, compute-matched level-2 experiments once the reviewed development set is ready; do not wait for the final holdout to run small exploratory tests.
-5. Benchmark model quality and user-visible latency, cold start, memory, unload, and wake-up behavior on each target hardware class.
-6. Select the smallest candidate that passes the behavioral targets and has the best measured product experience; retain evidence and rejected alternatives.
+1. Author a new task-matched English/Japanese/code-switch development set independently of the excluded 101-case draft, obtain two semantic reviews plus qualified Japanese/bilingual review, and freeze it before quality-bearing comparisons.
+2. Close rights, source-fit, and distribution reviews for task-matched training data; keep unapproved data and all final-holdout material out of training, tokenizer fitting, filtering, and prompts.
+3. Compare task-focused formulations, tokenizers, sequence architectures, and training methods with controlled, compute-matched level-2 experiments after the reviewed development set is ready.
+4. Measure the full system's behavior and user-visible latency, cold start, memory, unload, and wake-up behavior on representative CPU and GPU hardware.
+5. Build and seal a statistically suitable final holdout for level-3 claims, then select a candidate only if it passes every behavioral and release gate.
 
 No production model or ZenStream integration is implied by this research scaffold.
