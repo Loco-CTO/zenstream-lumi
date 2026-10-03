@@ -31,6 +31,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ID = "jmultiwoz-v1-training-pilot"
 TRAIN_DIALOGUE_COUNT = 64
 DEV_DIALOGUE_COUNT = 24
+SCALE_TRAIN_DIALOGUE_COUNT = 512
+SCALE_DEV_DIALOGUE_COUNT = 64
 UPSTREAM_REVISION = "a78dd334b907e12318b76bb23d0a9ed1498b8d15"
 ARCHIVE_SHA256 = "sha256:283dea36f5abeea8f016fea2bd4df4dfba67a40f89c4600e47ed701c57ea2bc2"
 MEMBER_SHA256 = {
@@ -91,14 +93,17 @@ def _read_approved_source() -> tuple[dict[str, Any], str]:
     return source, _sha256_bytes(manifest_bytes)
 
 
-def _select_ids(ids: list[str], split: str, count: int) -> list[str]:
+def _select_ids(
+    ids: list[str], split: str, count: int, excluded_ids: set[str] | None = None
+) -> list[str]:
     ranked = sorted(
         ids,
         key=lambda item_id: hashlib.sha256(
             f"{SOURCE_ID}\0{split}\0{item_id}".encode("utf-8")
         ).digest(),
     )
-    return ranked[:count]
+    excluded = excluded_ids or set()
+    return [item_id for item_id in ranked if item_id not in excluded][:count]
 
 
 def _hash_zip_member(bundle: zipfile.ZipFile, name: str) -> str:
@@ -310,10 +315,20 @@ def _build_examples(
 
 
 def _load_data(
-    archive_path: Path, train_count: int, dev_count: int
+    archive_path: Path,
+    train_count: int,
+    dev_count: int,
+    exclude_prior_dev: bool = False,
 ) -> tuple[list[dict[str, str]], list[dict[str, str]], dict[str, Any]]:
-    if train_count != TRAIN_DIALOGUE_COUNT or dev_count != DEV_DIALOGUE_COUNT:
-        raise ValueError("the admitted source scope is locked to 64 train and 24 dev dialogues")
+    approved_scope = (train_count, dev_count, exclude_prior_dev) in {
+        (TRAIN_DIALOGUE_COUNT, DEV_DIALOGUE_COUNT, False),
+        (SCALE_TRAIN_DIALOGUE_COUNT, SCALE_DEV_DIALOGUE_COUNT, True),
+    }
+    if not approved_scope:
+        raise ValueError(
+            "the admitted source scope is locked to 64 train/24 dev or "
+            "512 train/64 fresh dev with the prior 24 dev dialogues excluded"
+        )
     archive = archive_path.expanduser().resolve()
     if _inside_git_worktree(archive):
         raise ValueError("the source archive must remain outside every Git worktree")
@@ -344,7 +359,16 @@ def _load_data(
         if dev_count < 1 or dev_count > len(splits["dev"]):
             raise ValueError("dev-dialogues is outside the pinned development split")
         train_ids = _select_ids(splits["train"], "train", train_count)
-        dev_ids = _select_ids(splits["dev"], "dev", dev_count)
+        prior_dev_ids = (
+            set(_select_ids(splits["dev"], "dev", DEV_DIALOGUE_COUNT))
+            if exclude_prior_dev
+            else set()
+        )
+        dev_ids = _select_ids(
+            splits["dev"], "dev", dev_count, excluded_ids=prior_dev_ids
+        )
+        if len(dev_ids) != dev_count or set(dev_ids) & prior_dev_ids:
+            raise ValueError("fresh development selection overlaps the prior public dev sample")
         if set(train_ids) & set(dev_ids):
             raise ValueError("training and development dialogue IDs overlap")
         selected_ids = set(train_ids) | set(dev_ids)
@@ -377,7 +401,18 @@ def _load_data(
         "archive_sha256": archive_sha256,
         "dialogue_member_sha256": MEMBER_SHA256["JMultiWOZ_1.0/dialogues.json"],
         "split_member_sha256": MEMBER_SHA256["JMultiWOZ_1.0/split_list.json"],
-        "sampling": "lowest SHA-256 rank of source_id, official split, and dialogue ID",
+        "sampling": (
+            "lowest SHA-256 rank of source_id, official split, and dialogue ID; "
+            "the scaled development selection skips the prior pilot's 24 public-dev IDs"
+            if exclude_prior_dev
+            else "lowest SHA-256 rank of source_id, official split, and dialogue ID"
+        ),
+        "scope": {
+            "training_dialogue_count": train_count,
+            "development_dialogue_count": dev_count,
+            "prior_public_dev_dialogues_excluded": len(prior_dev_ids),
+            "prior_public_dev_dialogue_ids": sorted(prior_dev_ids),
+        },
         "input_transform": "last four preceding utterances; phone-like sequences replaced with [PHONE]",
         "target_transform": (
             "compact JSON of active domain, active-domain arguments plus general city, and the final system response; "
@@ -543,8 +578,21 @@ def _empty_output_dir(path: Path) -> Path:
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     source, source_manifest_sha256 = _read_approved_source()
+    if args.exclude_prior_dev and (
+        args.seed != 314159
+        or args.epochs != 20
+        or args.learning_rate != 0.01
+        or args.max_output_bytes != 512
+    ):
+        raise ValueError(
+            "the admitted scale pilot is fixed to seed 314159, 20 epochs, "
+            "learning rate 0.01, and 512 output bytes"
+        )
     train_rows, dev_rows, preparation = _load_data(
-        args.archive, TRAIN_DIALOGUE_COUNT, DEV_DIALOGUE_COUNT
+        args.archive,
+        args.train_dialogues,
+        args.dev_dialogues,
+        exclude_prior_dev=args.exclude_prior_dev,
     )
     if set(preparation["training_families"]) & set(preparation["development_families"]):
         raise ValueError("train and development dialogue families overlap")
@@ -569,8 +617,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "pilot_script_sha256": engine._sha256(Path(__file__).resolve()),
         "response_engine_sha256": engine._sha256(Path(engine.__file__).resolve()),
     }
+    model_id = (
+        "lumi-random-init-jmultiwoz-scale-state-response-pilot-v2"
+        if args.exclude_prior_dev
+        else "lumi-random-init-jmultiwoz-state-response-smoke-v1"
+    )
     metadata = {
-        "model_id": "lumi-random-init-jmultiwoz-state-response-smoke-v1",
+        "model_id": model_id,
         "architecture": (
             "single-layer tanh recurrent byte-level encoder-decoder with shared input "
             "embedding and autoregressive byte softmax"
@@ -582,6 +635,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "parameter_count": sum(int(value.size) for value in parameters.values()),
         "source_id": SOURCE_ID,
         "source_revision": UPSTREAM_REVISION,
+        "selection_scope": preparation["selection"]["scope"],
         "source_manifest_sha256": source_manifest_sha256,
         "document_records_sha256": engine._sha256(records_path),
         "transform_config_sha256": transform_config_sha256,
@@ -697,6 +751,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "archive_sha256": preparation["archive_sha256"],
         "selected_train_dialogues": len(train_rows),
         "selected_dev_dialogues": len(dev_rows),
+        "prior_public_dev_dialogues_excluded": preparation["selection"]["scope"][
+            "prior_public_dev_dialogues_excluded"
+        ],
         "train_dev_family_overlap": False,
         "training_utf8_byte_count": preparation["train_input_target_utf8_bytes"],
         "development_utf8_byte_count": preparation["dev_input_target_utf8_bytes"],
@@ -749,8 +806,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "sha256": engine._sha256(prediction_path),
         },
         "limitations": [
-            "This is a small Japanese travel-domain state-and-response smoke, not a Lumi-quality result.",
-            "Only a deterministic 64-dialogue training subset and 24-dialogue public development subset are used by default.",
+            "This is a Japanese travel-domain state-and-response diagnostic, not a Lumi-quality result.",
+            "The scaled run uses deterministic samples of 512 official-train dialogues and 64 fresh public-dev dialogues; it excludes the prior pilot's 24 public-dev dialogues.",
+            "The fixed 20-epoch scale run is capped at 10,240 per-example Adam updates; no extra seed or tuning run is included.",
             "The model has 18,321 trainable parameters and a byte-level vocabulary; it is a toy candidate, not a selected architecture.",
             "The public source is Japanese travel dialogue; English, natural EN/JA code-switching, media behavior, unsupported requests, and false-action safety are not exercised.",
             "Development references are public dataset labels, not the qualified human-reviewed Lumi evaluation set or final holdout.",
@@ -777,6 +835,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--archive", type=Path, required=True, help="pinned archive outside every Git worktree")
     parser.add_argument("--output-dir", type=Path, required=True, help="empty controlled output directory outside every Git worktree")
     parser.add_argument("--seed", type=int, default=314159)
+    parser.add_argument("--train-dialogues", type=int, default=TRAIN_DIALOGUE_COUNT)
+    parser.add_argument("--dev-dialogues", type=int, default=DEV_DIALOGUE_COUNT)
+    parser.add_argument(
+        "--exclude-prior-dev",
+        action="store_true",
+        help="use the admitted 512/64 scale scope and exclude the prior 24 public-dev dialogues",
+    )
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--learning-rate", type=float, default=0.01)
     parser.add_argument("--max-output-bytes", type=int, default=512)
