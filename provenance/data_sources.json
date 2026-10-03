@@ -1,5 +1,55 @@
 {
   "manifest_version": 1,
-  "status": "empty",
-  "sources": []
+  "status": "approved_sources_present",
+  "sources": [
+    {
+      "source_id": "asdc-main-dialog-001",
+      "source_type": "external_dataset",
+      "name": "Accommodation Search Dialog Corpus main dialog 001",
+      "canonical_identifier": "https://github.com/megagonlabs/asdc/blob/f37d6575c73602adcb8ae3687520726793baa672/data/main/dialog/json/001.json",
+      "authors_or_organization": "Megagonlabs ASDC; the upstream README cites Yuta Hayashibe for the corpus and Hongjie Shi for dialog-act and request-span work",
+      "version": "ASDC repository at commit f37d6575c73602adcb8ae3687520726793baa672; main dialog asdc.v4.001 only",
+      "revision": "f37d6575c73602adcb8ae3687520726793baa672",
+      "release_date": null,
+      "access_date": "2026-10-03",
+      "license": {
+        "identifier": "CC-BY-4.0",
+        "url": "https://creativecommons.org/licenses/by/4.0/",
+        "copyright_notice": "The pinned ASDC README states that the corpus, annotations, and documentation are licensed under CC BY 4.0; see its references for named authors.",
+        "attribution_requirement": "Credit the ASDC project and named authors where supplied, link the source and license, describe changes, and do not imply endorsement.",
+        "terms_review": "The pinned upstream README and LICENSE.txt cover the corpus, annotations, and documents under CC BY 4.0. The license permits reproduction and adaptation, including commercial use, subject to attribution and other license conditions. Lumi admits only this exact public main-set dialog for a local development diagnostic; it is not used for training, tokenizer fitting, generation, filtering, or final-holdout evaluation. This record is a scoped research review, not legal advice, and does not resolve rights in other corpus items or rights outside the license grant."
+      },
+      "permissions": {
+        "commercial_use": "permitted",
+        "redistribution": "permitted",
+        "modification": "permitted",
+        "derivative_works": "permitted",
+        "training_use": "permitted",
+        "evaluation_use": "permitted"
+      },
+      "lumi_uses": [
+        "evaluation"
+      ],
+      "decision": "approved_for_use",
+      "direct_or_indirect": "direct",
+      "transformations": [],
+      "filters": [
+        "Admit only data/main/dialog/json/001.json (ASDC item asdc.v4.001); do not infer approval for any other main, supplemental, or vanilla item.",
+        "Use only as a public Japanese development diagnostic; keep the raw item and its item-level provenance record in controlled local storage."
+      ],
+      "deduplication": [
+        "Record the exact UTF-8 source-file SHA-256. Lumi has no training corpus or trained candidate yet; reserve this item from all training, tokenizer, filtering, and generation inputs and recheck overlap before future model comparisons."
+      ],
+      "document_count": 1,
+      "example_count": 1,
+      "token_count": null,
+      "checksum": "sha256:37ca02a9e648b9cb913973cfe55d3d1ff913931d1496a6a802df5b9292905813",
+      "review": {
+        "reviewed_by": "Codex-assisted primary-source and item audit",
+        "reviewed_date": "2026-10-03",
+        "rationale": "Pinned GitHub API metadata confirms that commit f37d6575c73602adcb8ae3687520726793baa672 is the ASDC master revision. The pinned README expressly licenses the corpus, annotations, and documentation under CC BY 4.0. The exact 001.json item was inspected, identified as a fictitious accommodation-search role-play, and checked for direct personal identifiers. Only this item is admitted for a public development diagnostic; the rest of ASDC remains unreviewed and excluded."
+      },
+      "generation_record_id": null
+    }
+  ]
 }

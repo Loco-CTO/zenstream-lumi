@@ -2,6 +2,8 @@
 
 **Status:** Versioned case, candidate-output, trajectory-step, prediction, and independent-review formats, a draft capability registry, a dependency-free scorer, a model-independent input projection, a provenance- and review-gated callback runner with fixture-only tool trajectories, and a required-slice coverage audit exist. A 101-case development draft covers all 101 required slice-language pairs in local controlled storage; all rows remain drafts, rights are unresolved, no human review records or ready cases exist, and no final holdout has been created. The public repository records only aggregate counts and hashes in the metadata-only [draft inventory manifest](draft_inventory_manifest.json); it does not contain case text or item-level provenance.
 
+One exact ASDC main-set dialog (`asdc.v4.001`) is separately approved in `provenance/data_sources.json` for a public Japanese development diagnostic. Its local raw sample and item-level provenance do not yet form a Lumi case inventory, do not count as ready evaluation cases, and cannot serve as a sealed final holdout or as training/tokenizer input.
+
 The canonical output record is an evaluation adapter, not a decision about Lumi's eventual runtime or ZenStream integration protocol. It gives competing model formulations one comparable representation for action/no-action choice, arguments, optional user-facing text, and presentation intent. A later protocol adapter may map between this record and the deployed interface.
 
 ## Files and use
