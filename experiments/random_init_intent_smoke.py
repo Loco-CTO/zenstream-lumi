@@ -31,6 +31,10 @@ SLOT_LABELS = ("O", "B-TITLE", "I-TITLE")
 SCHEMA_REQUIRED = {"decision", "action", "arguments", "requires_clarification"}
 SCHEMA_OPTIONAL = {"message", "presentation_intent"}
 TITLE_CONFIDENCE = 0.45
+INTENT_SMOKE_DATA_SHA256 = "sha256:7b547556886fcc8dbbd96f17da049bf6a03410f555c1be59cdb647feed57f4fd"
+INTENT_SMOKE_SOURCE_DESCRIPTION = (
+    "User-supplied representative examples in the Lumi task brief; exploratory internal use only."
+)
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -45,6 +49,17 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return "sha256:" + digest.hexdigest()
+
+
+def _require_frozen_smoke_dataset(path: Path) -> str:
+    """Keep this historical smoke restricted to its one recorded local dataset."""
+    digest = _sha256(path)
+    if digest != INTENT_SMOKE_DATA_SHA256:
+        raise ValueError(
+            "training data does not match the frozen intent-smoke dataset; "
+            "this runner cannot be used with replacement or derived data"
+        )
+    return digest
 
 
 def _hash_feature(value: str) -> tuple[int, float]:
@@ -509,6 +524,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError(f"training data does not exist: {data_path}")
     if any((parent / ".git").exists() for parent in (data_path, *data_path.parents)):
         raise ValueError("training data must remain outside every Git worktree")
+    data_sha256 = _require_frozen_smoke_dataset(data_path)
     if output_dir.exists() and any(output_dir.iterdir()):
         raise ValueError(f"output directory is not empty: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -637,9 +653,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "model_id": metadata["model_id"],
         "random_initialization": True,
         "pretrained_artifacts_used": False,
-        "training_input_source": args.source_description,
+        "training_input_source": INTENT_SMOKE_SOURCE_DESCRIPTION,
         "training_data_path": str(data_path),
-        "training_data_sha256": _sha256(data_path),
+        "training_data_sha256": data_sha256,
         "training_example_count": len(train_rows),
         "development_example_count": len(dev_rows),
         "training_families": len({row["family_id"] for row in train_rows}),
@@ -714,10 +730,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--learning-rate", type=float, default=0.02)
     parser.add_argument("--latency-repeats", type=int, default=25)
-    parser.add_argument(
-        "--source-description",
-        default="User-supplied representative examples in the Lumi task brief; exploratory internal use only.",
-    )
     args = parser.parse_args(argv)
     if args.epochs < 1 or args.batch_size < 1 or args.latency_repeats < 1:
         parser.error("epochs, batch-size, and latency-repeats must be positive")

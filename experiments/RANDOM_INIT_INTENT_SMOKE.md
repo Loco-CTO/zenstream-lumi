@@ -14,6 +14,7 @@ Can Lumi run a tiny ZenStream-specific intent and title-span predictor from rand
 - Allowed use recorded in the local manifest: this project's local exploratory training and development-only smoke evaluation. No release or distribution approval.
 - Dataset: 12 training and 5 exploratory development rows; 8 train families and 4 disjoint development families. The tiny prompt-derived split is not a benchmark and has no qualified Japanese review.
 - Dataset SHA-256: `7b547556886fcc8dbbd96f17da049bf6a03410f555c1be59cdb647feed57f4fd`.
+- The runner is pinned to this exact dataset hash and a fixed source description. It rejects replacement or derived input instead of acting as a general training entry point; this also keeps the separately excluded 101-case draft and derivatives out of this smoke.
 - The JSONL, source manifest, outputs, logs, and weights remain under local `.lumi-data` controlled storage outside every Git worktree. They are not part of the production data manifest or formal evaluation inventory.
 
 ## Candidate and training
