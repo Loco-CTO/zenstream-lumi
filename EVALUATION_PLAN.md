@@ -31,6 +31,8 @@ Examples must be semantically varied, not mostly paraphrases. Split by intent pa
 
 These targets come from the user goal. They are minimum targets, not claims about Lumi performance.
 
+See the [sample-size plan](evaluation/SAMPLE_SIZE_PLAN.md) for the minimum independent-case counts needed even when every scored output is correct, and the limits of interpreting those counts.
+
 | Metric | Initial target |
 |---|---:|
 | Structured-response validity | >= 99.9% |
