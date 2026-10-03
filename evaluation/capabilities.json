@@ -5,9 +5,9 @@
   "created_date": "2026-10-02",
   "source_snapshot": {
     "repository": "Loco-CTO/zenstream-orchestrator",
-    "commit": "61aa7ae75c42e8177e496ee121ba37c4ef8c23cd",
+    "commit": "d07c1d1e8d74dc870570f1ac7b5cbc3f14d94f1c",
     "contract_path": "contracts/openapi.json",
-    "contract_sha256": "7b22eab5f070c867f5036dbb65415a3febd97cf09035e0a9b65c43ff38a82f78",
+    "contract_sha256": "3b157408028b8d2053fc4e85e36f06a0d799c60c4c221a5eb94eba4226b722aa",
     "implementation_path": "orchestrator/api/zenstream/client_routes.py",
     "implementation_sha256": "2dcc411882c2ba2779655ab0006f7c75a9e090a65c0c77985cd4a2bdef33a5df"
   },
