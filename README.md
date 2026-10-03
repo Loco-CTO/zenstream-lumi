@@ -28,8 +28,9 @@ Architecture, tokenizer, model size, runtime, training corpus, integration proto
 - [Tokenizer pilot protocol](experiments/TOKENIZER_PILOT.md): a controlled EN/JA/code-switch tokenizer comparison, gated on approved text and reviewed development cases.
 - [Model formulation and architecture pilot](experiments/ARCHITECTURE_PILOT.md): a staged, compute-matched comparison of conditional-generation formulations and short-context sequence architectures, gated on rights, review, tokenizer, and hardware evidence.
 - [Data sources](DATA_SOURCES.md): inclusion policy and human-readable provenance summary.
+- [MASSIVE 1.1 source audit](experiments/MASSIVE_AUDIT.md): pinned archive, file hashes, count reconciliation, licensing evidence, quality signals, and limits; the source remains unadmitted.
 - [Human contributor intake checklist](provenance/AUTHOR_CONTRIBUTION_CHECKLIST.md): separates evaluation-only contributions from training grants and records exact model-distribution scope before collection.
-- [Machine-readable provenance](provenance/data_sources.json): currently empty because no external data has been approved or used; [the validator](provenance/README.md#provenance-gate) checks source/sample joins and split-safe evaluation hashes.
+- [Machine-readable provenance](provenance/data_sources.json): records the single approved ASDC diagnostic item; MASSIVE remains a candidate without admitted content. [The validator](provenance/README.md#provenance-gate) checks source/sample joins and split-safe evaluation hashes.
 - [Synthetic-data provenance](provenance/synthetic_data.json): currently empty because no synthetic data has been generated or used.
 - [Model card](MODEL_CARD.md): pre-release placeholder; no model exists yet.
 - [Third-party notices](THIRD_PARTY_NOTICES.md): current code license and outstanding artifact-license research.
