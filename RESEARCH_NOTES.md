@@ -168,6 +168,10 @@ These remain open; no method below has been accepted or rejected for Lumi, and n
 
 A tiny NumPy predictor trained from random initialization completed 120 epochs, saved and reloaded its artifact, and produced schema-shaped output on CPU. Its 12 training examples fit almost perfectly, while exact semantic match was only 2/5 on the separate five-example exploratory split; it made two false actions on future-intent cases and missed a code-switched title. These measurements show that the training and artifact path works, while the current representation and data do not generalize reliably. The dataset was copied from examples in the user-provided goal, remained outside Git, and was scoped to this local smoke only. See [the reproducibility record](experiments/RANDOM_INIT_INTENT_SMOKE.md).
 
+#### Level-1 random-init conversation response smoke (2026-10-03)
+
+An 18,321-parameter byte-level tanh encoder-decoder trained from random initialization on four illustrative English prompt/response examples, saved and reloaded its artifact, and generated bounded UTF-8 text on CPU. Training loss fell from 5.5718 to 0.00410 in 300 epochs. A two-example, family-disjoint illustrative development pass emitted text for both inputs but reused the weather response for a media comment and returned generic uncertainty wording instead of the specific playback clarification. No exact-match or human quality score was used. Repeated same-seed runs produced the same 69,972-byte artifact (sha256:a0d53170c9f4c34e383d88b9fc1fc8cc431327306acfc07aeab2fb58b315fe77). This demonstrates a minimal generation path, not conversational quality or a selected architecture. The research compares flat byte recurrence with ByT5 and the more recent hierarchical byte AU-Net; neither literature result transfers to this tiny data regime. See [the experiment record](experiments/CONVERSATION_RESPONSE_SMOKE.md).
+
 ### Hypotheses awaiting measurement
 
 - A task-focused model may be much smaller than a general-purpose conversational model while meeting action and slot targets.

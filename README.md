@@ -4,7 +4,7 @@ Lumi is a proposed optional, local natural-language capability for ZenStream. It
 
 ## Project status
 
-This repository contains Lumi's research, evaluation, and provenance foundation plus a first level-1 exploratory random-init structured-prediction smoke. The smoke proves a small local train/save/reload/infer loop, not a product model: its five-example development result is poor and it has no ZenStream service or playback integration. No release candidate, production inference service, approved production-quality training corpus, or selected runtime exists. The temporary examples, model artifacts, and logs remain in local controlled storage and are not checked in. No pretrained model weights are permitted for Lumi; any eventual model must start from random initialization.
+This repository contains Lumi's research, evaluation, and provenance foundation plus two level-1 exploratory random-init experiments: a structured-prediction smoke and a byte-level conversational-response smoke. The second experiment proves that a tiny local model can train, save, reload, and generate bounded UTF-8 text on CPU; its two illustrative development generations show clear response-selection failures and have no human quality review. Neither experiment is a product model. No release candidate, production inference service, approved production-quality training corpus, or selected runtime exists. Temporary examples, model artifacts, and logs remain in local controlled storage and are not checked in. No pretrained model weights are permitted for Lumi; any eventual model must start from random initialization.
 
 Architecture, tokenizer, model size, runtime, training corpus, integration protocol, and artifact licensing remain open research decisions. Research claims are not Lumi measurements. See [RESEARCH_NOTES.md](RESEARCH_NOTES.md) for the initial evidence review and its limitations.
 
@@ -24,7 +24,7 @@ Architecture, tokenizer, model size, runtime, training corpus, integration proto
 - **Level 2 — development:** compare reproducible candidates using permitted, provenance-recorded training material and a frozen, independently reviewed development set, including qualified Japanese review. The final holdout and final statistical power are not prerequisites for this stage.
 - **Level 3 — release/final:** require admitted training sources, qualified reviewed evaluation, a sequestered and statistically suitable holdout, resolved artifact-distribution terms, production hardware measurements, and complete release provenance.
 
-Level-3 requirements must not block clearly scoped level-1 work. The current smoke is described in [its experiment record](experiments/RANDOM_INIT_INTENT_SMOKE.md); it is not admitted as production training or benchmark data.
+Level-3 requirements must not block clearly scoped level-1 work. The [structured intent smoke](experiments/RANDOM_INIT_INTENT_SMOKE.md) and [conversation response smoke](experiments/CONVERSATION_RESPONSE_SMOKE.md) are engineering evidence only; their examples are not admitted as production training data or formal benchmark cases.
 
 ## Project records
 
@@ -48,9 +48,10 @@ Level-3 requirements must not block clearly scoped level-1 work. The current smo
 - [Human contributor intake checklist](provenance/AUTHOR_CONTRIBUTION_CHECKLIST.md): separates evaluation-only contributions from training grants and records exact model-distribution scope before collection.
 - [Machine-readable provenance](provenance/data_sources.json): records the single approved ASDC diagnostic item; MASSIVE remains a candidate without admitted content. [The validator](provenance/README.md#provenance-gate) checks source/sample joins and split-safe evaluation hashes.
 - [Synthetic-data provenance](provenance/synthetic_data.json): currently empty because no synthetic data has been generated or used.
-- [Model card](MODEL_CARD.md): pre-release placeholder; no model exists yet.
+- [Model card](MODEL_CARD.md): pre-release status and limitations; no complete Lumi model has been selected.
 - [Third-party notices](THIRD_PARTY_NOTICES.md): current code license and outstanding artifact-license research.
 - [Experiment record template](experiments/EXPERIMENT_TEMPLATE.md): reproducibility and comparison fields.
+- [Conversation response smoke](experiments/CONVERSATION_RESPONSE_SMOKE.md): a random-init byte-level sequence-generation pilot, its two held-out illustrative outputs, and the reasons it is not a quality-bearing candidate.
 
 ## Initial sequence
 

@@ -52,6 +52,12 @@
 - Yang et al. 2025. [Gated Delta Networks: Improving Mamba2 with Delta Rule](https://arxiv.org/abs/2412.06464), ICLR 2025; [official implementation](https://github.com/NVlabs/GatedDeltaNet). Candidate for small hybrid experiments; kernel and CPU portability are open questions.
 - Dao and Gu. 2024. [Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality](https://arxiv.org/abs/2405.21060). Introduces Mamba-2/SSD; useful architectural background, not direct evidence of a Lumi win.
 
+## Byte-level modeling and Japanese scratch training
+
+- Xue et al. 2021. [ByT5: Towards a Token-Free Future with Pre-trained Byte-to-Byte Models](https://arxiv.org/abs/2105.13626); [official Google Research implementation](https://github.com/google-research/byt5). ByT5 removes the fixed subword vocabulary and processes UTF-8 bytes, reporting robustness on noisy text; its released model sizes start at 300 million parameters, so those results do not establish that a tiny byte RNN can produce useful conversation.
+- Videau et al. 2025, updated 2026. [From Bytes to Ideas: Language Modeling with Autoregressive U-Nets](https://arxiv.org/abs/2506.14761); [official Meta Lingua implementation](https://github.com/facebookresearch/lingua/tree/main/apps/aunet). The proposed hierarchy pools raw bytes into words and larger units and studies models from 25 million to 500 million parameters. It is a more recent alternative to flat byte recurrence, but its pretraining scale and objective are not comparable to Lumi's six-example engineering smoke.
+- Preferred Elements et al. 2024. [PLaMo-100B: A Ground-Up Language Model Designed for Japanese Proficiency](https://arxiv.org/abs/2410.07563). The report describes Japanese/English scratch pretraining on two trillion tokens and later instruction tuning. It is a useful data-scale warning for Lumi's Japanese target, not an architecture or quality estimate at Lumi's intended size.
+
 ## Structured generation and reliability
 
 - Geng et al. 2025. [Generating Structured Outputs from Language Models: Benchmark and Studies](https://arxiv.org/abs/2501.10868); [JSONSchemaBench](https://github.com/guidance-ai/jsonschemabench). Evaluates structured decoding validity, schema coverage, efficiency, and output quality; syntax and semantic correctness must be scored separately.
