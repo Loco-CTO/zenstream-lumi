@@ -158,14 +158,9 @@ def _validate_ledger(cases: list[dict[str, Any]], records: list[dict[str, Any]])
 def _safe_output_path(path: Path, cases_path: Path) -> Path:
     output = path.expanduser().resolve()
     cases = cases_path.expanduser().resolve()
-    root = REPOSITORY_ROOT.resolve()
     if output == cases:
         raise WorkbenchError("review records must be written to a separate file")
-    try:
-        output.relative_to(root)
-    except ValueError:
-        pass
-    else:
+    if any((parent / ".git").exists() for parent in (output, *output.parents)):
         raise WorkbenchError("review records must be stored outside the Git repository")
     if output.suffix.lower() != ".jsonl":
         raise WorkbenchError("the review output path must end in .jsonl")
