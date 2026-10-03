@@ -1,6 +1,6 @@
 # Model formulation and architecture pilot
 
-**Status:** One level-1 random-init structured-predictor smoke has been trained and measured; see [its record](RANDOM_INIT_INTENT_SMOKE.md). It is not a selected model or architecture. A quality-bearing level-2 architecture comparison remains pending permitted training data, a reviewed development set, and a pinned tokenizer and evaluator. The final holdout and model-weight distribution terms are level-3 gates and must not block exploratory work.
+**Status:** A level-1 random-init structured-predictor smoke, a four-seed response-generation smoke, and the Japanese JMultiWOZ state-and-response training pilot have been measured; see their linked records. The JMultiWOZ pilot now validates all 88 transformed item records before training and reproduces identical weights and predictions across runs, but it is still a toy candidate, not a selected model or architecture. Its development match rates remain weak and its Japanese responses are unreviewed. A quality-bearing level-2 architecture comparison remains pending qualified reviewed development cases across English, Japanese, and code-switching, plus pinned evaluation and comparison controls. The final holdout and final artifact-release review remain level-3 gates and do not block these exploratory runs.
 
 ## Question and scope
 
@@ -22,11 +22,11 @@ Published results motivate candidates but do not predict a Lumi winner:
 - [SSM-Scope](https://arxiv.org/abs/2507.12442), published at ISPASS 2026, reports Transformers faster below 8K tokens and SSM advantages at much longer contexts on tested consumer and embedded GPUs. It does not measure CPU inference or random-initialized Lumi models. Lumi should use its reviewed context distribution before spending compute on a recurrent candidate.
 - The single-author [Daedalus-150M preprint](https://arxiv.org/abs/2608.20210) reports a matched, from-scratch hybrid/all-attention comparison, with decode speed gains that grow with context length and are near zero at empty context. It is one general-task result and is not independently replicated; its preregistered matched-control design is useful, while its measured win remains only that author's result.
 
-**Lumi evidence:** one tiny level-1 structured-prediction smoke is recorded in [RANDOM_INIT_INTENT_SMOKE.md](RANDOM_INIT_INTENT_SMOKE.md). It did not compare sequence architectures and does not inform a quality-bearing design choice. The statements above are published or author-reported findings, not Lumi measurements. Claims that task-focused outputs, short convolution, or an encoder-decoder formulation will help Lumi remain hypotheses until tested in controlled Lumi experiments.
+**Lumi evidence:** the tiny level-1 structured-prediction and conversation-response results are recorded in [RANDOM_INIT_INTENT_SMOKE.md](RANDOM_INIT_INTENT_SMOKE.md), [CONVERSATION_RESPONSE_SEED_SWEEP.md](CONVERSATION_RESPONSE_SEED_SWEEP.md), and [the JMultiWOZ pilot](JMULTIWOZ_PILOT.md). None compares sequence architectures or supports a product-quality claim. The statements above are published or author-reported findings, not Lumi measurements. Claims that task-focused outputs, short convolution, or an encoder-decoder formulation will help Lumi remain hypotheses until tested in controlled Lumi experiments.
 
 ## Evidence gates
 
-The gates depend on the evidence level. Level 1 permits small local smoke experiments with explicitly scoped temporary material, separate exploratory train/development families, random initialization, a predeclared compute ceiling, and recorded code/dependency/data hashes. Outputs and artifacts stay local, and no result is described as product quality. The [first smoke record](RANDOM_INIT_INTENT_SMOKE.md) demonstrates this boundary.
+The gates depend on the evidence level. Level 1 permits small local smoke experiments with explicitly scoped material, separate train/development families, random initialization, a predeclared compute ceiling, and recorded code/dependency/data hashes. Outputs and artifacts stay local, and no result is described as product quality. The current JMultiWOZ run is level 1: its public-source labels are a diagnostic, not the project's qualified review set.
 
 Before a level-2 formulation or architecture comparison, require:
 

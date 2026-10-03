@@ -50,6 +50,63 @@
         "rationale": "Pinned GitHub API metadata confirms that commit f37d6575c73602adcb8ae3687520726793baa672 is the ASDC master revision. The pinned README expressly licenses the corpus, annotations, and documentation under CC BY 4.0. The exact 001.json item was inspected, identified as a fictitious accommodation-search role-play, and checked for direct personal identifiers. Only this item is admitted for a public development diagnostic; the rest of ASDC remains unreviewed and excluded."
       },
       "generation_record_id": null
+    },
+    {
+      "source_id": "jmultiwoz-v1-training-pilot",
+      "source_type": "external_dataset",
+      "name": "JMultiWOZ Japanese Multi-Domain Wizard-of-Oz Dataset v1.0",
+      "canonical_identifier": "https://github.com/nu-dialogue/jmultiwoz/tree/a78dd334b907e12318b76bb23d0a9ed1498b8d15/dataset",
+      "authors_or_organization": "Atsumoto Ohashi, Ryu Hirai, Shinya Iizuka, and Ryuichiro Higashinaka; Nagoya University Dialogue System Research Group",
+      "version": "JMultiWOZ 1.0 archive at the upstream master commit pinned below; 64 official-train and 24 official-dev dialogue examples selected for this local pilot",
+      "revision": "a78dd334b907e12318b76bb23d0a9ed1498b8d15",
+      "release_date": null,
+      "access_date": "2026-10-03",
+      "license": {
+        "identifier": "CC-BY-SA-4.0",
+        "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "copyright_notice": "The authors license the JMultiWOZ dataset under CC BY-SA 4.0 and explicitly state in their repository that models trained using it are not considered copies or direct derivatives of the dataset and do not need to comply with that license.",
+        "attribution_requirement": "Credit Ohashi et al. (2024), link the JMultiWOZ repository and CC BY-SA 4.0 license, describe transformations, and do not imply author endorsement.",
+        "terms_review": "The upstream dataset README, Hugging Face card, paper, license, and exact v1.0 archive were reviewed. The upstream repository explicitly permits model training and says resulting models are not copies or direct derivatives subject to CC BY-SA. The dataset contains Japanese human-simulated Wizard-of-Oz travel conversations with dialogue-state labels; its database sources are described by the authors as government or municipal and copyright-unencumbered official sites. This admission is limited to a local exploratory model run using deterministic samples from official train and dev splits, with phone-like spans redacted and phone, address, and reference slots omitted. Raw data and weights remain local. Preserve attribution and recheck terms before distributing an artifact; this is a scoped source review, not legal advice."
+      },
+      "permissions": {
+        "commercial_use": "permitted",
+        "redistribution": "conditional",
+        "modification": "conditional",
+        "derivative_works": "conditional",
+        "training_use": "permitted",
+        "evaluation_use": "permitted"
+      },
+      "lumi_uses": [
+        "instruction_training",
+        "evaluation"
+      ],
+      "decision": "approved_for_use",
+      "direct_or_indirect": "direct",
+      "transformations": [
+        "Use the last four utterances before the final annotated SYSTEM turn as model context.",
+        "Serialize the final active domain, non-null active-domain arguments plus general city, and final SYSTEM reply as compact UTF-8 JSON.",
+        "Replace phone-like number spans with [PHONE] and omit phone, address, and reference slots."
+      ],
+      "filters": [
+        "Use only 64 deterministically selected dialogues from the official train split for local exploratory instruction training and 24 disjoint dialogues from the official dev split for exploratory development diagnostics.",
+        "Do not use the public test split, remaining train/dev items, backend database files, participant account identifiers, or goal-description templates in this pilot.",
+        "Keep the archive, normalized examples, per-item selection manifest, predictions, and model artifacts outside every Git worktree; commit no source text or trained weights.",
+        "Keep the 101-case Codex-generated draft and every derivative excluded from training, tokenizer fitting, evaluation, filtering, prompt construction, and release evidence."
+      ],
+      "deduplication": [
+        "Select and audit by dialogue ID and dialogue family; require disjoint official train/dev families and check item-content hashes for exact cross-split duplicates before training.",
+        "Record the exact upstream archive and source-member SHA-256 values plus selected per-dialogue content hashes in the local selection manifest."
+      ],
+      "document_count": 88,
+      "example_count": 88,
+      "token_count": null,
+      "checksum": "sha256:283dea36f5abeea8f016fea2bd4df4dfba67a40f89c4600e47ed701c57ea2bc2",
+      "review": {
+        "reviewed_by": "Codex-assisted primary-source and pinned-archive review",
+        "reviewed_date": "2026-10-03",
+        "rationale": "The archive was downloaded from the authors' repository at commit a78dd334b907e12318b76bb23d0a9ed1498b8d15 and its SHA-256 and key JSON-member hashes were verified. Upstream files identify 4,246 Japanese dialogues across six task-oriented domains and official 3,646/300/300 train/dev/test splits. Training and development selection is deterministic and local; only the scoped 64/24 sample is admitted, with raw source text and model artifacts retained outside Git."
+      },
+      "generation_record_id": null
     }
   ]
 }
