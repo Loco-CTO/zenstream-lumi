@@ -5,9 +5,9 @@
   "created_date": "2026-10-02",
   "source_snapshot": {
     "repository": "Loco-CTO/zenstream-orchestrator",
-    "commit": "f4fc86cdf97d2519779a842d540df5b5b99074cc",
+    "commit": "61aa7ae75c42e8177e496ee121ba37c4ef8c23cd",
     "contract_path": "contracts/openapi.json",
-    "contract_sha256": "89d614ade8d7d9f8a46d96ac0047c63d1377b49f53bba3979e15405886447bbf",
+    "contract_sha256": "7b22eab5f070c867f5036dbb65415a3febd97cf09035e0a9b65c43ff38a82f78",
     "implementation_path": "orchestrator/api/zenstream/client_routes.py",
     "implementation_sha256": "2dcc411882c2ba2779655ab0006f7c75a9e090a65c0c77985cd4a2bdef33a5df"
   },
@@ -88,7 +88,7 @@
         }
       ],
       "limitations": [
-        "The runtime route accepts section=recommendations, but the generated OpenAPI section enum omits that value; the registry remains draft until this contract drift is resolved.",
+        "The generated OpenAPI contract now includes recommendations as a Home section; Lumi workflow behavior and the capability mapping still require review.",
         "The library section requires a libraryId and remains subject to account grants.",
         "continueWatching is an authoritative continuation row, not proof of what is currently playing."
       ]
