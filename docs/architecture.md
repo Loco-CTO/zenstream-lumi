@@ -2,21 +2,21 @@
 
 Status: initial implementation decisions, 2026-10-06
 
-## Service responsibilities
+## In-process responsibilities
 
 ### Orchestrator
 
 - Owns public client authentication and account identity.
-- Proxies Lumi conversation and model-choice requests after normal account authentication.
-- Mints short-lived, audience-scoped delegation bound to the authenticated user, live session, conversation, allowed read scopes, expiry, and a unique identifier. Lumi never receives browser cookies or access/refresh tokens and cannot mint this delegation.
-- Exposes a dedicated read-only tool gateway for Lumi. The gateway authenticates the Lumi service separately, derives account identity from the signed delegation, verifies the live session and conversation owner, and reapplies library grants on every call.
+- Downloads and installs a supported, versioned Lumi release from its published release into managed runtime storage only after an administrator explicitly enables the integration. An Orchestrator-owned allowlist pins the release version, immutable source revision, runtime API version, optional dependencies, checksum, and compatible Python/platform targets.
+- Imports Lumi from that managed release into the Orchestrator process. Lumi remains developed and released from this repository; its source is not copied into the Orchestrator source tree, and there is no separately deployed Lumi service.
+- Calls Lumi internally with the current authenticated account context and grants Lumi only bounded, read-only catalog/history adapters.
 - Enforces an expected browser Origin or equivalent CSRF defense on cookie-authenticated requests that create or append conversations.
 - Owns ZenStream catalog, watch-history, progress, favourites, and preference reads. A missing read contract should be added as a bounded, grant-filtered route before Lumi depends on it.
 
-### Lumi service
+### Lumi package
 
-- Owns chat orchestration, persisted conversations, local Qwen3.5 inference, web research, source metadata, and rich-reference validation.
-- Scopes every conversation and message operation to the delegated account identity. A client-provided account ID or model-generated identifier never selects the owner.
+- Provides chat orchestration, persisted conversations, embedded Qwen3.5 inference, web research, source metadata, and rich-reference validation as importable Python code.
+- Uses only the account context supplied by Orchestrator. A client-provided account ID or model-generated identifier never selects the owner.
 - Exposes only the read-only ZenStream tools required for answering. It has no playback, download, delete, metadata-edit, watched-state, favourite-write, or library-write tools.
 - Keeps conversation model and thinking choices with the conversation. New conversations inherit the configured user/server default.
 - Limits tool steps, distinct web searches, fetched pages, repeated queries, context, output, inference time, and simultaneous inference. Tool availability stays bounded and explicit.
@@ -33,14 +33,14 @@ Status: initial implementation decisions, 2026-10-06
 sequenceDiagram
     participant C as ZenStream client
     participant O as Orchestrator
-    participant L as Lumi
-    participant R as Qwen3.5 runtime
+    participant L as Lumi package in Orchestrator
+    participant R as embedded Qwen3.5 runtime
     participant W as Web research
     C->>O: Authenticated conversation request
-    O->>L: Request plus short-lived scoped delegation
+    O->>L: Internal call with authenticated account context
     L->>R: Native Qwen3.5 tool definitions and conversation
     R-->>L: Normalized assistant text or native tool calls
-    L->>O: Delegated read-only tool request
+    L->>O: Bounded read-only catalog/history call
     O-->>L: Grant-filtered local result
     L->>W: Bounded query/page requests when useful
     W-->>L: Untrusted evidence and source metadata
@@ -50,7 +50,7 @@ sequenceDiagram
     O-->>C: Authenticated answer
 ```
 
-Conversation data stays in Lumi's own local store. Lumi does not connect to the Orchestrator database or media filesystem. External search receives only the query needed for research; private history, favourites, usernames, and full library inventories remain local.
+Conversation data and model files stay in Orchestrator-managed storage. The installed Lumi package does not connect directly to the Orchestrator database or media filesystem; it uses the internal read-only adapters. External search receives only the query needed for research; private history, favourites, usernames, and full library inventories remain local.
 
 ## Model and tool protocol
 
@@ -59,21 +59,23 @@ Conversation data stays in Lumi's own local store. Lumi does not connect to the 
 - The executor accepts only registered tool names and validates arguments against each tool's schema. Calls for unavailable or state-changing tools are rejected and never mapped to an equivalent write route.
 - Treat all retrieved web text as untrusted evidence. It cannot change system policy, tool permissions, model selection, or recommendation scope.
 - Restrict page retrieval to HTTP(S), validate and pin the resolved destination at connection time, reject loopback/private/link-local/reserved addresses, and revalidate each redirect. Apply strict redirect, response-size, port, and timeout limits; send no Orchestrator credentials to external sites.
-- Never log delegated credentials, full transcripts, raw web pages, or private library snapshots. Keep request payload and per-user rate limits at the Orchestrator boundary.
+- Never log session secrets, full transcripts, raw web pages, or private library snapshots. Keep request payload and per-user rate limits at the Orchestrator boundary.
 - Keep the available tool list compact and tool descriptions short; tool-call formatting alone does not ensure a model will choose a tool.
-- Recommendations use media available to the delegated user by default. External recommendations require an explicit request. Candidate matching uses provider IDs, aliases, original/localized titles, dates, and type; uncertainty never creates a local reference.
+- Recommendations use media available to the current user by default. External recommendations require an explicit request. Candidate matching uses provider IDs, aliases, original/localized titles, dates, and type; uncertainty never creates a local reference.
 - The answer may contain `:::zenstream{type="..." id="..."}` references only for IDs returned by trusted local tools. The server validates each reference before it reaches a client and returns source metadata as separate structured data.
 
-The initial runtime adapter targets [Ollama's chat API](https://docs.ollama.com/api/chat). Qwen3.5's model card documents native tool use and thinking configuration; thinking is disabled with the model-template setting when selected by the user. Ollama exposes a `think` request option and model residency controls. Keep runtime-specific request fields inside the adapter. See the [Qwen3.5 model card](https://huggingface.co/Qwen/Qwen3.5-4B) and [Ollama API reference](https://github.com/ollama/ollama/blob/main/docs/api.md).
+The embedded adapter uses the ONNX Runtime GenAI Python API directly in the Orchestrator process. Its package dependency is optional and pinned separately from Lumi's core package. Qwen3.5's native chat template handles tool definitions and per-request thinking; the adapter normalizes native tool-call output into Lumi's runtime-independent contracts. It does not make an inference HTTP request or download models.
+
+Orchestrator verifies the downloaded Lumi release before atomically making that version importable from managed runtime storage. Its model installer also verifies every model-file digest before marking a model ready, then writes a model manifest and passes the expected manifest digest to Lumi. On first model load, Lumi independently verifies the manifest, exact file set, and every model-file digest. It caches each file's identity and change timestamps, rehashing changed files before a later load so ordinary idle unload/reload does not rescan unchanged multi-gigabyte weights.
 
 ## Runtime lifecycle
 
 - Load models only when a request selects them.
-- Keep the number of concurrently resident models and inference requests within admin-configured limits.
+- Load one model lazily and run one generation at a time; switching models unloads the previous model first.
 - Allow inactive models to unload after a configured idle interval; expose loading, loaded, unloading, unavailable, and error states to administrators.
 - Apply configured context and output limits instead of the models' maximum context by default.
-- Isolate runtime failures from the Orchestrator process and return a recoverable Lumi error.
-- Start with Ollama and preserve a small adapter interface for a later Qwen3.5-capable runtime such as llama.cpp if NAS compatibility or measured CPU performance warrants it.
+- Run synchronous native generation on a worker thread so the Orchestrator event loop remains responsive. Cancellation stops generation between native token steps; a token step already executing must return before the runtime can release the model. Return recoverable Lumi errors when model loading or inference fails.
+- Unload idle models and release model resources when Lumi is disabled or Orchestrator shuts down.
 
 ## Production and evaluation boundary
 
@@ -83,4 +85,4 @@ Before considering fine-tuning, compare available Qwen3.5 0.8B, 2B, and 4B model
 
 ## Integration requirements
 
-The Orchestrator API contract, OpenAPI snapshot/fixtures, admin dashboard, deployment/launcher lifecycle, and web client must be updated as part of their respective stages. Keep each stage in its own affected repository worktree and commit completed stages locally. Never expose the Lumi service as an unauthenticated public endpoint.
+The Orchestrator API contract, OpenAPI snapshot/fixtures, admin dashboard, deployment/launcher lifecycle, and web client must be updated as part of their respective stages. Keep each stage in its own affected repository worktree. The Orchestrator integration must import an explicitly installed compatible Lumi release in-process; it must not vendor Lumi source into the Orchestrator repository or expose a separate public Lumi service.
