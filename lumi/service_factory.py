@@ -84,19 +84,17 @@ def build_zenstream_tool_registry(
         max_response_bytes=max_response_bytes,
         transport=transport,
     )
-    web_search, open_web_result = build_web_research_tools(
+    web_tools = build_web_research_tools(
         web_research_config or WebResearchConfig(),
         transport=web_transport,
     )
-    return ToolRegistry(
-        (
-            CatalogSearchTool(client),
-            CatalogItemDetailTool(client),
-            HomeRecommendationsTool(client),
-            ContinueWatchingTool(client),
-            NextUpTool(client),
-            FavoritesTool(client),
-            web_search,
-            open_web_result,
-        )
+    local_tools = (
+        CatalogSearchTool(client),
+        CatalogItemDetailTool(client),
+        HomeRecommendationsTool(client),
+        ContinueWatchingTool(client),
+        NextUpTool(client),
+        FavoritesTool(client),
     )
+    return ToolRegistry((*local_tools, *web_tools))
+
