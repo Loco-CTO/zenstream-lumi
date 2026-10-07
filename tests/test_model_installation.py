@@ -21,7 +21,6 @@ from lumi.model_installation import (
     supported_models,
 )
 
-
 _MODEL_ID = "qwen3.5:0.8b"
 _SOURCE_FILES = ("config.json", "tokenizer_config.json", "model.safetensors")
 

@@ -311,7 +311,9 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         planner_messages = runtime.requests[1].messages
         self.assertEqual([message.role for message in planner_messages], ["system", "user"])
         self.assertEqual(planner_messages[1].content, user_text)
-        self.assertNotIn("SecretFavorite", " ".join(message.content for message in planner_messages))
+        self.assertNotIn(
+            "SecretFavorite", " ".join(message.content for message in planner_messages)
+        )
         self.assertEqual(
             search_tool.calls[0][1]["query"],
             "recent updates about something like that",

@@ -559,7 +559,7 @@ class Qwen35ModelInstaller:
             total_size += size
 
         actual: set[str] = set()
-        for relative_name, path in _walk_regular_files(model_dir):
+        for relative_name, _path in _walk_regular_files(model_dir):
             if relative_name != MODEL_MANIFEST_FILENAME:
                 actual.add(relative_name)
                 if relative_name not in expected:

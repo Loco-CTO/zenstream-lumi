@@ -7,15 +7,16 @@ import json
 import math
 import re
 from dataclasses import dataclass, replace
-from typing import Any, Mapping
+from typing import Any
+from collections.abc import Mapping
 
 from lumi.contracts import (
-    ENTITY_TYPES,
     ChatAnswer,
     ChatContext,
     ChatMessage,
     ChatRuntime,
     EntityReference,
+    ENTITY_TYPES,
     EvidenceTrust,
     ModelRequest,
     ModelResponse,

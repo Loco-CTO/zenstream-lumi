@@ -14,8 +14,8 @@ from fastapi.testclient import TestClient
 
 from lumi.agent import AgentLimits, InferenceError
 from lumi.contracts import (
-    ChatMessage,
     ChatContext,
+    ChatMessage,
     EntityReference,
     EvidenceTrust,
     ModelRequest,
@@ -212,7 +212,9 @@ class LumiServiceAPITests(unittest.TestCase):
             ).status_code,
             401,
         )
-        self.assertEqual(self.client.get("/internal/models", headers=self.headers()).status_code, 422)
+        self.assertEqual(
+            self.client.get("/internal/models", headers=self.headers()).status_code, 422
+        )
         self.assertEqual(
             self.client.get(
                 "/internal/models",
@@ -366,7 +368,10 @@ class LumiServiceAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         answer = response.json()["answer"]
-        self.assertEqual(answer["references"], [{"type": "series", "id": "series-1", "title": "Frieren"}])
+        self.assertEqual(
+            answer["references"],
+            [{"type": "series", "id": "series-1", "title": "Frieren"}],
+        )
         self.assertEqual(answer["sources"][0]["url"], "https://example.org/frieren")
         self.assertEqual(self.catalog_tool.calls[0][0].account_id, "account-1")
         self.assertEqual(self.catalog_tool.calls[0][0].delegation_token, self.token())
@@ -551,11 +556,15 @@ class LumiServiceAPITests(unittest.TestCase):
         endpoint = "/internal/conversations/conversation-1/turns"
 
         self.assertEqual(
-            self.client.post(endpoint, headers=self.headers(no_chat_scope), json={"message": "Hi"}).status_code,
+            self.client.post(
+                endpoint, headers=self.headers(no_chat_scope), json={"message": "Hi"}
+            ).status_code,
             401,
         )
         self.assertEqual(
-            self.client.post(endpoint, headers=self.headers(wrong_conversation), json={"message": "Hi"}).status_code,
+            self.client.post(
+                endpoint, headers=self.headers(wrong_conversation), json={"message": "Hi"}
+            ).status_code,
             401,
         )
 
@@ -585,4 +594,3 @@ class LumiServiceAPITests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

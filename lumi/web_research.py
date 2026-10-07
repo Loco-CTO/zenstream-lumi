@@ -138,7 +138,7 @@ class WebResearchConfig:
                 raise ValueError("SearXNG URL must not contain surrounding whitespace")
             parts = urlsplit(self.searxng_url)
             try:
-                parts.port
+                _ = parts.port
             except ValueError as error:
                 raise ValueError("SearXNG URL has an invalid port") from error
             if (
@@ -580,7 +580,22 @@ class _PageDocument:
 
 
 _VOID_HTML_TAGS = frozenset(
-    {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
 )
 
 

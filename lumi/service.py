@@ -19,7 +19,7 @@ from lumi.contracts import (
     EntityReference,
 )
 from lumi.delegation import DelegationClaims, DelegationError, DelegationVerifier
-from lumi.model_catalog import ModelCatalog, ModelConfigurationError
+from lumi.model_catalog import ModelCatalog, ModelConfigurationError, QwenModelOption
 from lumi.storage import (
     ConversationNotFound,
     ConversationSnapshot,

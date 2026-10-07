@@ -216,7 +216,10 @@ class OrtGenAIRuntimeTests(unittest.IsolatedAsyncioTestCase):
     ) -> ModelRequest:
         return ModelRequest(
             model=model,
-            messages=(ChatMessage("system", "Use read-only tools."), ChatMessage("user", "Find it")),
+            messages=(
+                ChatMessage("system", "Use read-only tools."),
+                ChatMessage("user", "Find it"),
+            ),
             tools=tools,
             thinking=thinking,
             context_size=context_size,

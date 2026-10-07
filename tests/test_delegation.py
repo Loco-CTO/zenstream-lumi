@@ -112,12 +112,10 @@ class DelegationVerifierTests(unittest.TestCase):
     def test_rejects_duplicate_json_claims(self) -> None:
         header = encode_segment(b'{"alg":"EdDSA","typ":"JWT"}')
         payload = encode_segment(
-            (
-                '{"iss":"zenstream-orchestrator","iss":"attacker",'
-                '"aud":"zenstream-lumi","sub":"account-7","sid":"session-9",'
-                '"cid":"conversation-11","scope":["catalog.read"],"iat":1800000000,'
-                '"exp":1800000120,"jti":"grant-13"}'
-            ).encode("utf-8")
+            b'{"iss":"zenstream-orchestrator","iss":"attacker",'
+            b'"aud":"zenstream-lumi","sub":"account-7","sid":"session-9",'
+            b'"cid":"conversation-11","scope":["catalog.read"],"iat":1800000000,'
+            b'"exp":1800000120,"jti":"grant-13"}'
         )
         signed = f"{header}.{payload}".encode("ascii")
         token = f"{header}.{payload}.{encode_segment(self.private_key.sign(signed))}"

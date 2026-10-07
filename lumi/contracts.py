@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Literal, Mapping, Protocol, Sequence
+from typing import Any, Literal, Protocol
+from collections.abc import Mapping, Sequence
 from urllib.parse import urlsplit
 
 
@@ -103,7 +104,7 @@ class Source:
         if parts.username is not None or parts.password is not None:
             raise ValueError("Source URLs cannot contain embedded credentials")
         try:
-            parts.port
+            _ = parts.port
         except ValueError as error:
             raise ValueError("Source URLs cannot contain invalid ports") from error
         if self.favicon_url is not None:

@@ -293,7 +293,11 @@ class OllamaRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 make_request(
                     tools=(
                         ToolDefinition(
-                            "search", "Search", {"type": "string"}, data_scope="local", read_only=True
+                            "search",
+                            "Search",
+                            {"type": "string"},
+                            data_scope="local",
+                            read_only=True,
                         ),
                     )
                 )

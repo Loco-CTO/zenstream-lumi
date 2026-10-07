@@ -6,7 +6,8 @@ import base64
 import json
 import time
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Protocol
+from collections.abc import Callable
 
 
 class DelegationError(PermissionError):
