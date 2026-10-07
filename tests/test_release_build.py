@@ -146,6 +146,33 @@ class LumiReleaseBuildTests(unittest.TestCase):
             with self.assertRaisesRegex(ReleaseBuildError, "no onnxruntime-genai wheel"):
                 build_release(project_root, wheelhouse, root / "out", "v0.1.0")
 
+    def test_ignores_nested_vendored_distribution_metadata(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            wheelhouse = self._wheelhouse(root)
+            setuptools = self._wheel(
+                wheelhouse / "installer" / "universal",
+                "setuptools",
+                "81.0.0",
+                "py3",
+                "none",
+                "any",
+            )
+            with zipfile.ZipFile(setuptools, "a") as archive:
+                archive.writestr(
+                    "setuptools/_vendor/jaraco_text-3.12.1.dist-info/METADATA",
+                    "Metadata-Version: 2.1\nName: jaraco-text\nVersion: 3.12.1\n\n",
+                )
+
+            manifest = build_release(project_root, wheelhouse, root / "out", "v0.1.0")
+
+        installer_names = {
+            entry["distribution"].lower()
+            for entry in manifest["installerDependencies"]
+        }
+        self.assertIn("setuptools", installer_names)
+
 
 if __name__ == "__main__":
     unittest.main()
