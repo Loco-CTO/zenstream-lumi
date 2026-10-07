@@ -180,14 +180,19 @@ class ToolResult:
 
 @dataclass(frozen=True, slots=True)
 class ChatContext:
-    """Identity and choices verified by Lumi's authenticated Orchestrator boundary."""
+    """Account identity and choices supplied by Lumi's trusted host boundary.
+
+    Standalone deployments also carry a short-lived delegation token so catalog tools
+    can authenticate their HTTP reads. Embedded hosts already authenticated the user
+    and can omit it; tools use ``account_id`` for account-scoped reads instead.
+    """
 
     account_id: str
     conversation_id: str
     model: str
     thinking: bool
     turn_id: str
-    delegation_token: str = field(repr=False)
+    delegation_token: str | None = field(default=None, repr=False)
     previous_entities: tuple[EntityReference, ...] = ()
 
     def __post_init__(self) -> None:
@@ -197,8 +202,8 @@ class ChatContext:
             raise ValueError("A configured model is required")
         if not self.turn_id.strip():
             raise ValueError("A unique Lumi turn ID is required")
-        if not self.delegation_token.strip():
-            raise ValueError("An Orchestrator delegation is required")
+        if self.delegation_token is not None and not self.delegation_token.strip():
+            raise ValueError("An Orchestrator delegation cannot be empty")
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,7 +237,7 @@ class ReadOnlyTool(Protocol):
         """Validate and normalize untrusted model-generated arguments."""
 
     async def execute(self, context: ChatContext, arguments: Mapping[str, Any]) -> ToolResult:
-        """Run a bounded read-only operation using the delegated user context."""
+        """Run a bounded read-only operation using the trusted account context."""
 
 
 @dataclass(frozen=True, slots=True)

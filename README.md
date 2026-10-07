@@ -18,11 +18,25 @@ python -m pip install '.[embedded]'
 
 The Lumi installer verifies downloaded source files against pinned repository revisions and checkpoint SHA-256 values. It writes a `lumi-model-manifest.json` with the model identity and every generated file path, size, and SHA-256 digest. The host passes Lumi a `VerifiedModelArtifact` created by `InstalledModelArtifact.as_verified_model_artifact()`. Before its first native load, Lumi checks the manifest digest, model identity, exact file set, safe paths, and every declared file hash. It caches verified file identities and change timestamps in process, rehashing files when those fingerprints change. The first model load therefore includes one integrity pass over the installed files. The manifest must include `genai_config.json` and either `chat_template.jinja` or `tokenizer_config.json`. Only read-only tool definitions are passed to Qwen, and native Qwen3.5 tool-call output is normalized into Lumi's `ToolCall` contract.
 
+## Building and releasing
+
+The `Lumi release` GitHub Actions workflow runs the package suite on pull requests and publishes a GitHub Release when a matching stable `vMAJOR.MINOR.PATCH` tag is pushed. The tag must match `project.version` in `pyproject.toml`. Each release contains `lumi-runtime.zip` and host-specific, SHA-256 recorded dependency wheels; it never contains Qwen checkpoints or model weights.
+
+The release manifest keeps the runtime wheel set separate from the model-conversion wheel set. Orchestrator downloads runtime dependencies only when an administrator enables Lumi. It downloads installer dependencies only after an administrator explicitly starts a model installation. Local inference uses ONNX Runtime GenAI and does not use a model API URL. Web research remains optional and is enabled only by the administrator's SearXNG setting.
+
+For local model-conversion development, use the official CPU PyTorch wheel index:
+
+```powershell
+python -m pip install ".[model-install]" --find-links https://download.pytorch.org/whl/cpu/torch/
+```
+
+Run `python -m unittest discover -s tests -v` for the package suite, `python -m unittest discover -s tests -p "test_release_build.py" -v` for release archive tests, and `ruff check lumi tests scripts` for lint.
+
 ## Optional Qwen3.5 model installation
 
 Lumi owns its supported model catalog and installer. `supported_models()` is the single source for supported model IDs, display labels, and thinking support. It currently exposes the pinned official `qwen3.5:0.8b`, `qwen3.5:2b`, and `qwen3.5:4b` models. `Qwen35ModelInstaller.list_models()` adds local installation state and provenance.
 
-The host supplies a model data directory outside the Lumi package and repository. Install conversion dependencies with `python -m pip install '.[model-install]'`, then call the public package API after an administrator explicitly requests installation:
+The host supplies a model data directory outside the Lumi package and repository. Install conversion dependencies with `python -m pip install ".[model-install]" --find-links https://download.pytorch.org/whl/cpu/torch/`, then call the public package API after an administrator explicitly requests installation:
 
 ```python
 from lumi import Qwen35ModelInstaller, supported_models
