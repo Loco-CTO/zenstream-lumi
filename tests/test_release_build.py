@@ -23,6 +23,9 @@ class LumiReleaseBuildTests(unittest.TestCase):
         filename = f"{distribution}-{version}-{python_tag}-{abi_tag}-{platform_tag}.whl"
         path = wheelhouse / filename
         dist_info = f"{distribution.replace('-', '_')}-{version}.dist-info"
+        wheel_tags = "\n".join(
+            f"Tag: {python_tag}-{abi_tag}-{tag}" for tag in platform_tag.split(".")
+        )
         with zipfile.ZipFile(path, "w") as archive:
             archive.writestr(
                 f"{dist_info}/METADATA",
@@ -31,7 +34,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
             archive.writestr(
                 f"{dist_info}/WHEEL",
                 "Wheel-Version: 1.0\nGenerator: unit-test\nRoot-Is-Purelib: true\n"
-                f"Tag: {python_tag}-{abi_tag}-{platform_tag}\n",
+                f"{wheel_tags}\n",
             )
         return path
 
@@ -48,6 +51,14 @@ class LumiReleaseBuildTests(unittest.TestCase):
         for python_tag, abi_tag, platform_tag in targets:
             runtime_subdir = wheelhouse / "runtime" / f"{python_tag}-{platform_tag}"
             installer_subdir = wheelhouse / "installer" / f"{python_tag}-{platform_tag}"
+            numpy_platform_tag = {
+                "manylinux_2_28_x86_64": (
+                    "manylinux_2_17_x86_64.manylinux2014_x86_64"
+                ),
+                "manylinux_2_28_aarch64": (
+                    "manylinux_2_17_aarch64.manylinux2014_aarch64"
+                ),
+            }.get(platform_tag, platform_tag)
             self._wheel(
                 runtime_subdir,
                 "onnxruntime_genai",
@@ -57,13 +68,23 @@ class LumiReleaseBuildTests(unittest.TestCase):
                 platform_tag,
             )
             self._wheel(
-                runtime_subdir, "numpy", "2.2.6", python_tag, abi_tag, platform_tag
+                runtime_subdir,
+                "numpy",
+                "2.2.6",
+                python_tag,
+                abi_tag,
+                numpy_platform_tag,
             )
             self._wheel(
                 installer_subdir, "torch", "2.11.0+cpu", python_tag, abi_tag, platform_tag
             )
             self._wheel(
-                installer_subdir, "numpy", "2.2.6", python_tag, abi_tag, platform_tag
+                installer_subdir,
+                "numpy",
+                "2.2.6",
+                python_tag,
+                abi_tag,
+                numpy_platform_tag,
             )
         runtime_universal = wheelhouse / "runtime" / "universal"
         installer_universal = wheelhouse / "installer" / "universal"
@@ -97,6 +118,17 @@ class LumiReleaseBuildTests(unittest.TestCase):
             }
             self.assertEqual(
                 runtime_names, {"numpy", "onnxruntime-genai", "packaging"}
+            )
+            numpy_platforms = {
+                entry["platformTag"]
+                for entry in manifest["runtimeDependencies"]
+                if entry["distribution"].lower() == "numpy"
+            }
+            self.assertIn(
+                "manylinux_2_17_x86_64.manylinux2014_x86_64", numpy_platforms
+            )
+            self.assertIn(
+                "manylinux_2_17_aarch64.manylinux2014_aarch64", numpy_platforms
             )
             installer_names = {
                 entry["distribution"].lower().replace("_", "-")
@@ -176,3 +208,4 @@ class LumiReleaseBuildTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
