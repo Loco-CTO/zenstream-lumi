@@ -109,10 +109,10 @@ class LumiReleaseBuildTests(unittest.TestCase):
             root = Path(temporary)
             wheelhouse = self._wheelhouse(root)
             output = root / "release"
-            manifest = build_release(project_root, wheelhouse, output, "v0.1.1")
+            manifest = build_release(project_root, wheelhouse, output, "v0.1.2")
 
             self.assertEqual(manifest["schemaVersion"], 1)
-            self.assertEqual(manifest["tag"], "v0.1.1")
+            self.assertEqual(manifest["tag"], "v0.1.2")
             self.assertEqual(len(manifest["runtimeDependencies"]), 19)
             self.assertEqual(len(manifest["installerDependencies"]), 13)
             runtime_names = {
@@ -159,6 +159,27 @@ class LumiReleaseBuildTests(unittest.TestCase):
                     )
                 )
 
+    def test_builds_release_with_more_than_128_wheel_assets(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            wheelhouse = self._wheelhouse(root)
+            for index in range(87):
+                self._wheel(
+                    wheelhouse / "installer" / "universal",
+                    f"release_cap_{index:03d}",
+                    "1.0.0",
+                    "py3",
+                    "none",
+                    "any",
+                )
+
+            self.assertGreater(len(list(wheelhouse.rglob("*.whl"))), 128)
+            manifest = build_release(project_root, wheelhouse, root / "out", "v0.1.2")
+
+        self.assertEqual(manifest["tag"], "v0.1.2")
+        self.assertGreater(len(manifest["installerDependencies"]), 13)
+
     def test_rejects_a_tag_that_does_not_match_project_version(self) -> None:
         project_root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:
@@ -179,7 +200,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
             )
             missing.unlink()
             with self.assertRaisesRegex(ReleaseBuildError, "no onnxruntime-genai wheel"):
-                build_release(project_root, wheelhouse, root / "out", "v0.1.1")
+                build_release(project_root, wheelhouse, root / "out", "v0.1.2")
 
     def test_ignores_nested_vendored_distribution_metadata(self) -> None:
         project_root = Path(__file__).resolve().parents[1]
@@ -200,7 +221,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
                     "Metadata-Version: 2.1\nName: jaraco-text\nVersion: 3.12.1\n\n",
                 )
 
-            manifest = build_release(project_root, wheelhouse, root / "out", "v0.1.1")
+            manifest = build_release(project_root, wheelhouse, root / "out", "v0.1.2")
 
         installer_names = {
             entry["distribution"].lower()
