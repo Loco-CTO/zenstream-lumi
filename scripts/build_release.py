@@ -106,7 +106,7 @@ def _wheel_identity(path: Path) -> WheelAsset:
             metadata_names = [
                 name
                 for name in wheel.namelist()
-                if name.endswith(".dist-info/METADATA") and "/" in name
+                if name.endswith(".dist-info/METADATA") and name.count("/") == 1
             ]
             if len(metadata_names) != 1:
                 raise ReleaseBuildError(f"wheel has no unique package metadata: {path.name}")
