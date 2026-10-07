@@ -13,8 +13,8 @@ from typing import Any
 from lumi.contracts import (
     ChatAnswer,
     ChatContext,
-    ChatMessage,
     ENTITY_TYPES,
+    ChatMessage,
     ChatRuntime,
     EntityReference,
     EvidenceTrust,
