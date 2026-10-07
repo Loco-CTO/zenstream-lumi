@@ -33,7 +33,7 @@ _SUPPORTED_TARGETS = (
     ("cp313", "cp313", "manylinux_2_28_aarch64"),
     ("cp314", "cp314", "manylinux_2_28_aarch64"),
 )
-_MAX_WHEEL_ASSETS = 128
+_MAX_WHEEL_ASSETS = 512
 
 
 class ReleaseBuildError(RuntimeError):
@@ -354,7 +354,7 @@ def build_release(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tag", required=True, help="Stable release tag, for example v0.1.1")
+    parser.add_argument("--tag", required=True, help="Stable release tag, for example v0.1.2")
     parser.add_argument(
         "--check-tag",
         action="store_true",
