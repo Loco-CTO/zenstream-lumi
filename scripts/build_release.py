@@ -16,6 +16,12 @@ from pathlib import Path
 from typing import Any
 
 _TAG_RE = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+_MANYLINUX_TAG_RE = re.compile(r"^manylinux_(\d+)_(\d+)_(.+)$")
+_LEGACY_MANYLINUX_BASELINES = {
+    "manylinux1": (2, 5),
+    "manylinux2010": (2, 12),
+    "manylinux2014": (2, 17),
+}
 _SUPPORTED_TARGETS = (
     ("cp312", "cp312", "win_amd64"),
     ("cp313", "cp313", "win_amd64"),
@@ -143,8 +149,41 @@ def _supports_target(
     return (
         wheel.python_tag in {python_tag, "py3"}
         and wheel.abi_tag in {abi_tag, "none"}
-        and wheel.platform_tag in {platform_tag, "any"}
+        and _supports_platform_target(wheel.platform_tag, platform_tag)
     )
+
+
+def _manylinux_platform(platform_tag: str) -> tuple[tuple[int, int], str] | None:
+    match = _MANYLINUX_TAG_RE.fullmatch(platform_tag)
+    if match:
+        return (int(match.group(1)), int(match.group(2))), match.group(3)
+    for legacy_tag, baseline in _LEGACY_MANYLINUX_BASELINES.items():
+        prefix = f"{legacy_tag}_"
+        if platform_tag.startswith(prefix):
+            return baseline, platform_tag.removeprefix(prefix)
+    return None
+
+
+def _supports_platform_target(wheel_platform_tag: str, target_platform_tag: str) -> bool:
+    wheel_platform_tags = wheel_platform_tag.split(".")
+    if target_platform_tag in wheel_platform_tags or "any" in wheel_platform_tags:
+        return True
+
+    target = _manylinux_platform(target_platform_tag)
+    if target is None:
+        return False
+    target_baseline, target_architecture = target
+    for wheel_tag in wheel_platform_tags:
+        candidate = _manylinux_platform(wheel_tag)
+        if candidate is None:
+            continue
+        candidate_baseline, candidate_architecture = candidate
+        if (
+            candidate_architecture == target_architecture
+            and candidate_baseline <= target_baseline
+        ):
+            return True
+    return False
 
 
 def _collect_wheels(
@@ -342,3 +381,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
