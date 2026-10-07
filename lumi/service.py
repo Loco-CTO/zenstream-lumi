@@ -19,7 +19,7 @@ from lumi.contracts import (
     EntityReference,
 )
 from lumi.delegation import DelegationClaims, DelegationError, DelegationVerifier
-from lumi.model_catalog import ModelCatalog, ModelConfigurationError
+from lumi.model_catalog import ModelCatalog, ModelConfigurationError, QwenModelOption
 from lumi.storage import (
     ConversationNotFound,
     ConversationSnapshot,
@@ -94,14 +94,19 @@ class _ConversationLockPool:
 
 
 class LumiConversationService:
-    """Own chats while deriving all account identity from verified delegations."""
+    """Own chats behind either a verified delegation or a trusted embedded host.
+
+    Delegated methods preserve Lumi's standalone private API. The ``*_for_account``
+    methods are for an in-process host that has already authenticated and authorized
+    the request; every storage call remains explicitly scoped to that account ID.
+    """
 
     def __init__(
         self,
         store: ConversationStore,
         runtime: ChatRuntime,
         tools: ToolRegistry,
-        delegation_verifier: DelegationVerifier,
+        delegation_verifier: DelegationVerifier | None,
         models: ModelCatalog,
         *,
         agent_limits: AgentLimits | None = None,
@@ -145,12 +150,60 @@ class LumiConversationService:
         thinking: bool | None = None,
     ) -> ChatTurn:
         claims = self._authorize(delegation_token, SCOPE_CHAT_WRITE, conversation_id)
+        return await self._run_chat(
+            claims.subject,
+            conversation_id,
+            user_text,
+            create_if_missing=SCOPE_CONVERSATION_CREATE in claims.scopes,
+            delegation_token=delegation_token,
+            model=model,
+            thinking=thinking,
+        )
+
+    async def chat_for_account(
+        self,
+        account_id: str,
+        conversation_id: str,
+        user_text: str,
+        *,
+        model: str | None = None,
+        thinking: bool | None = None,
+    ) -> ChatTurn:
+        """Run a turn for an account authenticated by the embedding host.
+
+        The account ID must come from the host's trusted authentication boundary, never
+        from model-generated arguments or an untrusted client field.
+        """
+
+        return await self._run_chat(
+            _validate_account_id(account_id),
+            conversation_id,
+            user_text,
+            create_if_missing=True,
+            delegation_token=None,
+            model=model,
+            thinking=thinking,
+        )
+
+    async def _run_chat(
+        self,
+        account_id: str,
+        conversation_id: str,
+        user_text: str,
+        *,
+        create_if_missing: bool,
+        delegation_token: str | None,
+        model: str | None,
+        thinking: bool | None,
+    ) -> ChatTurn:
+        account_id = _validate_account_id(account_id)
         try:
             async with asyncio.timeout(self._agent_limits.turn_timeout_seconds):
                 return await self._complete_turn(
-                    claims,
+                    account_id,
                     delegation_token,
                     conversation_id,
+                    create_if_missing,
                     user_text,
                     model,
                     thinking,
@@ -160,26 +213,30 @@ class LumiConversationService:
 
     async def _complete_turn(
         self,
-        claims: DelegationClaims,
-        delegation_token: str,
+        account_id: str,
+        delegation_token: str | None,
         conversation_id: str,
+        create_if_missing: bool,
         user_text: str,
         model: str | None,
         thinking: bool | None,
     ) -> ChatTurn:
-        async with self._conversation_locks.hold(conversation_id):
+        async with self._conversation_locks.hold(
+            _conversation_lock_key(account_id, conversation_id)
+        ):
             try:
                 snapshot = await asyncio.to_thread(
                     self._store.get_snapshot,
-                    claims.subject,
+                    account_id,
                     conversation_id,
                     self._history_limit,
                 )
             except ConversationNotFound:
-                if SCOPE_CONVERSATION_CREATE not in claims.scopes:
+                if not create_if_missing:
                     raise
                 snapshot = await self._create_conversation(
-                    claims,
+                    account_id,
+                    conversation_id,
                     model=model,
                     thinking=thinking,
                 )
@@ -203,7 +260,7 @@ class LumiConversationService:
                 ChatMessage(message.role, message.content) for message in snapshot.messages
             )
             context = ChatContext(
-                account_id=claims.subject,
+                account_id=account_id,
                 conversation_id=conversation_id,
                 model=option.id,
                 thinking=conversation.thinking,
@@ -224,7 +281,7 @@ class LumiConversationService:
                 raise InferenceError("The model returned no user-visible answer")
             updated = await asyncio.to_thread(
                 self._store.append_turn,
-                claims.subject,
+                account_id,
                 conversation_id,
                 user_text,
                 answer,
@@ -239,6 +296,14 @@ class LumiConversationService:
         claims = self._authorize(delegation_token, SCOPE_CONVERSATION_LIST, None)
         return await asyncio.to_thread(self._store.list_conversations, claims.subject, limit)
 
+    async def list_conversations_for_account(
+        self,
+        account_id: str,
+        limit: int = 50,
+    ) -> tuple[StoredConversation, ...]:
+        owner_id = _validate_account_id(account_id)
+        return await asyncio.to_thread(self._store.list_conversations, owner_id, limit)
+
     async def get_conversation(
         self,
         delegation_token: str,
@@ -248,6 +313,19 @@ class LumiConversationService:
         return await asyncio.to_thread(
             self._store.get_snapshot,
             claims.subject,
+            conversation_id,
+            self._history_limit,
+        )
+
+    async def get_conversation_for_account(
+        self,
+        account_id: str,
+        conversation_id: str,
+    ) -> ConversationSnapshot:
+        owner_id = _validate_account_id(account_id)
+        return await asyncio.to_thread(
+            self._store.get_snapshot,
+            owner_id,
             conversation_id,
             self._history_limit,
         )
@@ -265,10 +343,30 @@ class LumiConversationService:
             conversation_id,
         )
         self._models.validate_choice(model, thinking)
-        async with self._conversation_locks.hold(conversation_id):
+        async with self._conversation_locks.hold(
+            _conversation_lock_key(claims.subject, conversation_id)
+        ):
             return await asyncio.to_thread(
                 self._store.update_choice,
                 claims.subject,
+                conversation_id,
+                model,
+                thinking,
+            )
+
+    async def update_choice_for_account(
+        self,
+        account_id: str,
+        conversation_id: str,
+        model: str,
+        thinking: bool,
+    ) -> StoredConversation:
+        owner_id = _validate_account_id(account_id)
+        self._models.validate_choice(model, thinking)
+        async with self._conversation_locks.hold(_conversation_lock_key(owner_id, conversation_id)):
+            return await asyncio.to_thread(
+                self._store.update_choice,
+                owner_id,
                 conversation_id,
                 model,
                 thinking,
@@ -291,8 +389,29 @@ class LumiConversationService:
         )
         return preference
 
+    async def update_user_preference_for_account(
+        self,
+        account_id: str,
+        model: str,
+        thinking: bool,
+    ) -> UserModelPreference:
+        owner_id = _validate_account_id(account_id)
+        self._models.validate_choice(model, thinking)
+        preference = UserModelPreference(model=model, thinking=thinking)
+        await asyncio.to_thread(
+            self._store.set_user_preference,
+            owner_id,
+            model,
+            thinking,
+        )
+        return preference
+
     def available_models(self, delegation_token: str) -> tuple[QwenModelOption, ...]:
         self._authorize(delegation_token, SCOPE_MODELS_READ, None)
+        return self._models.selectable_models
+
+    def available_models_for_account(self, account_id: str) -> tuple[QwenModelOption, ...]:
+        _validate_account_id(account_id)
         return self._models.selectable_models
 
     @property
@@ -313,6 +432,8 @@ class LumiConversationService:
         required_scope: str,
         conversation_id: str | None,
     ) -> DelegationClaims:
+        if self._delegations is None:
+            raise DelegationError("Delegated access is not configured.")
         claims = self._delegations.verify(delegation_token)
         if required_scope not in claims.scopes:
             raise DelegationError("Invalid Lumi delegation.")
@@ -322,13 +443,12 @@ class LumiConversationService:
 
     async def _create_conversation(
         self,
-        claims: DelegationClaims,
+        account_id: str,
+        conversation_id: str,
         *,
         model: str | None = None,
         thinking: bool | None = None,
     ) -> ConversationSnapshot:
-        if claims.conversation_id is None:
-            raise DelegationError("Invalid Lumi delegation.")
         if model is not None or thinking is not None:
             if model is None or thinking is None:
                 raise ModelConfigurationError("Model and thinking must be supplied together")
@@ -338,7 +458,7 @@ class LumiConversationService:
         else:
             preference = await asyncio.to_thread(
                 self._store.get_user_preference,
-                claims.subject,
+                account_id,
             )
             if preference is not None:
                 try:
@@ -354,10 +474,10 @@ class LumiConversationService:
         try:
             await asyncio.to_thread(
                 self._store.create_conversation,
-                claims.subject,
+                account_id,
                 selected_model,
                 default_thinking=selected_thinking,
-                conversation_id=claims.conversation_id,
+                conversation_id=conversation_id,
                 use_user_preference=False,
             )
         except sqlite3.IntegrityError as error:
@@ -366,10 +486,26 @@ class LumiConversationService:
             raise ConversationNotFound("Conversation not found.") from error
         return await asyncio.to_thread(
             self._store.get_snapshot,
-            claims.subject,
-            claims.conversation_id,
+            account_id,
+            conversation_id,
             self._history_limit,
         )
+
+
+def _validate_account_id(account_id: str) -> str:
+    if (
+        not isinstance(account_id, str)
+        or not account_id
+        or account_id != account_id.strip()
+        or len(account_id) > 200
+        or any(ord(character) < 32 or ord(character) == 127 for character in account_id)
+    ):
+        raise ValueError("A bounded trusted account ID is required")
+    return account_id
+
+
+def _conversation_lock_key(account_id: str, conversation_id: str) -> str:
+    return f"{len(account_id)}:{account_id}{conversation_id}"
 
 
 def _previous_entities(

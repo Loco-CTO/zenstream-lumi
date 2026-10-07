@@ -1,0 +1,125 @@
+name: Lumi release
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Package tests (Python ${{ matrix.python }} on ${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { python: "3.12", target: windows-x64, runner: windows-latest }
+          - { python: "3.13", target: windows-x64, runner: windows-latest }
+          - { python: "3.12", target: linux-x64, runner: ubuntu-24.04 }
+          - { python: "3.13", target: linux-x64, runner: ubuntu-24.04 }
+          - { python: "3.12", target: linux-arm64, runner: ubuntu-24.04-arm }
+          - { python: "3.13", target: linux-arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - name: Check out Lumi
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install package test dependencies
+        run: python -m pip install -e ".[dev,service,embedded]"
+      - name: Check release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: python scripts/build_release.py --tag "${GITHUB_REF_NAME}" --check-tag
+        shell: bash
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+      - name: Check lint
+        run: ruff check lumi tests scripts
+      - name: Compile package and release script
+        run: python -m compileall -q lumi scripts tests
+
+  release-wheels:
+    name: Build dependency wheelhouse (Python ${{ matrix.python }} on ${{ matrix.target }})
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: tests
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { python: "3.12", target: windows-x64, runner: windows-latest }
+          - { python: "3.13", target: windows-x64, runner: windows-latest }
+          - { python: "3.12", target: linux-x64, runner: ubuntu-24.04 }
+          - { python: "3.13", target: linux-x64, runner: ubuntu-24.04 }
+          - { python: "3.12", target: linux-arm64, runner: ubuntu-24.04-arm }
+          - { python: "3.13", target: linux-arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - name: Check out Lumi
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Download pinned runtime wheels and their dependencies
+        run: >-
+          python -m pip download
+          --only-binary=:all:
+          --dest dist/wheels/runtime
+          "numpy==2.2.6"
+          "onnxruntime-genai==0.17.1"
+      - name: Download pinned CPU model installer wheels and their dependencies
+        run: >-
+          python -m pip download
+          --only-binary=:all:
+          --dest dist/wheels/installer
+          --find-links https://download.pytorch.org/whl/cpu/torch/
+          "huggingface-hub==1.10.0"
+          "onnx-ir==0.2.1"
+          "numpy==2.2.6"
+          "torch==2.11.0+cpu"
+          "transformers==5.2.0"
+      - name: Save wheelhouse artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: wheels-${{ matrix.python }}-${{ matrix.target }}
+          path: dist/wheels/**/*.whl
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-release:
+    name: Publish Lumi GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: release-wheels
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tagged Lumi source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.ref }}
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Download all platform wheelhouses
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: build/wheels
+      - name: Create the verified Lumi release archive
+        run: python scripts/build_release.py --tag "${GITHUB_REF_NAME}" --wheelhouse build/wheels --output dist/release
+      - name: Publish stable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          dist/release/lumi-runtime.zip
+          dist/release/*.whl
+          --verify-tag
+          --generate-notes
+          --title "Lumi ${GITHUB_REF_NAME}"

@@ -2,11 +2,11 @@
 
 from lumi.model_installation import (
     INSTALL_PROGRESS_TOTAL,
-    InstalledModelArtifact,
     MODEL_INSTALL_API_VERSION,
-    ModelInstallOption,
+    InstalledModelArtifact,
     ModelInstallationError,
     ModelInstallationUnavailableError,
+    ModelInstallOption,
     ModelInstallProgress,
     Qwen35ModelInstaller,
     UnsupportedModelError,

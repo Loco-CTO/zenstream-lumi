@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-
 _OFFICIAL_MODEL_TAGS = frozenset({"0.8b", "2b", "4b", "9b", "27b", "35b-a3b"})
 
 

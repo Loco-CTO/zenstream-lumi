@@ -5,8 +5,9 @@ from __future__ import annotations
 import base64
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Protocol
 
 
 class DelegationError(PermissionError):

@@ -85,7 +85,7 @@ class OllamaRuntimeConfig:
         normalized_url = self.base_url.strip()
         parsed = urlsplit(normalized_url)
         try:
-            parsed.port
+            _ = parsed.port
         except ValueError as exc:
             raise ValueError("Ollama base_url has an invalid port") from exc
         if (

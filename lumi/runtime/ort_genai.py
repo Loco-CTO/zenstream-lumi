@@ -18,13 +18,19 @@ import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any
 from uuid import uuid4
 
-from lumi.contracts import ChatMessage, ChatRuntime, ModelRequest, ModelResponse, ToolCall, ToolDefinition
+from lumi.contracts import (
+    ChatMessage,
+    ChatRuntime,
+    ModelRequest,
+    ModelResponse,
+    ToolCall,
+    ToolDefinition,
+)
 from lumi.model_installation import supported_models
 
 LUMI_RUNTIME_API_VERSION = 1
@@ -115,7 +121,11 @@ class OrtGenAIConfig:
             ("max_response_chars", self.max_response_chars, 1, 1_000_000),
         )
         for name, value, minimum, maximum in bounded_values:
-            if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not minimum <= value <= maximum
+            ):
                 raise ValueError(f"{name} must be between {minimum} and {maximum}")
 
 
@@ -298,7 +308,10 @@ class OrtGenAIChatRuntime(ChatRuntime):
     def _serialize_message(self, message: ChatMessage) -> dict[str, Any]:
         if message.role not in {"system", "user", "assistant", "tool"}:
             raise ValueError("Unsupported chat message role")
-        if not isinstance(message.content, str) or len(message.content) > self.config.max_message_chars:
+        if (
+            not isinstance(message.content, str)
+            or len(message.content) > self.config.max_message_chars
+        ):
             raise ValueError("A chat message exceeds the configured size limit")
         result: dict[str, Any] = {"role": message.role, "content": message.content}
         if message.role == "tool" and message.name is not None:
@@ -371,7 +384,11 @@ class OrtGenAIChatRuntime(ChatRuntime):
             prompt = loaded.tokenizer.apply_chat_template(
                 template,
                 messages=json.dumps(messages, ensure_ascii=False, separators=(",", ":")),
-                tools=json.dumps(tools, ensure_ascii=False, separators=(",", ":")) if tools else None,
+                tools=(
+                    json.dumps(tools, ensure_ascii=False, separators=(",", ":"))
+                    if tools
+                    else None
+                ),
                 add_generation_prompt=True,
             )
             if not isinstance(prompt, str):
@@ -550,7 +567,9 @@ def _verify_model_artifact(
             try:
                 relative_name = path.relative_to(model_dir).as_posix()
             except ValueError as error:
-                raise OrtGenAIRuntimeError("The selected Qwen3.5 model file path is invalid") from error
+                raise OrtGenAIRuntimeError(
+                    "The selected Qwen3.5 model file path is invalid"
+                ) from error
             actual_files.add(relative_name)
     if actual_files != set(listed_files):
         raise OrtGenAIRuntimeError("The selected Qwen3.5 model files do not match their manifest")

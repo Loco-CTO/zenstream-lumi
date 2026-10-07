@@ -6,8 +6,9 @@ import asyncio
 import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any, Mapping
+from typing import Any
 
 from lumi.contracts import (
     ENTITY_TYPES,
