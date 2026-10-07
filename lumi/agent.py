@@ -11,9 +11,9 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from lumi.contracts import (
+    ENTITY_TYPES,
     ChatAnswer,
     ChatContext,
-    ENTITY_TYPES,
     ChatMessage,
     ChatRuntime,
     EntityReference,
