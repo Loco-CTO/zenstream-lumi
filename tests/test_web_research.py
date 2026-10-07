@@ -23,6 +23,7 @@ from lumi.web_research import (
     _normalise_public_web_url,
     _resolve_public_addresses,
     _read_chunked,
+    build_web_research_tools,
 )
 
 
@@ -58,6 +59,17 @@ class FakeWriter:
 
 
 class WebResearchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_builder_requires_a_configured_search_endpoint(self) -> None:
+        self.assertEqual(build_web_research_tools(WebResearchConfig()), ())
+
+        configured = build_web_research_tools(
+            WebResearchConfig(searxng_url="https://search.example.org")
+        )
+        self.assertEqual(
+            tuple(tool.definition.name for tool in configured),
+            ("web_search", "open_web_result"),
+        )
+
     async def test_search_batches_languages_sanitizes_results_and_returns_opaque_ids(self) -> None:
         requests: list[httpx.Request] = []
 

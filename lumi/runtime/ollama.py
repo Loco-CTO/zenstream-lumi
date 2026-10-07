@@ -24,12 +24,9 @@ from lumi.contracts import (
     ToolCall,
     ToolDefinition,
 )
+from lumi.model_installation import supported_models
 
-DEFAULT_QWEN35_MODELS = (
-    "qwen3.5:0.8b",
-    "qwen3.5:2b",
-    "qwen3.5:4b",
-)
+DEFAULT_QWEN35_MODELS = tuple(option.model_id for option in supported_models())
 
 _OFFICIAL_MODEL_TAGS = frozenset(
     {
