@@ -19,10 +19,13 @@ jobs:
         include:
           - { python: "3.12", target: windows-x64, runner: windows-latest }
           - { python: "3.13", target: windows-x64, runner: windows-latest }
+          - { python: "3.14", target: windows-x64, runner: windows-latest }
           - { python: "3.12", target: linux-x64, runner: ubuntu-24.04 }
           - { python: "3.13", target: linux-x64, runner: ubuntu-24.04 }
+          - { python: "3.14", target: linux-x64, runner: ubuntu-24.04 }
           - { python: "3.12", target: linux-arm64, runner: ubuntu-24.04-arm }
           - { python: "3.13", target: linux-arm64, runner: ubuntu-24.04-arm }
+          - { python: "3.14", target: linux-arm64, runner: ubuntu-24.04-arm }
     steps:
       - name: Check out Lumi
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -54,10 +57,13 @@ jobs:
         include:
           - { python: "3.12", target: windows-x64, runner: windows-latest }
           - { python: "3.13", target: windows-x64, runner: windows-latest }
+          - { python: "3.14", target: windows-x64, runner: windows-latest }
           - { python: "3.12", target: linux-x64, runner: ubuntu-24.04 }
           - { python: "3.13", target: linux-x64, runner: ubuntu-24.04 }
+          - { python: "3.14", target: linux-x64, runner: ubuntu-24.04 }
           - { python: "3.12", target: linux-arm64, runner: ubuntu-24.04-arm }
           - { python: "3.13", target: linux-arm64, runner: ubuntu-24.04-arm }
+          - { python: "3.14", target: linux-arm64, runner: ubuntu-24.04-arm }
     steps:
       - name: Check out Lumi
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -70,7 +76,7 @@ jobs:
           python -m pip download
           --only-binary=:all:
           --dest dist/wheels/runtime
-          "numpy==2.2.6"
+          "numpy==2.5.3"
           "onnxruntime-genai==0.17.1"
       - name: Download pinned CPU model installer wheels and their dependencies
         run: >-
@@ -80,7 +86,7 @@ jobs:
           --find-links https://download.pytorch.org/whl/cpu/torch/
           "huggingface-hub==1.10.0"
           "onnx-ir==0.2.1"
-          "numpy==2.2.6"
+          "numpy==2.5.3"
           "torch==2.11.0+cpu"
           "transformers==5.2.0"
       - name: Save wheelhouse artifact
@@ -123,3 +129,4 @@ jobs:
           --verify-tag
           --generate-notes
           --title "Lumi ${GITHUB_REF_NAME}"
+

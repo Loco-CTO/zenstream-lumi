@@ -25,10 +25,13 @@ _LEGACY_MANYLINUX_BASELINES = {
 _SUPPORTED_TARGETS = (
     ("cp312", "cp312", "win_amd64"),
     ("cp313", "cp313", "win_amd64"),
+    ("cp314", "cp314", "win_amd64"),
     ("cp312", "cp312", "manylinux_2_28_x86_64"),
     ("cp313", "cp313", "manylinux_2_28_x86_64"),
+    ("cp314", "cp314", "manylinux_2_28_x86_64"),
     ("cp312", "cp312", "manylinux_2_28_aarch64"),
     ("cp313", "cp313", "manylinux_2_28_aarch64"),
+    ("cp314", "cp314", "manylinux_2_28_aarch64"),
 )
 _MAX_WHEEL_ASSETS = 128
 
@@ -351,7 +354,7 @@ def build_release(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tag", required=True, help="Stable release tag, for example v0.1.0")
+    parser.add_argument("--tag", required=True, help="Stable release tag, for example v0.1.1")
     parser.add_argument(
         "--check-tag",
         action="store_true",
@@ -381,4 +384,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 

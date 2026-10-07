@@ -43,10 +43,13 @@ class LumiReleaseBuildTests(unittest.TestCase):
         targets = (
             ("cp312", "cp312", "win_amd64"),
             ("cp313", "cp313", "win_amd64"),
+            ("cp314", "cp314", "win_amd64"),
             ("cp312", "cp312", "manylinux_2_28_x86_64"),
             ("cp313", "cp313", "manylinux_2_28_x86_64"),
+            ("cp314", "cp314", "manylinux_2_28_x86_64"),
             ("cp312", "cp312", "manylinux_2_28_aarch64"),
             ("cp313", "cp313", "manylinux_2_28_aarch64"),
+            ("cp314", "cp314", "manylinux_2_28_aarch64"),
         )
         for python_tag, abi_tag, platform_tag in targets:
             runtime_subdir = wheelhouse / "runtime" / f"{python_tag}-{platform_tag}"
@@ -70,7 +73,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
             self._wheel(
                 runtime_subdir,
                 "numpy",
-                "2.2.6",
+                "2.5.3",
                 python_tag,
                 abi_tag,
                 numpy_platform_tag,
@@ -81,7 +84,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
             self._wheel(
                 installer_subdir,
                 "numpy",
-                "2.2.6",
+                "2.5.3",
                 python_tag,
                 abi_tag,
                 numpy_platform_tag,
@@ -106,12 +109,12 @@ class LumiReleaseBuildTests(unittest.TestCase):
             root = Path(temporary)
             wheelhouse = self._wheelhouse(root)
             output = root / "release"
-            manifest = build_release(project_root, wheelhouse, output, "v0.1.0")
+            manifest = build_release(project_root, wheelhouse, output, "v0.1.1")
 
             self.assertEqual(manifest["schemaVersion"], 1)
-            self.assertEqual(manifest["tag"], "v0.1.0")
-            self.assertEqual(len(manifest["runtimeDependencies"]), 13)
-            self.assertEqual(len(manifest["installerDependencies"]), 10)
+            self.assertEqual(manifest["tag"], "v0.1.1")
+            self.assertEqual(len(manifest["runtimeDependencies"]), 19)
+            self.assertEqual(len(manifest["installerDependencies"]), 13)
             runtime_names = {
                 entry["distribution"].lower().replace("_", "-")
                 for entry in manifest["runtimeDependencies"]
@@ -161,7 +164,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with self.assertRaisesRegex(ReleaseBuildError, "match project.version"):
-                build_release(project_root, root, root / "out", "v0.1.1")
+                build_release(project_root, root, root / "out", "v0.1.0")
 
     def test_rejects_a_missing_supported_host_wheel(self) -> None:
         project_root = Path(__file__).resolve().parents[1]
@@ -176,7 +179,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
             )
             missing.unlink()
             with self.assertRaisesRegex(ReleaseBuildError, "no onnxruntime-genai wheel"):
-                build_release(project_root, wheelhouse, root / "out", "v0.1.0")
+                build_release(project_root, wheelhouse, root / "out", "v0.1.1")
 
     def test_ignores_nested_vendored_distribution_metadata(self) -> None:
         project_root = Path(__file__).resolve().parents[1]
@@ -197,7 +200,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
                     "Metadata-Version: 2.1\nName: jaraco-text\nVersion: 3.12.1\n\n",
                 )
 
-            manifest = build_release(project_root, wheelhouse, root / "out", "v0.1.0")
+            manifest = build_release(project_root, wheelhouse, root / "out", "v0.1.1")
 
         installer_names = {
             entry["distribution"].lower()
@@ -208,4 +211,5 @@ class LumiReleaseBuildTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
