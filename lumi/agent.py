@@ -6,17 +6,17 @@ import asyncio
 import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
-from collections.abc import Mapping
 
 from lumi.contracts import (
     ChatAnswer,
     ChatContext,
     ChatMessage,
+    ENTITY_TYPES,
     ChatRuntime,
     EntityReference,
-    ENTITY_TYPES,
     EvidenceTrust,
     ModelRequest,
     ModelResponse,

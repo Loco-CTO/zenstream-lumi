@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Literal, Protocol
-from collections.abc import Mapping, Sequence
 from urllib.parse import urlsplit
 
 
