@@ -36,6 +36,7 @@ from lumi.service import (
     SCOPE_MODELS_READ,
     SCOPE_PREFERENCE_WRITE,
     LumiConversationService,
+    _conversation_lock_key,
 )
 from lumi.storage import ConversationStore
 from lumi.tools import ToolRegistry
@@ -320,7 +321,9 @@ class LumiServiceAPITests(unittest.TestCase):
         )
 
         async def blocked_on_lock() -> None:
-            async with service._conversation_locks.hold("lock-wait"):
+            async with service._conversation_locks.hold(
+                _conversation_lock_key("account-1", "lock-wait")
+            ):
                 with self.assertRaises(InferenceError):
                     await service.chat(
                         self.token(conversation_id="lock-wait"), "lock-wait", "Hi"
@@ -582,3 +585,4 @@ class LumiServiceAPITests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
