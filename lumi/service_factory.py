@@ -28,12 +28,12 @@ def build_zenstream_tool_registry(
     web_research_config: WebResearchConfig | None = None,
     web_transport: httpx.AsyncBaseTransport | None = None,
 ) -> ToolRegistry:
-    """Build six fixed local catalog tools and two bounded web-research tools.
+    """Build six fixed local tools and optional bounded web-research tools.
 
     The resulting registry can be passed directly to ``LumiConversationService``. The
     optional transports are intended for in-process tests. Production uses HTTPX's default
-    network transport with environment proxy settings disabled. Web search stays disabled
-    until service configuration supplies a SearXNG URL.
+    network transport with environment proxy settings disabled. Web tools are not registered
+    unless service configuration supplies a SearXNG URL.
     """
 
     client = OrchestratorReadOnlyClient(
@@ -43,7 +43,7 @@ def build_zenstream_tool_registry(
         max_response_bytes=max_response_bytes,
         transport=transport,
     )
-    web_search, open_web_result = build_web_research_tools(
+    web_tools = build_web_research_tools(
         web_research_config or WebResearchConfig(),
         transport=web_transport,
     )
@@ -55,7 +55,6 @@ def build_zenstream_tool_registry(
             ContinueWatchingTool(client),
             NextUpTool(client),
             FavoritesTool(client),
-            web_search,
-            open_web_result,
+            *web_tools,
         )
     )

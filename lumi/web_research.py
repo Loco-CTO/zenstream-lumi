@@ -20,6 +20,7 @@ from uuid import uuid4
 from lumi.contracts import (
     ChatContext,
     EvidenceTrust,
+    ReadOnlyTool,
     Source,
     ToolDefinition,
     ToolResult,
@@ -1012,9 +1013,11 @@ def build_web_research_tools(
     *,
     sessions: WebResearchSessions | None = None,
     transport: object | None = None,
-) -> tuple[SearXNGSearchTool, OpenWebResultTool]:
-    """Create the two explicit read-only tools sharing a bounded result-ID cache."""
+) -> tuple[ReadOnlyTool, ...]:
+    """Create web tools only when an explicit search endpoint is configured."""
 
+    if config.searxng_url is None:
+        return ()
     shared_sessions = sessions or WebResearchSessions()
     return (
         SearXNGSearchTool(config, shared_sessions, transport=transport),

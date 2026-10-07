@@ -128,14 +128,12 @@ class OrchestratorToolTests(unittest.IsolatedAsyncioTestCase):
                 "zenstream_continue_watching",
                 "zenstream_next_up",
                 "zenstream_favorites",
-                "web_search",
-                "open_web_result",
             ),
         )
         self.assertEqual(runtime.requests[1].messages[-1].role, "tool")
         self.assertIn(EvidenceTrust.LOCAL.value, runtime.requests[1].messages[-1].content)
 
-    async def test_registry_uses_six_fixed_local_routes_and_scoped_web_tools(self) -> None:
+    async def test_registry_uses_six_local_routes_without_search_configuration(self) -> None:
         app = FastAPI()
         observed: list[tuple[str, str]] = []
 
@@ -160,6 +158,7 @@ class OrchestratorToolTests(unittest.IsolatedAsyncioTestCase):
             "http://orchestrator.test:9090",
             SERVICE_TOKEN,
             transport=httpx.ASGITransport(app=app),
+            web_research_config=WebResearchConfig(),
         )
         expected = {
             ("POST", "/api/internal/lumi/tools/catalog-search"),
@@ -190,17 +189,8 @@ class OrchestratorToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(set(observed), expected)
         self.assertEqual(len(observed), len(expected))
-        web_search = registry.get("web_search")
-        open_page = registry.get("open_web_result")
-        assert web_search is not None and open_page is not None
-        self.assertEqual(web_search.definition.data_scope, "external_search")
-        self.assertEqual(open_page.definition.data_scope, "external_fetch")
-        unavailable = await web_search.execute(
-            make_context(),
-            web_search.validate_arguments({"queries": [{"query": "current news"}]}),
-        )
-        self.assertIs(unavailable.trust, EvidenceTrust.LOCAL)
-        self.assertIn("not configured", unavailable.content)
+        self.assertIsNone(registry.get("web_search"))
+        self.assertIsNone(registry.get("open_web_result"))
 
     async def test_factory_uses_a_separate_configured_web_transport(self) -> None:
         orchestrator_requests: list[str] = []

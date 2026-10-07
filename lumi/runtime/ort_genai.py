@@ -25,9 +25,10 @@ from typing import Any
 from uuid import uuid4
 
 from lumi.contracts import ChatMessage, ChatRuntime, ModelRequest, ModelResponse, ToolCall, ToolDefinition
+from lumi.model_installation import supported_models
 
 LUMI_RUNTIME_API_VERSION = 1
-SUPPORTED_QWEN35_MODELS = frozenset({"qwen3.5:0.8b", "qwen3.5:2b", "qwen3.5:4b"})
+SUPPORTED_QWEN35_MODELS = frozenset(option.model_id for option in supported_models())
 
 _TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _THINKING_CONDITION_RE = re.compile(
