@@ -63,6 +63,31 @@ class SearchCatalogTool:
         return self._result
 
 
+class HomeRecommendationsTool:
+    definition = ToolDefinition(
+        name="zenstream_home_recommendations",
+        description="Read the user's local, permission-filtered Home recommendations.",
+        parameters={"type": "object", "properties": {}, "additionalProperties": False},
+        data_scope="local",
+        read_only=True,
+    )
+
+    def __init__(self, result: ToolResult) -> None:
+        self._result = result
+        self.calls: list[ChatContext] = []
+
+    def validate_arguments(self, arguments: Mapping[str, object]) -> Mapping[str, object]:
+        if arguments:
+            raise ValueError("Home recommendations do not accept arguments")
+        return {}
+
+    async def execute(
+        self, context: ChatContext, arguments: Mapping[str, object]
+    ) -> ToolResult:
+        self.calls.append(context)
+        return self._result
+
+
 class ScopedTool(SearchCatalogTool):
     def __init__(
         self,
@@ -111,6 +136,141 @@ def chat_context() -> ChatContext:
 
 
 class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_generic_japanese_movie_recommendation_uses_only_a_local_movie(self) -> None:
+        series = EntityReference("series", "series-1", "ローカルシリーズ")
+        movie = EntityReference("movie", "movie-1", "ローカル映画")
+        tool = HomeRecommendationsTool(
+            ToolResult(
+                json.dumps(
+                    {
+                        "items": [
+                            {"type": "series", "id": series.id, "title": series.title},
+                            {"type": "movie", "id": movie.id, "title": movie.title},
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                EvidenceTrust.LOCAL,
+                entities=(series, movie),
+            )
+        )
+        runtime = FakeRuntime([])
+        agent = ChatAgent(runtime, ToolRegistry([tool]))
+
+        answer = await agent.answer(
+            chat_context(),
+            [],
+            "私のZenStreamライブラリにある、今すぐ視聴可能な映画を1本だけおすすめしてください。"
+            "必ずローカルライブラリの検索ツールで確認し、正確な作品名と理由を示してください。",
+        )
+
+        self.assertEqual(answer.references, (movie,))
+        self.assertIn('type="movie" id="movie-1"', answer.markdown)
+        self.assertIn("おすすめ", answer.markdown)
+        self.assertEqual(tool.calls, [chat_context()])
+        self.assertEqual(runtime.requests, [])
+        self.assertEqual(answer.tool_calls, 1)
+
+    async def test_vietnamese_local_recommendation_does_not_invent_when_no_results_exist(
+        self,
+    ) -> None:
+        tool = HomeRecommendationsTool(
+            ToolResult('{"items":[]}', EvidenceTrust.LOCAL)
+        )
+        runtime = FakeRuntime([])
+        agent = ChatAgent(runtime, ToolRegistry([tool]))
+
+        answer = await agent.answer(
+            chat_context(), [], "Hãy gợi ý một bộ phim trong thư viện ZenStream của tôi."
+        )
+
+        self.assertEqual(
+            answer.markdown,
+            "Hiện mình chưa lấy được đề xuất trong thư viện đã xác minh. "
+            "Hãy thử lại hoặc tìm theo tên phim hay thể loại.",
+        )
+        self.assertEqual(answer.references, ())
+        self.assertEqual(len(tool.calls), 1)
+        self.assertEqual(runtime.requests, [])
+
+    async def test_constrained_and_outside_library_recommendations_remain_agentic(self) -> None:
+        tool = HomeRecommendationsTool(ToolResult('{"items":[]}', EvidenceTrust.LOCAL))
+        runtime = FakeRuntime(
+            [
+                ChatMessage("assistant", "I will compare local matches for that theme."),
+                ChatMessage("assistant", "I will research an outside-library option."),
+                ChatMessage("assistant", "I will use the previous local results."),
+                ChatMessage("assistant", "I will look for an album."),
+                ChatMessage("assistant", "ライブラリ外の映画を調べます。"),
+                ChatMessage("assistant", "Mình sẽ tìm một phim ngoài danh sách."),
+                ChatMessage("assistant", "I will apply your earlier constraints."),
+                ChatMessage("assistant", "I will check the year and requested count."),
+                ChatMessage("assistant", "I will look up ratings before recommending."),
+                ChatMessage("assistant", "I will clarify the mixed anime/movie request."),
+                ChatMessage("assistant", "I will compare both requested media types."),
+                ChatMessage("assistant", "I will rank several local candidates."),
+                ChatMessage("assistant", "候補の本数を確認して検索します。"),
+                ChatMessage("assistant", "高評価の条件を確認します。"),
+            ]
+        )
+        agent = ChatAgent(runtime, ToolRegistry([tool]))
+
+        await agent.answer(chat_context(), [], "Recommend an anime like Code Geass.")
+        await agent.answer(
+            chat_context(), [], "Recommend something outside my library, even if I don't have it."
+        )
+        await agent.answer(chat_context(), [], "Recommend a different one.")
+        await agent.answer(chat_context(), [], "Recommend an album.")
+        await agent.answer(chat_context(), [], "ライブラリにない映画をおすすめして。")
+        await agent.answer(chat_context(), [], "Gợi ý một phim ngoài danh sách của tôi.")
+        await agent.answer(
+            chat_context(),
+            [ChatMessage("user", "I prefer mystery movies under two hours.")],
+            "Recommend one movie.",
+        )
+        await agent.answer(chat_context(), [], "Recommend three movies from 1990.")
+        await agent.answer(chat_context(), [], "Recommend a highly rated movie.")
+        await agent.answer(chat_context(), [], "Recommend movies or anime.")
+        await agent.answer(chat_context(), [], "Recommend one movie and one series.")
+        await agent.answer(chat_context(), [], "Recommend the top 3 movies.")
+        await agent.answer(chat_context(), [], "映画を3本おすすめしてください。")
+        await agent.answer(chat_context(), [], "高評価の映画をおすすめしてください。")
+
+        self.assertEqual(tool.calls, [])
+        self.assertEqual(len(runtime.requests), 14)
+
+    async def test_anime_movie_shortcut_selects_only_movies(self) -> None:
+        series = EntityReference("series", "series-1", "A Local Series")
+        movie = EntityReference("movie", "movie-1", "A Local Film")
+        tool = HomeRecommendationsTool(
+            ToolResult(
+                json.dumps({"items": [{"type": "series"}, {"type": "movie"}]}),
+                EvidenceTrust.LOCAL,
+                entities=(series, movie),
+            )
+        )
+        runtime = FakeRuntime([])
+        agent = ChatAgent(runtime, ToolRegistry([tool]))
+
+        answer = await agent.answer(chat_context(), [], "Recommend one anime movie.")
+
+        self.assertEqual(answer.references, (movie,))
+        self.assertEqual(len(tool.calls), 1)
+        self.assertEqual(runtime.requests, [])
+
+    async def test_collapses_consecutive_duplicate_answer_paragraphs(self) -> None:
+        agent = ChatAgent(FakeRuntime([]), ToolRegistry([]))
+
+        answer = agent._make_answer(
+            "Repeated answer.\n\nRepeated answer.\n\nFinal detail.",
+            {},
+            {},
+            0,
+            0,
+        )
+
+        self.assertEqual(answer.markdown, "Repeated answer.\n\nFinal detail.")
+
     async def test_turn_timeout_has_a_720_second_default_and_upper_bound(self) -> None:
         self.assertEqual(AgentLimits().turn_timeout_seconds, 720)
         self.assertEqual(AgentLimits(turn_timeout_seconds=720).turn_timeout_seconds, 720)
@@ -434,12 +594,16 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                 ChatMessage(
                     "assistant",
                     "",
-                    tool_calls=(ToolCall("call-1", "web_read", {"url": "https://example.org/one"}),),
+                    tool_calls=(
+                        ToolCall("call-1", "web_read", {"url": "https://example.org/one"}),
+                    ),
                 ),
                 ChatMessage(
                     "assistant",
                     "",
-                    tool_calls=(ToolCall("call-2", "web_read", {"url": "https://example.org/two"}),),
+                    tool_calls=(
+                        ToolCall("call-2", "web_read", {"url": "https://example.org/two"}),
+                    ),
                 ),
                 ChatMessage("assistant", "I have enough page evidence."),
             ]

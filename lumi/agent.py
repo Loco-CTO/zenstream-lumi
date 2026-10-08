@@ -32,6 +32,224 @@ _REFERENCE_PATTERN = re.compile(
     r':::zenstream\{type="(?P<type>[^"]+)"\s+id="(?P<id>[^"]+)"\}'
 )
 _THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.IGNORECASE | re.DOTALL)
+_RECOMMENDATION_MARKERS = (
+    "recommend",
+    "suggest",
+    "what should i watch",
+    "what to watch",
+    "pick something to watch",
+    "おすすめ",
+    "推薦",
+    "推奨",
+    "何を観",
+    "何を見",
+    "gợi ý",
+    "đề xuất",
+    "nên xem",
+    "xem gì",
+)
+_OUTSIDE_LIBRARY_MARKERS = (
+    "outside my library",
+    "outside the library",
+    "outside-library",
+    "not in my library",
+    "not in my collection",
+    "even if i don't have",
+    "even if i do not have",
+    "i don't own",
+    "i do not own",
+    "what should i add",
+    "what to add",
+    "ライブラリ外",
+    "ライブラリにない",
+    "ライブラリに入っていない",
+    "コレクション外",
+    "コレクションにない",
+    "持っていない作品",
+    "持っていないタイトル",
+    "追加すべき",
+    "追加した方が",
+    "追加する作品",
+    "ngoài thư viện",
+    "không có trong thư viện",
+    "ngoài danh sách",
+    "chưa có trong thư viện",
+    "tôi chưa có",
+    "mình chưa có",
+    "nên thêm",
+)
+_CONSTRAINED_RECOMMENDATION_MARKERS = (
+    "similar to",
+    "like ",
+    "for fans of",
+    "same genre",
+    "starring",
+    "directed by",
+    "released in",
+    "highly rated",
+    "rated",
+    "rating",
+    "top ",
+    "top rated",
+    "top-rated",
+    "highest rated",
+    "best rated",
+    "best movie",
+    "best film",
+    "most popular",
+    "popular",
+    "award-winning",
+    "ranked",
+    "from the 90s",
+    "from the 1990s",
+    "from the 80s",
+    "from the 1980s",
+    "based on",
+    "adapted from",
+    "unwatched",
+    "haven't seen",
+    "not watched",
+    "genre",
+    "themes",
+    "theme",
+    "tone",
+    "mood",
+    "politics",
+    "war",
+    "dark fantasy",
+    "のような",
+    "みたいな",
+    "似た",
+    "ジャンル",
+    "テーマ",
+    "雰囲気",
+    "政治",
+    "戦争",
+    "高評価",
+    "評価",
+    "人気",
+    "ランキング",
+    "giống như",
+    "thể loại",
+    "chủ đề",
+    "chính trị",
+    "chiến tranh",
+    "cozy",
+    "funny",
+    "comedy",
+    "horror",
+    "romantic",
+    "action",
+    "thriller",
+    "science fiction",
+    "sci-fi",
+    "short movie",
+    "under 2 hours",
+    "less than",
+    "字幕",
+    "吹替",
+    "短い",
+    "新作",
+    "最近",
+    "コメディ",
+    "ホラー",
+    "恋愛",
+    "アクション",
+    "phụ đề",
+    "lồng tiếng",
+    "gần đây",
+    "kinh dị",
+    "hài",
+    "lãng mạn",
+    "dưới",
+)
+_FOLLOW_UP_RECOMMENDATION_MARKERS = (
+    "another",
+    "different",
+    "new one",
+    "something else",
+    "instead",
+    "alternative",
+    "this one",
+    "that one",
+    "the first",
+    "the second",
+    "the one you mentioned",
+    "which one",
+    "それ",
+    "これ",
+    "その作品",
+    "さっきの",
+    "二番目",
+    "2番目",
+    "前の作品",
+    "別の作品",
+    "別の",
+    "違う作品",
+    "もう一つ",
+    "cái đó",
+    "phim đó",
+    "một phim khác",
+    "khác",
+    "thứ hai",
+)
+_MOVIE_MARKERS = (
+    "movie",
+    "movies",
+    "film",
+    "films",
+    "映画",
+    "phim lẻ",
+    "phim điện ảnh",
+)
+_SERIES_MARKERS = (
+    "series",
+    "tv show",
+    "show",
+    "シリーズ",
+    "ドラマ",
+    "phim bộ",
+    "phim truyền hình",
+)
+_ANIME_MARKERS = ("anime", "アニメ")
+_GENERIC_WATCH_MARKERS = (
+    "what should i watch",
+    "what to watch",
+    "something to watch",
+    "watch tonight",
+    "何を観",
+    "何を見",
+    "観たい",
+    "見たい",
+    "xem gì",
+    "bộ phim",
+    "phim trong thư viện",
+)
+_UNSUPPORTED_MEDIA_MARKERS = (
+    "album",
+    "song",
+    "track",
+    "music",
+    "artist",
+    "podcast",
+    "book",
+    "playlist",
+    "アルバム",
+    "曲",
+    "音楽",
+    "歌",
+    "アーティスト",
+    "ポッドキャスト",
+    "本を",
+    "小説",
+    "プレイリスト",
+    "bài hát",
+    "ca khúc",
+    "nhạc",
+    "nghệ sĩ",
+    "sách",
+)
+_LOCAL_RECOMMENDATIONS_TOOL = "zenstream_home_recommendations"
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +310,104 @@ class InferenceError(RuntimeError):
     """A model request failed or exceeded its configured deadline."""
 
 
+def _simple_local_recommendation_kind(
+    user_text: str, history: list[ChatMessage]
+) -> tuple[bool, str | None]:
+    """Identify generic recommendations that can be served from trusted local picks."""
+
+    if history:
+        return False, None
+    text = re.sub(r"\s+", " ", user_text.casefold())
+    if any(marker in text for marker in _OUTSIDE_LIBRARY_MARKERS):
+        return False, None
+    if not any(marker in text for marker in _RECOMMENDATION_MARKERS):
+        return False, None
+    if any(marker in text for marker in _UNSUPPORTED_MEDIA_MARKERS):
+        return False, None
+    if any(
+        marker in text
+        for marker in (
+            *_CONSTRAINED_RECOMMENDATION_MARKERS,
+            *_FOLLOW_UP_RECOMMENDATION_MARKERS,
+        )
+    ):
+        return False, None
+
+    # The local shortcut returns a single trusted Home pick. Keep requests for
+    # ranked lists, a particular year, or a mixed anime/movie category agentic.
+    if re.search(r"\b(?:18|19|20)\d{2}\b", text):
+        return False, None
+    if re.search(
+        r"\b(?:two|three|four|five|six|seven|eight|nine|ten|several|multiple|"
+        r"a few|a couple of|\d+)\s+"
+        r"(?:movies?|films?|series|shows?|anime)\b",
+        text,
+    ):
+        return False, None
+    if re.search(
+        r"(?:[2-9]\d*|[二三四五六七八九十百千][二三四五六七八九十百千]*)"
+        r"\s*(?:本|作品|タイトル|番組|映画|ドラマ|アニメ)",
+        text,
+    ):
+        return False, None
+
+    wants_movie = any(marker in text for marker in _MOVIE_MARKERS)
+    wants_series = any(marker in text for marker in _SERIES_MARKERS)
+    wants_anime = any(marker in text for marker in _ANIME_MARKERS)
+    explicit_anime_movie = bool(
+        re.search(r"\banime\s+(?:movies?|films?)\b", text)
+        or "アニメ映画" in text
+    )
+    explicit_anime_series = bool(
+        re.search(r"\banime\s+(?:series|shows?|tv)\b", text)
+        or "アニメシリーズ" in text
+    )
+    if wants_movie and wants_series:
+        return False, None
+    if wants_anime and wants_movie and not explicit_anime_movie:
+        return False, None
+    if wants_anime and wants_series and not explicit_anime_series:
+        return False, None
+    if wants_anime and not (explicit_anime_movie or explicit_anime_series):
+        return False, None
+    if wants_movie:
+        return True, "movie"
+    if wants_series:
+        return True, "series"
+    if any(marker in text for marker in _GENERIC_WATCH_MARKERS):
+        return True, None
+    return False, None
+
+
+def _recommendation_locale(user_text: str) -> str:
+    """Choose a short deterministic fallback in the language of common Lumi prompts."""
+
+    folded = user_text.casefold()
+    if any("\u3040" <= char <= "\u30ff" for char in user_text):
+        return "ja"
+    if any(
+        marker in folded
+        for marker in ("gợi ý", "đề xuất", "thư viện", "phim", "xem", "bạn", "mình")
+    ):
+        return "vi"
+    return "en"
+
+
+def _collapse_consecutive_duplicate_paragraphs(markdown: str) -> str:
+    """Stop a decoding loop from repeating the same paragraph in the final answer."""
+
+    paragraphs = re.split(r"(?:\r?\n){2,}", markdown.strip())
+    unique: list[str] = []
+    previous: str | None = None
+    for paragraph in paragraphs:
+        normalized = re.sub(r"\s+", " ", paragraph).strip().casefold()
+        if normalized and normalized == previous:
+            continue
+        unique.append(paragraph.strip())
+        previous = normalized
+    return "\n\n".join(unique)
+
+
 def _external_search_planning_messages(
     conversation_messages: list[ChatMessage],
 ) -> list[ChatMessage]:
@@ -140,6 +456,16 @@ class ChatAgent:
             raise ValueError("A user message cannot be empty")
         if len(user_text) > self._limits.max_user_input_chars:
             raise ValueError("The user message exceeds Lumi's configured input limit")
+
+        local_recommendation, requested_type = _simple_local_recommendation_kind(
+            user_text, history
+        )
+        if local_recommendation:
+            return await self._answer_from_local_recommendations(
+                context,
+                user_text,
+                requested_type,
+            )
 
         trusted_entities = {
             (entity.type, entity.id): entity
@@ -270,6 +596,82 @@ class ChatAgent:
                 return await self._answer_after_limit(
                     context, messages, trusted_entities, sources, tool_rounds, total_calls
                 )
+
+    async def _answer_from_local_recommendations(
+        self,
+        context: ChatContext,
+        user_text: str,
+        requested_type: str | None,
+    ) -> ChatAnswer:
+        """Answer generic recommendations only from the authenticated local Home row."""
+
+        result = await self._dispatch(
+            context,
+            ToolCall("local-recommendation", _LOCAL_RECOMMENDATIONS_TOOL, {}),
+            set(),
+            {},
+        )
+        try:
+            payload = json.loads(result.content)
+        except (TypeError, ValueError):
+            payload = None
+        catalog_result_available = (
+            result.trust is EvidenceTrust.LOCAL
+            and isinstance(payload, dict)
+            and isinstance(payload.get("items"), list)
+        )
+        candidates = [
+            entity
+            for entity in result.entities
+            if entity.type in {"movie", "series"}
+            and (requested_type is None or entity.type == requested_type)
+        ]
+        locale = _recommendation_locale(user_text)
+        if not catalog_result_available:
+            lead = {
+                "en": "I couldn't check your library just now. Please try again.",
+                "ja": "今はライブラリを確認できませんでした。もう一度お試しください。",
+                "vi": "Hiện mình chưa thể kiểm tra thư viện. Vui lòng thử lại.",
+            }[locale]
+            markdown = lead
+            references: dict[tuple[str, str], EntityReference] = {}
+        elif not candidates:
+            lead = {
+                "en": (
+                    "I couldn't retrieve a verified local recommendation right now. "
+                    "Try again or search for a title or genre."
+                ),
+                "ja": "今は確認済みのローカルおすすめを取得できませんでした。もう一度お試しいただくか、作品名やジャンルで検索してください。",
+                "vi": "Hiện mình chưa lấy được đề xuất trong thư viện đã xác minh. Hãy thử lại hoặc tìm theo tên phim hay thể loại.",
+            }[locale]
+            markdown = lead
+            references = {}
+        else:
+            selected = candidates[0]
+            lead = {
+                "en": (
+                    "I recommend this title because it appears in your permission-filtered "
+                    "ZenStream Home recommendations:"
+                ),
+                "ja": "アクセス可能なローカルのおすすめ一覧に掲載されているため、この作品をおすすめします:",
+                "vi": (
+                    "Mình gợi ý phim này vì nó xuất hiện trong mục đề xuất ZenStream mà bạn "
+                    "có quyền truy cập:"
+                ),
+            }[locale]
+            markdown = (
+                f'{lead} :::zenstream{{type="{selected.type}" id="{selected.id}"}}'
+            )
+            references = {(selected.type, selected.id): selected}
+
+        sources = {source.url: source for source in result.sources}
+        return self._make_answer(
+            markdown,
+            references,
+            sources,
+            tool_rounds=1,
+            total_calls=1,
+        )
 
     async def _complete(
         self,
@@ -534,7 +936,9 @@ class ChatAgent:
         tool_rounds: int,
         total_calls: int,
     ) -> ChatAnswer:
-        bounded = _THINK_BLOCK_PATTERN.sub("", markdown).strip()[: self._limits.max_answer_chars]
+        cleaned = _THINK_BLOCK_PATTERN.sub("", markdown).strip()
+        cleaned = _collapse_consecutive_duplicate_paragraphs(cleaned)
+        bounded = cleaned[: self._limits.max_answer_chars]
         used_references: list[EntityReference] = []
 
         def keep_reference(match: re.Match[str]) -> str:
