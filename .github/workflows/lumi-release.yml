@@ -75,6 +75,39 @@ jobs:
           vulkan_version: "1.4.309.0"
           install_runtime: true
           stripdown: true
+      - name: Install the SPIR-V headers required by the pinned Vulkan SDK
+        shell: pwsh
+        run: |
+          $sourcePath = Join-Path $env:RUNNER_TEMP "SPIRV-Headers"
+          $buildPath = Join-Path $env:RUNNER_TEMP "SPIRV-Headers-build"
+          $installPath = Join-Path $env:RUNNER_TEMP "SPIRV-Headers-install"
+          $expectedCommit = "09913f088a1197aba4aefd300a876b2ebbaa3391"
+
+          git clone https://github.com/KhronosGroup/SPIRV-Headers.git $sourcePath
+          git -C $sourcePath checkout --detach $expectedCommit
+          $actualCommit = (git -C $sourcePath rev-parse HEAD).Trim()
+          if ($actualCommit -ne $expectedCommit) {
+            throw "Unexpected SPIRV-Headers commit: $actualCommit"
+          }
+
+          cmake -S $sourcePath -B $buildPath `
+            -DSPIRV_HEADERS_ENABLE_TESTS=OFF `
+            -DSPIRV_HEADERS_ENABLE_INSTALL=ON `
+            "-DCMAKE_INSTALL_PREFIX=$installPath"
+          cmake --install $buildPath --config Release
+
+          $configPath = Join-Path $installPath "share\cmake\SPIRV-Headers\SPIRV-HeadersConfig.cmake"
+          if (-not (Test-Path $configPath)) {
+            throw "SPIRV-Headers CMake package configuration was not installed"
+          }
+
+          $cmakePrefixPaths = @($installPath)
+          if (-not [string]::IsNullOrWhiteSpace($env:CMAKE_PREFIX_PATH)) {
+            $cmakePrefixPaths += $env:CMAKE_PREFIX_PATH
+          }
+          $cmakePrefixPath = $cmakePrefixPaths -join ";"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "CMAKE_PREFIX_PATH=$cmakePrefixPath"
+
       - name: Check native GPU build tools
         shell: pwsh
         run: |
