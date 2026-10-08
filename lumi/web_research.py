@@ -38,6 +38,9 @@ _UUID_RE = re.compile(
 )
 _WINDOWS_PATH_RE = re.compile(r"(?:\b[A-Za-z]:\\|\\\\[^\\\s]+\\)")
 _UNIX_PATH_RE = re.compile(r"(?<![\w:])/(?:[^/\s]+/)+[^/\s]+/?")
+_UNIX_FILESYSTEM_PATH_ROOT_RE = re.compile(
+    r"^/(?:home|users?|root|tmp|private/var|var/tmp|mnt|volumes)/", re.IGNORECASE
+)
 _PHONE_NUMBER_RE = re.compile(r"(?<!\w)\+?\d(?:[\s().-]*\d){6,}(?!\w)")
 _DATE_RE = re.compile(
     r"(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})"
@@ -73,6 +76,14 @@ _PRIVATE_CONTEXT_RE = re.compile(
     r"(?:視聴履歴|視聴記録|視聴進捗|お気に入り|ウォッチリスト|ライブラリ|評価)|"
     r"(?:視聴履歴|視聴記録|視聴進捗|お気に入り|ウォッチリスト|ライブラリ|評価)"
     r"[\s\S]{0,16}(?:私|僕|自分)(?:の)?|"
+    r"(?:我的|我們的?|用户(?:的)?|用戶(?:的)?)[\s\S]{0,12}"
+    r"(?:观看历史|觀看歷史|观影历史|觀影歷史|播放历史|播放歷史|"
+    r"观看记录|觀看記錄|观影记录|觀影記錄|播放记录|播放記錄|"
+    r"观看进度|觀看進度|播放进度|播放進度|媒体库|媒體庫|影视库|影視庫|"
+    r"电影库|電影庫|片库|片庫|收藏夹|收藏夾|收藏|片单|片單|评分|評分|进度|進度)|"
+    r"(?:我|用户|用戶)(?:收藏|看过|看過|观看过|觀看過|播放过|播放過|"
+    r"评分过|評分過)[\s\S]{0,10}"
+    r"(?:电影|電影|影片|剧集|劇集|动漫|動漫|作品|节目|節目|视频|視頻)|"
     r"(?:lịch sử xem|lịch sử phát|danh sách yêu thích|mục yêu thích|"
     r"thư viện|danh sách xem|tiến độ xem|đánh giá)"
     r"[\s\S]{0,24}của\s+(?:tôi|người dùng)|"
@@ -182,17 +193,24 @@ def _contains_sensitive_web_url_detail(value: str) -> bool:
             component = unicodedata.normalize("NFKC", component)
             if is_path:
                 normalized = re.sub(r"[/._+-]+", " ", component)
-                if _PRIVATE_CONTEXT_RE.search(normalized) or any(
-                    pattern.search(component)
-                    for pattern in (
-                        _EMAIL_RE,
-                        _UUID_RE,
-                        _WINDOWS_PATH_RE,
-                        _UK_POSTCODE_RE,
-                        _STREET_ADDRESS_RE,
-                        _AT_HANDLE_RE,
-                        _LABELED_USERNAME_RE,
-                        _LABELED_PRIVATE_IDENTIFIER_RE,
+                if (
+                    _PRIVATE_CONTEXT_RE.search(normalized)
+                    or (
+                        _UNIX_FILESYSTEM_PATH_ROOT_RE.search(component)
+                        and _UNIX_PATH_RE.search(component)
+                    )
+                    or any(
+                        pattern.search(component)
+                        for pattern in (
+                            _EMAIL_RE,
+                            _UUID_RE,
+                            _WINDOWS_PATH_RE,
+                            _UK_POSTCODE_RE,
+                            _STREET_ADDRESS_RE,
+                            _AT_HANDLE_RE,
+                            _LABELED_USERNAME_RE,
+                            _LABELED_PRIVATE_IDENTIFIER_RE,
+                        )
                     )
                 ):
                     return True

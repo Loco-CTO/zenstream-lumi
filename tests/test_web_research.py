@@ -262,11 +262,24 @@ class WebResearchTests(unittest.IsolatedAsyncioTestCase):
             "search my favorite series and all my watch history",
             "私の視聴履歴にある作品を探して",
             "私のライブラリのお気に入り作品",
-            "tìm phim từ lịch sử xem của tôi",
-            "tìm danh sách yêu thích của tôi",
+            "根据我的观看历史推荐一部电影",
+            "在我的本地媒体库里搜索动画",
+            "搜索我的收藏夹中的影片",
+            "请从我看过的电影中推荐一部",
         ):
             with self.subTest(query=query), self.assertRaises(ValueError):
                 tool.validate_arguments({"query": query})
+
+        for query in (
+            "Frieren themes and soundtrack",
+            "best Chinese anime movies of 2026",
+            "宫崎骏最优秀的电影",
+            "《鬼灭之刃》观影指南",
+        ):
+            with self.subTest(query=query):
+                self.assertEqual(
+                    tool.validate_arguments({"query": query})["query"], query
+                )
 
     async def test_search_filters_private_urls(self) -> None:
         tool = SearXNGSearchTool(
@@ -316,12 +329,26 @@ class WebResearchTests(unittest.IsolatedAsyncioTestCase):
                 "%25E8%25A6%2596%25E8%2581%25B4%25E5%25B1%25A5%25E6%25AD%25B4"
             ),
             (
-                "https://example.org/search?q=l%E1%BB%8Bch+s%E1%BB%AD+xem+"
-                "c%E1%BB%A7a+t%C3%B4i"
-            ),
-            (
                 "https://example.org/%E7%A7%81%E3%81%AE"
                 "%E3%83%A9%E3%82%A4%E3%83%96%E3%83%A9%E3%83%AA"
+            ),
+            (
+                "https://example.org/search?q=%E6%88%91%E7%9A%84%E8%A7%82%E7%9C%8B"
+                "%E5%8E%86%E5%8F%B2"
+            ),
+            (
+                "https://example.org/search?q=%25E6%2588%2591%25E7%259A%2584"
+                "%25E6%2594%25B6%25E8%2597%258F%25E5%25A4%25B9"
+            ),
+            (
+                "https://example.org/search/%E6%88%91%E7%9A%84"
+                "%E5%AA%92%E4%BD%93%E5%BA%93"
+            ),
+            "https://example.org/home/alice/private/notes.txt",
+            "https://example.org/Users/alice/Videos/watch-history.txt",
+            (
+                "https://example.org/search?path=%2Fhome%2Falice%2Fprivate%2F"
+                "notes.txt"
             ),
         ):
             with self.subTest(url=url), self.assertRaises(ValueError):
