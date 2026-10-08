@@ -92,6 +92,33 @@ class InferenceError(RuntimeError):
     """A model request failed or exceeded its configured deadline."""
 
 
+def _external_search_planning_messages(
+    conversation_messages: list[ChatMessage],
+) -> list[ChatMessage]:
+    """Keep only a small recent user/assistant window for local follow-up resolution."""
+
+    candidates = [
+        message
+        for message in conversation_messages
+        if message.role in {"user", "assistant"}
+        and not message.tool_calls
+        and message.content.strip()
+    ][-6:]
+    budget = 2_400
+    bounded: list[ChatMessage] = []
+    for message in reversed(candidates):
+        remaining = budget - sum(len(item.content) for item in bounded)
+        if remaining <= 0:
+            break
+        content = message.content[-min(900, remaining) :]
+        bounded.append(ChatMessage(role=message.role, content=content))
+    bounded.reverse()
+    return [
+        ChatMessage(role="system", content=EXTERNAL_SEARCH_PLANNER_PROMPT),
+        *bounded,
+    ]
+
+
 class ChatAgent:
     def __init__(
         self,
@@ -124,8 +151,6 @@ class ChatAgent:
         tool_call_counts: dict[str, int] = {}
         total_calls = 0
         tool_rounds = 0
-        local_context_seen = False
-        web_search_used = False
 
         while True:
             response = await self._complete(context, messages, self._tools.definitions)
@@ -201,24 +226,11 @@ class ChatAgent:
                 total_calls += 1
                 tool = self._tools.get(original_call.name)
                 data_scope = tool.definition.data_scope if tool is not None else "local"
-                if valid_arguments and data_scope == "external_search" and local_context_seen:
-                    result = ToolResult(
-                        "Web search must happen before any local ZenStream lookup in this turn. "
-                        "Use only a query derived from the user's request, or answer from the "
-                        "local evidence already collected.",
-                        EvidenceTrust.LOCAL,
-                    )
-                elif valid_arguments and data_scope == "external_search" and web_search_used:
-                    result = ToolResult(
-                        "The one web-search call allowed per turn has already been used. "
-                        "Continue from the result IDs and evidence already collected.",
-                        EvidenceTrust.LOCAL,
-                    )
-                elif valid_arguments:
+                if valid_arguments:
                     if data_scope == "external_search" and tool is not None:
                         result = await self._dispatch_external_search(
                             context,
-                            user_text,
+                            messages,
                             original_call,
                             tool,
                             seen_calls,
@@ -231,10 +243,6 @@ class ChatAgent:
                             seen_calls,
                             tool_call_counts,
                         )
-                    if data_scope == "external_search":
-                        web_search_used = True
-                    elif tool is not None and data_scope == "local":
-                        local_context_seen = True
                 else:
                     result = ToolResult(
                         "Tool arguments were rejected because they were not a bounded JSON object.",
@@ -423,18 +431,15 @@ class ChatAgent:
     async def _dispatch_external_search(
         self,
         context: ChatContext,
-        user_text: str,
+        conversation_messages: list[ChatMessage],
         original_call: ToolCall,
         tool: Any,
         seen_calls: set[tuple[str, str]],
         tool_call_counts: dict[str, int],
     ) -> ToolResult:
-        """Plan outbound queries from this turn alone, excluding prior chat evidence."""
+        """Plan a minimal public query from bounded dialogue, excluding tool payloads."""
 
-        planning_messages = [
-            ChatMessage(role="system", content=EXTERNAL_SEARCH_PLANNER_PROMPT),
-            ChatMessage(role="user", content=user_text),
-        ]
+        planning_messages = _external_search_planning_messages(conversation_messages)
         try:
             response = await self._complete(
                 context,
@@ -453,8 +458,8 @@ class ChatAgent:
             or message.tool_calls[0].name != original_call.name
         ):
             return ToolResult(
-                "No external search was sent because the current message does not provide a "
-                "standalone searchable subject. Ask the user to name the subject if needed.",
+                "No external search was sent because a safe, focused public query could not be "
+                "resolved from the recent conversation. Ask the user to clarify the subject.",
                 EvidenceTrust.LOCAL,
             )
         return await self._dispatch(
@@ -463,7 +468,6 @@ class ChatAgent:
             seen_calls,
             tool_call_counts,
         )
-
     def _bounded_messages(
         self,
         history: list[ChatMessage],
