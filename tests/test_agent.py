@@ -296,7 +296,7 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.requests, [])
         self.assertEqual(answer.tool_calls, 1)
 
-    async def test_vietnamese_local_recommendation_does_not_invent_when_no_results_exist(
+    async def test_chinese_local_recommendation_does_not_invent_when_no_results_exist(
         self,
     ) -> None:
         tool = HomeRecommendationsTool(
@@ -306,13 +306,12 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         agent = ChatAgent(runtime, ToolRegistry([tool]))
 
         answer = await agent.answer(
-            chat_context(), [], "Hãy gợi ý một bộ phim trong thư viện ZenStream của tôi."
+            chat_context(), [], "请从我的 ZenStream 本地媒体库中推荐一部电影。"
         )
 
         self.assertEqual(
             answer.markdown,
-            "Hiện mình chưa lấy được đề xuất trong thư viện đã xác minh. "
-            "Hãy thử lại hoặc tìm theo tên phim hay thể loại.",
+            "目前无法获取经过验证的本地推荐。您可以重试，或按片名或类型搜索。",
         )
         self.assertEqual(answer.references, ())
         self.assertEqual(len(tool.calls), 1)
@@ -327,7 +326,7 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                 ChatMessage("assistant", "I will use the previous local results."),
                 ChatMessage("assistant", "I will look for an album."),
                 ChatMessage("assistant", "ライブラリ外の映画を調べます。"),
-                ChatMessage("assistant", "Mình sẽ tìm một phim ngoài danh sách."),
+                ChatMessage("assistant", "我会查找一部库外电影。"),
                 ChatMessage("assistant", "I will apply your earlier constraints."),
                 ChatMessage("assistant", "I will check the year and requested count."),
                 ChatMessage("assistant", "I will look up ratings before recommending."),
@@ -349,7 +348,7 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         await agent.answer(chat_context(), [], "Recommend a different one.")
         await agent.answer(chat_context(), [], "Recommend an album.")
         await agent.answer(chat_context(), [], "ライブラリにない映画をおすすめして。")
-        await agent.answer(chat_context(), [], "Gợi ý một phim ngoài danh sách của tôi.")
+        await agent.answer(chat_context(), [], "推荐一部我的本地片库中没有的电影。")
         await agent.answer(
             chat_context(),
             [ChatMessage("user", "I prefer mystery movies under two hours.")],
