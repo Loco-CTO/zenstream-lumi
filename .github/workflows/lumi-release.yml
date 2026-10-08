@@ -229,7 +229,7 @@ jobs:
           PYTHON=/opt/python/${{ matrix.python_tag }}-${{ matrix.python_tag }}/bin/python
           if [[ "${{ matrix.target }}" == "linux-x64" ]]; then
             nvcc --version
-            glslc --version
+            build-tools/glslc --version
           fi
           "$PYTHON" -m pip wheel --no-deps --no-binary=llama-cpp-python --wheel-dir dist/wheels/runtime "llama-cpp-python==0.3.35"
           mkdir -p dist/wheels/expanded
