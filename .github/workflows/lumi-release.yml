@@ -84,6 +84,8 @@ jobs:
       image: ${{ matrix.container }}
     env:
       CMAKE_ARGS: -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_CUDA=OFF
+      CC: /usr/bin/gcc
+      CXX: /usr/bin/g++
     strategy:
       fail-fast: false
       matrix:
@@ -95,6 +97,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Build and repair the pinned CPU-only llama.cpp runtime wheel
         run: |
+          "$CC" --version
+          "$CXX" --version
           PYTHON=/opt/python/cp312-cp312/bin/python
           "$PYTHON" -m pip wheel --no-deps --no-binary=llama-cpp-python --wheel-dir dist/wheels/runtime "llama-cpp-python==0.3.35"
           auditwheel repair --plat "${{ matrix.platform }}" --wheel-dir dist/wheels/repaired dist/wheels/runtime/*.whl
