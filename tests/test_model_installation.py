@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -17,12 +18,14 @@ from lumi.model_installation import (
     MODEL_MANIFEST_FILENAME,
     MODEL_MANIFEST_SCHEMA_VERSION,
     InstalledModelArtifact,
+    ModelInstallationCancelledError,
     ModelInstallationError,
     Qwen35ModelInstaller,
     Qwen35ModelSpec,
     UnsupportedModelError,
     _SourceFetchResult,
     _SourceFileRecord,
+    _hash_file_with_size,
     supported_models,
 )
 
@@ -52,7 +55,16 @@ class FakeGGUFSourceFetcher:
         self.tamper_record = tamper_record
         self.add_symlink = add_symlink
 
-    def fetch(self, spec: Qwen35ModelSpec, destination: Path, progress):
+    def fetch(
+        self,
+        spec: Qwen35ModelSpec,
+        destination: Path,
+        progress,
+        *,
+        cancel_event: threading.Event | None = None,
+    ):
+        if cancel_event is not None and cancel_event.is_set():
+            raise ModelInstallationCancelledError("cancelled")
         self.called = True
         path = destination / spec.gguf_filename
         path.write_bytes(_GGUF_BYTES)
@@ -176,6 +188,143 @@ class ModelInstallationTests(unittest.TestCase):
             self.assertTrue(installer.list_models()[0].installed)
             self.assertFalse((model_directory / "model.onnx").exists())
             self.assertTrue((Path(artifact.directory) / _GGUF_FILENAME).is_file())
+
+    def test_cancelled_download_cleans_staging_and_cache_and_retry_can_activate(self) -> None:
+        spec = _test_spec()
+        cancel_event = threading.Event()
+        cache_partial: Path | None = None
+
+        class CancellingFetcher:
+            def fetch(
+                _self,
+                _spec: Qwen35ModelSpec,
+                destination: Path,
+                _progress,
+                *,
+                cancel_event: threading.Event | None = None,
+            ):
+                nonlocal cache_partial
+                (destination / spec.gguf_filename).write_bytes(b"partial download")
+                assert cancel_event is not None
+                cache_partial = (
+                    self.root
+                    / ".lumi-hub-cache"
+                    / spec.directory_name
+                    / ".cache"
+                    / "huggingface"
+                    / "download"
+                    / "model.gguf.incomplete"
+                )
+                cache_partial.parent.mkdir(parents=True, exist_ok=True)
+                cache_partial.write_bytes(b"partial cache")
+                cancel_event.set()
+                raise ModelInstallationCancelledError("cancelled")
+
+        with patch("lumi.model_installation._MODEL_SPECS", {_MODEL_ID: spec}):
+            installer = self.installer(spec, CancellingFetcher())
+            with self.assertRaises(ModelInstallationCancelledError):
+                installer.install_model(_MODEL_ID, cancel_event=cancel_event)
+
+            self.assertFalse(installer.list_models()[0].installed)
+            self.assertFalse((self.root / spec.directory_name).exists())
+            self.assertIsNotNone(cache_partial)
+            self.assertFalse(cache_partial.exists())
+            self.assertFalse((self.root / ".lumi-hub-cache").exists())
+
+            retry_installer = self.installer(spec)
+            artifact = retry_installer.install_model(_MODEL_ID)
+            self.assertTrue(retry_installer.list_models()[0].installed)
+
+        self.assertTrue(Path(artifact.directory).is_dir())
+
+    def test_hash_verification_checks_cancellation_between_chunks(self) -> None:
+        model_path = Path(self.temp_dir.name) / "large-model.gguf"
+        model_path.write_bytes(b"x" * (2 * 1024 * 1024))
+        cancel_event = threading.Event()
+        original_sha256 = hashlib.sha256
+
+        class CancellingDigest:
+            def __init__(self) -> None:
+                self.inner = original_sha256()
+
+            def update(self, chunk: bytes) -> None:
+                self.inner.update(chunk)
+                cancel_event.set()
+
+            def hexdigest(self) -> str:
+                return self.inner.hexdigest()
+
+        with patch("lumi.model_installation.hashlib.sha256", CancellingDigest):
+            with self.assertRaises(ModelInstallationCancelledError):
+                _hash_file_with_size(model_path, cancel_event=cancel_event)
+
+    def test_huggingface_stream_progress_cancellation_cleans_partial_cache(self) -> None:
+        spec = _test_spec()
+        cancel_event = threading.Event()
+        hub = ModuleType("huggingface_hub")
+
+        class FakeHubApi:
+            def __init__(self, **_kwargs):
+                pass
+
+            def model_info(self, **_kwargs):
+                sibling = SimpleNamespace(
+                    rfilename=spec.gguf_filename,
+                    size=spec.download_size_bytes,
+                    lfs=SimpleNamespace(
+                        size=spec.download_size_bytes,
+                        sha256=spec.gguf_sha256,
+                    ),
+                )
+                return SimpleNamespace(sha=spec.revision, siblings=[sibling])
+
+        class FakeTqdm:
+            def __init__(self, *args, **kwargs):
+                self.n = 0
+
+            def update(self, amount=1):
+                self.n += amount
+                cancel_event.set()
+                return True
+
+        def fake_hf_hub_download(**kwargs):
+            local_directory = Path(kwargs["local_dir"])
+            partial = (
+                local_directory
+                / ".cache"
+                / "huggingface"
+                / "download"
+                / "model.gguf.incomplete"
+            )
+            partial.parent.mkdir(parents=True, exist_ok=True)
+            partial.write_bytes(b"partial streamed transfer")
+            progress = kwargs["tqdm_class"](total=spec.download_size_bytes)
+            progress.update(1)
+            raise AssertionError("the cancelled progress callback must stop the transfer")
+
+        hub.HfApi = FakeHubApi
+        hub.hf_hub_download = fake_hf_hub_download
+        tqdm_package = ModuleType("tqdm")
+        tqdm_auto = ModuleType("tqdm.auto")
+        tqdm_auto.tqdm = FakeTqdm
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "huggingface_hub": hub,
+                    "tqdm": tqdm_package,
+                    "tqdm.auto": tqdm_auto,
+                },
+            ),
+            patch("lumi.model_installation._MODEL_SPECS", {_MODEL_ID: spec}),
+        ):
+            installer = Qwen35ModelInstaller(self.root)
+            with self.assertRaises(ModelInstallationCancelledError):
+                installer.install_model(_MODEL_ID, cancel_event=cancel_event)
+
+            self.assertFalse(installer.list_models()[0].installed)
+            self.assertFalse((self.root / spec.directory_name).exists())
+            self.assertFalse((self.root / ".lumi-hub-cache").exists())
 
     def test_huggingface_download_cache_survives_retry_and_clears_after_success(self) -> None:
         spec = _test_spec()

@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from lumi.contracts import ChatMessage, ModelRequest  # noqa: E402
+from lumi.contracts import ChatMessage, ModelRequest, ToolDefinition  # noqa: E402
 from lumi.model_installation import MODEL_MANIFEST_FILENAME, supported_models  # noqa: E402
 from lumi.runtime import (  # noqa: E402
     LlamaCppChatRuntime,
@@ -25,6 +25,7 @@ def create_live_runtime(
     *,
     context_size: int,
     output_tokens: int,
+    acceleration_mode: str = "automatic",
 ) -> LlamaCppChatRuntime:
     """Create a runtime for one already installed and locally verified model."""
 
@@ -54,6 +55,7 @@ def create_live_runtime(
             n_ctx=context_size,
             n_batch=min(512, context_size),
             n_ubatch=min(512, context_size),
+            acceleration_mode=acceleration_mode,
         )
     )
 
@@ -64,12 +66,31 @@ def smoke_request(
     *,
     context_size: int,
     output_tokens: int,
+    thinking: bool = False,
+    with_tools: bool = False,
 ) -> ModelRequest:
+    tools = (
+        (
+            ToolDefinition(
+                "catalog_search",
+                "Search the local media catalog for matching titles.",
+                {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+                data_scope="local",
+                read_only=True,
+            ),
+        )
+        if with_tools
+        else ()
+    )
     return ModelRequest(
         model=model_id,
         messages=[ChatMessage(role="user", content=prompt)],
-        tools=[],
-        thinking=False,
+        tools=tools,
+        thinking=thinking,
         context_size=context_size,
         output_tokens=output_tokens,
     )

@@ -8,18 +8,20 @@ integration, then passes the managed model directories to this adapter.
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import gc
 import hashlib
 import json
 import os
 import re
 import stat
+import struct
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -28,6 +30,7 @@ from lumi.contracts import (
     ChatRuntime,
     ModelRequest,
     ModelResponse,
+    ModelStreamEvent,
     ToolCall,
     ToolDefinition,
 )
@@ -37,6 +40,16 @@ from lumi.model_installation import (
     _require_spec,
     supported_models,
 )
+from lumi.runtime.acceleration import (
+    AccelerationChoice,
+    AccelerationMode,
+    GpuDevice,
+    SUPPORTED_ACCELERATION_MODES,
+    _cpu_choice,
+    choose_acceleration,
+    detect_gpu_devices,
+)
+from lumi.runtime.streaming import VisibleTextFilter
 
 LUMI_RUNTIME_API_VERSION = 1
 SUPPORTED_QWEN35_MODELS = frozenset(option.model_id for option in supported_models())
@@ -47,10 +60,9 @@ _TOOL_CALL_RE = re.compile(
     r"<tool_call>\s*<function=([A-Za-z0-9_-]{1,64})>(.*?)</function>\s*</tool_call>",
     re.DOTALL,
 )
+_TOOL_CONTROL_TOKEN_RE = re.compile(r"<\|(?:tool_[^|>\r\n]*|function_call[^|>\r\n]*)\|>")
 _PARAMETER_RE = re.compile(r"<parameter=([A-Za-z0-9_-]{1,64})>(.*?)</parameter>", re.DOTALL)
-_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 _CHANNEL_RE = re.compile(r"<\|channel\|>(analysis|final|commentary|summary|justify|confidence)\b")
-_SPECIAL_TOKEN_RE = re.compile(r"<\|[^>]+\|>")
 
 
 class LlamaCppRuntimeError(RuntimeError):
@@ -66,6 +78,22 @@ class _CombinedStoppingCriteria(list[Callable[[Any, Any], bool]]):
 
     def __call__(self, tokens: Any, logits: Any) -> bool:
         return any(criterion(tokens, logits) for criterion in self)
+
+
+class _PreparedChatFormatter:
+    """Return the already validated GGUF chat template for a binding request."""
+
+    def __init__(self, response: Any) -> None:
+        self._response = response
+
+    def __call__(self, **_kwargs: Any) -> Any:
+        return self._response
+
+
+@dataclass(frozen=True, slots=True)
+class _StreamWorkerResult:
+    response: ModelResponse | None = None
+    error: BaseException | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +139,8 @@ class LlamaCppConfig:
     n_ubatch: int = 512
     n_threads: int = 0
     n_threads_batch: int = 0
-    n_gpu_layers: int = 0
+    n_gpu_layers: int | None = None
+    acceleration_mode: AccelerationMode = "automatic"
     use_mmap: bool = True
     use_mlock: bool = False
 
@@ -141,7 +170,6 @@ class LlamaCppConfig:
             ("n_ubatch", self.n_ubatch, 1, 4096),
             ("n_threads", self.n_threads, 0, 256),
             ("n_threads_batch", self.n_threads_batch, 0, 256),
-            ("n_gpu_layers", self.n_gpu_layers, 0, 256),
         )
         for name, value, minimum, maximum in bounded_values:
             if (
@@ -152,6 +180,14 @@ class LlamaCppConfig:
                 raise ValueError(f"{name} must be between {minimum} and {maximum}")
         if not isinstance(self.use_mmap, bool) or not isinstance(self.use_mlock, bool):
             raise ValueError("use_mmap and use_mlock must be booleans")
+        if self.n_gpu_layers is not None and (
+            isinstance(self.n_gpu_layers, bool)
+            or not isinstance(self.n_gpu_layers, int)
+            or not 0 <= self.n_gpu_layers <= 256
+        ):
+            raise ValueError("n_gpu_layers must be between 0 and 256")
+        if self.acceleration_mode not in SUPPORTED_ACCELERATION_MODES:
+            raise ValueError("acceleration_mode must be automatic, cpu_only, or gpu_preferred")
         if self.n_ubatch > self.n_batch:
             raise ValueError("n_ubatch cannot exceed n_batch")
 
@@ -163,6 +199,8 @@ class _LoadedModel:
     chat_template: str
     eos_token: str
     bos_token: str
+    acceleration: AccelerationChoice
+    load_duration_ns: int
 
 
 class LlamaCppChatRuntime(ChatRuntime):
@@ -188,6 +226,16 @@ class LlamaCppChatRuntime(ChatRuntime):
         self._closing = False
         self._closed = False
         self._idle_task: asyncio.Task[None] | None = None
+        self._acceleration = AccelerationChoice(
+            backend="cpu",
+            device="CPU",
+            offloaded_layers=0,
+            total_layers=0,
+            device_memory_free_bytes=0,
+            device_memory_total_bytes=0,
+        )
+        self._acceleration_state = "not_loaded"
+        self._forced_cpu_reason: str | None = None
 
     async def open(self) -> None:
         """Make the runtime available without importing llama.cpp or loading a model."""
@@ -272,7 +320,85 @@ class LlamaCppChatRuntime(ChatRuntime):
                 self._last_used = time.monotonic()
                 self._slot.release()
 
-    def _finish_cancelled_worker(self, task: asyncio.Task[ModelResponse]) -> None:
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        """Stream visible assistant-text deltas followed by one normalized response.
+
+        Native inference remains on a worker thread. Cancellation is cooperative at
+        token boundaries, and the single-flight slot remains held until that worker
+        exits so an abandoned native iterator cannot overlap a later request.
+        """
+
+        if not self._opened or self._closing or self._closed:
+            raise RuntimeError("Open the Lumi runtime before making requests")
+        self._validate_request(request)
+        await self._slot.acquire()
+        if not self._opened or self._closing or self._closed:
+            self._slot.release()
+            raise RuntimeError("The Lumi runtime is not available")
+
+        cancellation = threading.Event()
+        loop = asyncio.get_running_loop()
+        events: asyncio.Queue[ModelStreamEvent | _StreamWorkerResult] = asyncio.Queue()
+
+        def publish(event: ModelStreamEvent) -> None:
+            loop.call_soon_threadsafe(events.put_nowait, event)
+
+        def run_worker() -> None:
+            try:
+                response = self._generate_sync(request, cancellation, publish)
+            except BaseException as error:
+                loop.call_soon_threadsafe(events.put_nowait, _StreamWorkerResult(error=error))
+            else:
+                loop.call_soon_threadsafe(
+                    events.put_nowait,
+                    _StreamWorkerResult(response=response),
+                )
+
+        worker = asyncio.create_task(asyncio.to_thread(run_worker))
+        release_in_callback = False
+        try:
+            while True:
+                item = await events.get()
+                if isinstance(item, _StreamWorkerResult):
+                    if item.error is not None:
+                        raise item.error
+                    assert item.response is not None
+                    yield ModelStreamEvent(kind="complete", response=item.response)
+                    return
+                yield item
+        except asyncio.CancelledError:
+            cancellation.set()
+            release_in_callback = True
+            worker.add_done_callback(self._finish_cancelled_worker)
+            raise
+        finally:
+            if not release_in_callback:
+                if not worker.done():
+                    # Closing an async generator early is also cancellation. Keep
+                    # the single-flight lock until its native iterator exits.
+                    cancellation.set()
+                    worker.add_done_callback(self._finish_cancelled_worker)
+                else:
+                    self._resident_model_id = (
+                        self._loaded.model_id if self._loaded is not None else None
+                    )
+                    self._last_used = time.monotonic()
+                    self._slot.release()
+
+    def acceleration_status(self) -> dict[str, Any]:
+        """Return stable JSON-safe acceleration state for an admin status view."""
+
+        acceleration = self._acceleration
+        return {
+            "state": self._acceleration_state,
+            "selectedBackend": acceleration.backend,
+            "selectedDevice": acceleration.device,
+            "offloadedLayers": acceleration.offloaded_layers,
+            "totalLayers": acceleration.total_layers,
+            "fallbackReason": acceleration.fallback_reason,
+        }
+
+    def _finish_cancelled_worker(self, task: asyncio.Task[Any]) -> None:
         try:
             task.exception()
         except asyncio.CancelledError:
@@ -388,9 +514,18 @@ class LlamaCppChatRuntime(ChatRuntime):
         return normalized
 
     def _complete_sync(self, request: ModelRequest, cancellation: threading.Event) -> ModelResponse:
+        return self._generate_sync(request, cancellation, emit_delta=None)
+
+    def _generate_sync(
+        self,
+        request: ModelRequest,
+        cancellation: threading.Event,
+        emit_delta: Callable[[ModelStreamEvent], None] | None,
+    ) -> ModelResponse:
         if cancellation.is_set():
             raise asyncio.CancelledError
         loaded = self._loaded
+        load_duration_ns = 0
         if loaded is None or loaded.model_id != request.model:
             # Drop this local reference before clearing the runtime-owned reference;
             # otherwise the old native weights remain alive during the next load.
@@ -398,13 +533,20 @@ class LlamaCppChatRuntime(ChatRuntime):
             self._unload_sync()
             self._loaded = self._load_model(request.model)
             loaded = self._loaded
+            load_duration_ns = loaded.load_duration_ns
         assert loaded is not None
 
         tools_by_name = {tool.name: tool for tool in request.tools}
         messages = [self._serialize_message(message) for message in request.messages]
         tools = [self._serialize_tool(tool) for tool in request.tools]
+        streamed_visible = False
+        prompt_duration_ns: int | None = None
+        generation_duration_ns: int | None = None
+        total_duration_ns = 0
+        result: Any | None = None
         try:
-            formatter = self._api_module().Jinja2ChatFormatter(
+            api = self._api_module()
+            formatter = api.Jinja2ChatFormatter(
                 template=loaded.chat_template,
                 eos_token=loaded.eos_token,
                 bos_token=loaded.bos_token,
@@ -454,55 +596,318 @@ class LlamaCppChatRuntime(ChatRuntime):
             stopping_criteria = _CombinedStoppingCriteria(
                 [*formatter_stopping_criteria, should_stop]
             )
-            result = loaded.model.create_completion(
-                prompt=encoded,
-                max_tokens=output_limit,
-                temperature=0.0,
+            prepared_response = SimpleNamespace(
+                prompt=prompt,
                 stop=stop,
                 stopping_criteria=stopping_criteria,
-                stream=False,
+                added_special=added_special,
             )
+            handler_factory = getattr(api, "chat_formatter_to_chat_completion_handler", None)
+            if not callable(handler_factory):
+                raise LlamaCppRuntimeError(
+                    "Lumi's embedded chat streaming interface is unavailable"
+                )
+            chat_handler = handler_factory(_PreparedChatFormatter(prepared_response))
+            old_chat_handler = getattr(loaded.model, "chat_handler", None)
+            started_ns = time.perf_counter_ns()
+            loaded.model.chat_handler = chat_handler
+            try:
+                result = loaded.model.create_chat_completion(
+                    messages=messages,
+                    tools=tools or None,
+                    temperature=0.0,
+                    max_tokens=output_limit,
+                    stream=emit_delta is not None,
+                )
+            finally:
+                loaded.model.chat_handler = old_chat_handler
+
+            text_parts: list[str] = []
+            total_chars = 0
+            structured_tool_parts: dict[int, dict[str, Any]] = {}
+            filter_visible = VisibleTextFilter(
+                require_final_channel=False,
+                initially_thinking=request.thinking,
+            )
+            if emit_delta is None:
+                choices = result.get("choices") if isinstance(result, Mapping) else None
+                choice = choices[0] if isinstance(choices, list) and choices else None
+                message = choice.get("message") if isinstance(choice, Mapping) else None
+                if not isinstance(message, Mapping):
+                    raise LlamaCppProtocolError(
+                        "The Qwen3.5 chat response returned a malformed completion"
+                    )
+                response_text = message.get("content")
+                if response_text is None:
+                    response_text = ""
+                if not isinstance(response_text, str):
+                    raise LlamaCppProtocolError(
+                        "The Qwen3.5 chat response returned malformed text"
+                    )
+                total_chars = len(response_text)
+                if total_chars > self.config.max_response_chars:
+                    raise LlamaCppProtocolError("The Qwen3.5 response is too large")
+                text = response_text
+                structured_calls = message.get("tool_calls")
+                if structured_calls:
+                    calls = _parse_chat_tool_calls(
+                        structured_calls,
+                        tools_by_name,
+                        self.config.max_tools,
+                    )
+                    content = ""
+                elif message.get("function_call"):
+                    raise LlamaCppProtocolError(
+                        "The Qwen3.5 response used an unsupported legacy function call"
+                    )
+                else:
+                    content, calls = _parse_model_response(
+                        text,
+                        tools_by_name,
+                        self.config.max_tools,
+                        initially_thinking=request.thinking,
+                    )
+            else:
+                first_generation_token_ns: int | None = None
+                structured_control = False
+
+                def discard_partial_turn() -> None:
+                    nonlocal streamed_visible
+                    if streamed_visible:
+                        emit_delta(ModelStreamEvent(kind="reset", reason="intermediate"))
+                        streamed_visible = False
+
+                for chunk in result:
+                    if cancellation.is_set():
+                        raise asyncio.CancelledError
+                    choices = chunk.get("choices") if isinstance(chunk, Mapping) else None
+                    choice = choices[0] if isinstance(choices, list) and choices else None
+                    delta = choice.get("delta") if isinstance(choice, Mapping) else None
+                    if not isinstance(delta, Mapping):
+                        raise LlamaCppProtocolError(
+                            "The Qwen3.5 chat stream returned a malformed chunk"
+                        )
+                    tool_calls = delta.get("tool_calls")
+                    if tool_calls:
+                        structured_control = True
+                        discard_partial_turn()
+                        _collect_chat_tool_call_deltas(
+                            tool_calls,
+                            structured_tool_parts,
+                            self.config.max_tools,
+                            self.config.max_response_chars,
+                        )
+                    if delta.get("function_call"):
+                        structured_control = True
+                        discard_partial_turn()
+                        raise LlamaCppProtocolError(
+                            "The Qwen3.5 stream used an unsupported legacy function call"
+                        )
+                    if structured_control:
+                        continue
+
+                    # Read exactly `delta.content`; reasoning_content and all other
+                    # provider-specific fields remain private and are never joined.
+                    chunk_text = delta.get("content")
+                    if chunk_text is None:
+                        continue
+                    if not isinstance(chunk_text, str):
+                        raise LlamaCppProtocolError(
+                            "The Qwen3.5 chat stream returned malformed text"
+                        )
+                    if chunk_text and first_generation_token_ns is None:
+                        first_generation_token_ns = time.perf_counter_ns()
+                        prompt_duration_ns = first_generation_token_ns - started_ns
+                    total_chars += len(chunk_text)
+                    if total_chars > self.config.max_response_chars:
+                        raise LlamaCppProtocolError("The Qwen3.5 response is too large")
+                    text_parts.append(chunk_text)
+                    visible = filter_visible.feed(chunk_text)
+                    if visible:
+                        streamed_visible = True
+                        emit_delta(ModelStreamEvent(kind="delta", text=visible))
+                    if filter_visible.consume_reset_required():
+                        discard_partial_turn()
+                    if filter_visible.suppressed:
+                        discard_partial_turn()
+                final_visible = filter_visible.finish()
+                if final_visible:
+                    streamed_visible = True
+                    emit_delta(ModelStreamEvent(kind="delta", text=final_visible))
+                if filter_visible.consume_reset_required():
+                    discard_partial_turn()
+                finished_ns = time.perf_counter_ns()
+                total_duration_ns = finished_ns - started_ns
+                if first_generation_token_ns is not None:
+                    generation_duration_ns = max(0, finished_ns - first_generation_token_ns)
+                text = "".join(text_parts)
+                calls = (
+                    _parse_chat_tool_call_parts(
+                        structured_tool_parts,
+                        tools_by_name,
+                        self.config.max_tools,
+                    )
+                    if structured_tool_parts
+                    else ()
+                )
+                if calls:
+                    content = ""
+                else:
+                    content, calls = _parse_model_response(
+                        text,
+                        tools_by_name,
+                        self.config.max_tools,
+                        initially_thinking=request.thinking,
+                    )
+                if calls:
+                    # Tool rounds are intermediate control flow. The agent will
+                    # publish the final post-tool answer as the canonical stream
+                    # completion after it clears these deltas.
+                    content = ""
+                    discard_partial_turn()
             if cancellation.is_set():
                 raise asyncio.CancelledError
-            choices = result.get("choices") if isinstance(result, Mapping) else None
-            text = choices[0].get("text") if isinstance(choices, list) and choices else None
+        except asyncio.CancelledError:
+            raise
         except (ValueError, LlamaCppRuntimeError):
             raise
         except Exception as error:
+            if loaded.acceleration.uses_gpu:
+                fallback_reason = "GPU inference failed; CPU will be used for later turns."
+                # Drop traceback frames that retain the failed model through the
+                # synchronous binding iterator before attempting a CPU reload.
+                error.__traceback__ = None
+                self._forced_cpu_reason = fallback_reason
+                self._acceleration = _cpu_choice(loaded.acceleration.total_layers, fallback_reason)
+                self._acceleration_state = "cpu_fallback"
+                close_result = getattr(result, "close", None)
+                if callable(close_result):
+                    try:
+                        close_result()
+                    except Exception:
+                        pass
+                result = None
+                self._loaded = None
+                loaded = None
+                gc.collect()
+                if streamed_visible and emit_delta is not None:
+                    emit_delta(ModelStreamEvent(kind="reset", reason="cpu_fallback"))
+                    streamed_visible = False
+                if not cancellation.is_set():
+                    self._loaded = self._load_model(request.model)
+                    return self._generate_sync(request, cancellation, emit_delta)
+                raise LlamaCppRuntimeError(
+                    "Embedded Qwen3.5 GPU inference failed; CPU fallback is ready"
+                ) from error
             raise LlamaCppRuntimeError("Embedded Qwen3.5 inference failed") from error
 
         if not isinstance(text, str) or len(text) > self.config.max_response_chars:
             raise LlamaCppProtocolError("The Qwen3.5 response is malformed or too large")
-        content, calls = _parse_model_response(text, tools_by_name, self.config.max_tools)
-        return ModelResponse(ChatMessage("assistant", content, tool_calls=calls))
+        return ModelResponse(
+            ChatMessage("assistant", content, tool_calls=calls),
+            prompt_tokens=prompt_tokens,
+            prompt_duration_ns=prompt_duration_ns,
+            generation_duration_ns=generation_duration_ns,
+            load_duration_ns=load_duration_ns,
+            total_duration_ns=total_duration_ns,
+        )
 
     def _load_model(self, model_id: str) -> _LoadedModel:
+        load_started_ns = time.perf_counter_ns()
         artifact = self.config.model_artifacts[model_id]
         model_dir = _verify_model_artifact(artifact, self._verified_models)
         spec = _require_spec(model_id)
         model_path = model_dir / spec.gguf_filename
         api = self._api_module()
         try:
-            model = api.Llama(
+            total_layers = _read_gguf_layer_count(model_path)
+        except LlamaCppRuntimeError:
+            total_layers = 0
+        if self.config.acceleration_mode == "cpu_only" or self._forced_cpu_reason is not None:
+            # CPU-only must not initialize or enumerate compiled GPU backends as
+            # part of Lumi's device-selection path. The same bypass applies when
+            # recovering from a failed GPU so a CPU reload does not reprobe it.
+            choice = _cpu_choice(total_layers, self._forced_cpu_reason)
+        else:
+            devices = _available_gpu_devices(api)
+            choice = choose_acceleration(
+                self.config.acceleration_mode,
+                devices,
+                model_size_bytes=spec.download_size_bytes,
+                total_layers=total_layers,
+                max_layers=self.config.n_gpu_layers,
+            )
+        self._acceleration = choice
+        self._acceleration_state = "cpu_fallback" if choice.fallback_reason else "ready"
+
+        def load_native(n_gpu_layers: int) -> Any:
+            options = dict(
                 model_path=str(model_path),
                 n_ctx=self.config.n_ctx,
                 n_batch=self.config.n_batch,
                 n_ubatch=self.config.n_ubatch,
                 n_threads=self.config.n_threads,
                 n_threads_batch=self.config.n_threads_batch,
-                n_gpu_layers=self.config.n_gpu_layers,
+                n_gpu_layers=n_gpu_layers,
                 use_mmap=self.config.use_mmap,
                 use_mlock=self.config.use_mlock,
                 verbose=False,
             )
+            if n_gpu_layers == 0:
+                # The pinned Python wrapper lacks llama.cpp's `--device none`.
+                # Disable every offload path it does expose in CPU mode.
+                options["offload_kqv"] = False
+                options["op_offload"] = False
+            return api.Llama(**options)
+
+        try:
+            model = load_native(choice.offloaded_layers)
+        except Exception as error:
+            if not choice.uses_gpu:
+                self._acceleration_state = "unavailable"
+                self._acceleration = _cpu_choice(total_layers, "The model could not be loaded.")
+                raise LlamaCppRuntimeError(
+                    "The selected Qwen3.5 model could not be loaded"
+                ) from error
+            fallback_reason = "The selected GPU backend could not initialize; using CPU."
+            self._forced_cpu_reason = fallback_reason
+            self._acceleration = _cpu_choice(total_layers, fallback_reason)
+            self._acceleration_state = "cpu_fallback"
+            try:
+                model = load_native(0)
+            except Exception as cpu_error:
+                self._acceleration_state = "unavailable"
+                raise LlamaCppRuntimeError(
+                    "The selected Qwen3.5 model could not be loaded"
+                ) from cpu_error
+        try:
             template = _read_chat_template(getattr(model, "metadata", None))
             eos_token = _model_token_text(model, "token_eos")
             bos_token = _model_token_text(model, "token_bos")
+            metadata_layers = _metadata_layer_count(getattr(model, "metadata", None))
+            if metadata_layers is not None:
+                total_layers = metadata_layers
+                if not self._acceleration.uses_gpu:
+                    self._acceleration = _cpu_choice(
+                        total_layers,
+                        self._acceleration.fallback_reason,
+                    )
+            self._acceleration_state = (
+                "cpu_fallback" if self._acceleration.fallback_reason else "ready"
+            )
         except LlamaCppRuntimeError:
             raise
         except Exception as error:
             raise LlamaCppRuntimeError("The selected Qwen3.5 model could not be loaded") from error
-        return _LoadedModel(model_id, model, template, eos_token, bos_token)
+        return _LoadedModel(
+            model_id,
+            model,
+            template,
+            eos_token,
+            bos_token,
+            self._acceleration,
+            time.perf_counter_ns() - load_started_ns,
+        )
 
     def _api_module(self) -> Any:
         if self._api is not None:
@@ -510,18 +915,153 @@ class LlamaCppChatRuntime(ChatRuntime):
         try:
             from types import SimpleNamespace
 
-            from llama_cpp import Llama
-            from llama_cpp.llama_chat_format import Jinja2ChatFormatter
+            import llama_cpp
+            import llama_cpp._ggml as llama_ggml
+            from llama_cpp._ctypes_extensions import load_shared_library
+            from llama_cpp.llama_chat_format import (
+                Jinja2ChatFormatter,
+                chat_formatter_to_chat_completion_handler,
+            )
         except (ImportError, OSError) as error:  # pragma: no cover - optional native dependency
             raise LlamaCppRuntimeError(
                 "Lumi's embedded runtime dependency is unavailable in this installation"
             ) from error
-        self._api = SimpleNamespace(Llama=Llama, Jinja2ChatFormatter=Jinja2ChatFormatter)
+        self._api = SimpleNamespace(
+            Llama=llama_cpp.Llama,
+            Jinja2ChatFormatter=Jinja2ChatFormatter,
+            chat_formatter_to_chat_completion_handler=chat_formatter_to_chat_completion_handler,
+            llama_cpp=llama_cpp,
+            ggml=llama_ggml.libggml,
+            ggml_base=load_shared_library(
+                "ggml-base", Path(llama_cpp.__file__).resolve().parent / "lib"
+            ),
+        )
         return self._api
 
     def _unload_sync(self) -> None:
         self._loaded = None
         gc.collect()
+        if self._acceleration_state != "unavailable":
+            self._acceleration_state = "not_loaded"
+            self._acceleration = _cpu_choice(0, None)
+
+
+def _available_gpu_devices(api: Any) -> tuple[GpuDevice, ...]:
+    """Prefer a binding-provided device hook, then use ggml's stable C API."""
+
+    list_devices = getattr(api, "list_gpu_devices", None)
+    if callable(list_devices):
+        try:
+            devices = tuple(list_devices())
+            return tuple(device for device in devices if isinstance(device, GpuDevice))
+        except Exception:
+            return ()
+    native_module = getattr(api, "llama_cpp", None)
+    backend_init = getattr(native_module, "llama_backend_init", None)
+    if callable(backend_init):
+        try:
+            backend_init()
+        except Exception:
+            return ()
+    return detect_gpu_devices(api)
+
+
+def _metadata_layer_count(metadata: Any) -> int | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    values = [
+        value
+        for key, value in metadata.items()
+        if isinstance(key, str) and key.endswith(".block_count")
+    ]
+    if len(values) != 1:
+        return None
+    value = values[0]
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 512:
+        return None
+    return value
+
+
+def _read_gguf_layer_count(path: Path) -> int:
+    """Read the pinned GGUF's architecture block count without loading its weights."""
+
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as stream:
+            if stream.read(4) != b"GGUF":
+                raise ValueError("invalid GGUF header")
+            version, = _read_gguf_struct(stream, "<I")
+            if version not in {1, 2, 3}:
+                raise ValueError("unsupported GGUF version")
+            _tensor_count, metadata_count = _read_gguf_struct(stream, "<QQ")
+            if metadata_count > 100_000:
+                raise ValueError("excessive GGUF metadata count")
+            block_count: int | None = None
+            for _ in range(metadata_count):
+                key = _read_gguf_string(stream, size, decode=True)
+                value_type, = _read_gguf_struct(stream, "<I")
+                if key.endswith(".block_count") and value_type in {4, 10}:
+                    block_count, = _read_gguf_struct(
+                        stream,
+                        "<I" if value_type == 4 else "<Q",
+                    )
+                else:
+                    _skip_gguf_value(stream, size, value_type)
+            if isinstance(block_count, bool) or not isinstance(block_count, int):
+                raise ValueError("GGUF block count is missing")
+            if not 1 <= block_count <= 512:
+                raise ValueError("GGUF block count is outside the supported range")
+            return block_count
+    except (OSError, EOFError, UnicodeDecodeError, ValueError, struct.error) as error:
+        raise LlamaCppRuntimeError(
+            "The selected Qwen3.5 model layer layout could not be measured safely"
+        ) from error
+
+
+def _read_gguf_struct(stream: Any, format_string: str) -> tuple[int, ...]:
+    size = struct.calcsize(format_string)
+    payload = stream.read(size)
+    if len(payload) != size:
+        raise EOFError("truncated GGUF metadata")
+    return struct.unpack(format_string, payload)
+
+
+def _read_gguf_string(stream: Any, file_size: int, *, decode: bool) -> str:
+    length, = _read_gguf_struct(stream, "<Q")
+    position = stream.tell()
+    if length > file_size - position or (decode and length > 65_535):
+        raise ValueError("invalid GGUF string length")
+    payload = stream.read(length) if decode else b""
+    if not decode:
+        stream.seek(length, os.SEEK_CUR)
+        return ""
+    if len(payload) != length:
+        raise EOFError("truncated GGUF string")
+    return payload.decode("ascii")
+
+
+def _skip_gguf_value(stream: Any, file_size: int, value_type: int, *, depth: int = 0) -> None:
+    scalar_sizes = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
+    if value_type in scalar_sizes:
+        _seek_gguf(stream, file_size, scalar_sizes[value_type])
+        return
+    if value_type == 8:
+        _read_gguf_string(stream, file_size, decode=False)
+        return
+    if value_type != 9 or depth >= 8:
+        raise ValueError("unsupported GGUF metadata value")
+    item_type, = _read_gguf_struct(stream, "<I")
+    count, = _read_gguf_struct(stream, "<Q")
+    if count > 1_000_000:
+        raise ValueError("excessive GGUF array size")
+    for _ in range(count):
+        _skip_gguf_value(stream, file_size, item_type, depth=depth + 1)
+
+
+def _seek_gguf(stream: Any, file_size: int, amount: int) -> None:
+    if amount < 0 or stream.tell() + amount > file_size:
+        raise EOFError("truncated GGUF metadata")
+    stream.seek(amount, os.SEEK_CUR)
 
 
 def _read_chat_template(metadata: Any) -> str:
@@ -705,7 +1245,11 @@ def _parse_model_response(
     text: str,
     tools: Mapping[str, ToolDefinition],
     max_tools: int,
+    *,
+    initially_thinking: bool = False,
 ) -> tuple[str, tuple[ToolCall, ...]]:
+    if _TOOL_CONTROL_TOKEN_RE.search(text):
+        raise LlamaCppProtocolError("Qwen3.5 returned unsupported tool-control tokens")
     matches = list(_TOOL_CALL_RE.finditer(text))
     if text.count("<tool_call>") != len(matches) or text.count("</tool_call>") != len(matches):
         raise LlamaCppProtocolError("The Qwen3.5 tool-call output is malformed")
@@ -747,22 +1291,135 @@ def _parse_model_response(
         previous_end = match.end()
     pieces.append(text[previous_end:])
 
-    content = "".join(pieces)
-    # Qwen3.5 may mark analysis and final channels with special tokens in a GGUF
-    # completion. Only keep the final channel when one is present.
-    channel_markers = list(_CHANNEL_RE.finditer(content))
-    final_markers = [marker for marker in channel_markers if marker.group(1) == "final"]
-    if final_markers:
-        content = content[final_markers[-1].end() :]
-    elif any(marker.group(1) == "analysis" for marker in channel_markers):
-        first_analysis = next(marker for marker in channel_markers if marker.group(1) == "analysis")
-        content = content[: first_analysis.start()]
-
-    content = _THINK_RE.sub("", content)
-    if "<think>" in content:
-        content = content.split("<think>", 1)[0]
-    content = _SPECIAL_TOKEN_RE.sub("", content).strip()
+    raw_content = "".join(pieces)
+    has_channels = bool(_CHANNEL_RE.search(raw_content)) or "<|channel|>" in raw_content
+    filter_visible = VisibleTextFilter(
+        require_final_channel=has_channels,
+        initially_thinking=initially_thinking,
+    )
+    content = filter_visible.feed(raw_content) + filter_visible.finish()
+    # The agent will execute tool calls before accepting a user-facing answer.
+    # Keeping sanitized preamble text here preserves the non-streaming response
+    # contract; streaming clients clear any such text on the intermediate reset.
     return content, tuple(calls)
+
+
+def _collect_chat_tool_call_deltas(
+    deltas: Any,
+    collected: dict[int, dict[str, Any]],
+    max_tools: int,
+    max_chars: int,
+) -> None:
+    if not isinstance(deltas, list) or len(deltas) > max_tools:
+        raise LlamaCppProtocolError("The Qwen3.5 stream returned malformed tool calls")
+    for delta in deltas:
+        if not isinstance(delta, Mapping):
+            raise LlamaCppProtocolError("The Qwen3.5 stream returned malformed tool calls")
+        index = delta.get("index")
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < max_tools:
+            raise LlamaCppProtocolError("The Qwen3.5 stream returned an invalid tool index")
+        entry = collected.setdefault(index, {"id": "", "name": "", "arguments": ""})
+        call_id = delta.get("id")
+        if call_id is not None:
+            if not isinstance(call_id, str) or len(call_id) > 128:
+                raise LlamaCppProtocolError("The Qwen3.5 stream returned an invalid tool ID")
+            entry["id"] = call_id
+        function = delta.get("function")
+        if function is None:
+            continue
+        if not isinstance(function, Mapping):
+            raise LlamaCppProtocolError("The Qwen3.5 stream returned malformed tool calls")
+        name = function.get("name")
+        if name is not None:
+            if not isinstance(name, str) or len(name) > 64:
+                raise LlamaCppProtocolError("The Qwen3.5 stream returned an invalid tool name")
+            entry["name"] += name
+        arguments = function.get("arguments")
+        if arguments is not None:
+            if not isinstance(arguments, str):
+                raise LlamaCppProtocolError(
+                    "The Qwen3.5 stream returned malformed tool arguments"
+                )
+            entry["arguments"] += arguments
+        if sum(len(value["arguments"]) for value in collected.values()) > max_chars:
+            raise LlamaCppProtocolError("The Qwen3.5 tool response is too large")
+
+
+def _parse_chat_tool_calls(
+    value: Any,
+    tools: Mapping[str, ToolDefinition],
+    max_tools: int,
+) -> tuple[ToolCall, ...]:
+    if not isinstance(value, list) or len(value) > max_tools:
+        raise LlamaCppProtocolError("The Qwen3.5 chat response returned malformed tool calls")
+    collected: dict[int, dict[str, Any]] = {}
+    for index, call in enumerate(value):
+        if not isinstance(call, Mapping):
+            raise LlamaCppProtocolError("The Qwen3.5 chat response returned malformed tool calls")
+        function = call.get("function")
+        if not isinstance(function, Mapping):
+            raise LlamaCppProtocolError("The Qwen3.5 chat response returned malformed tool calls")
+        arguments = function.get("arguments", "{}")
+        if isinstance(arguments, dict):
+            try:
+                arguments = json.dumps(arguments, ensure_ascii=False, allow_nan=False)
+            except (TypeError, ValueError) as error:
+                raise LlamaCppProtocolError(
+                    "The Qwen3.5 chat response returned malformed tool arguments"
+                ) from error
+        if not isinstance(arguments, str) or len(arguments) > 200_000:
+            raise LlamaCppProtocolError(
+                "The Qwen3.5 chat response returned malformed tool arguments"
+            )
+        call_id = call.get("id")
+        collected[index] = {
+            "id": call_id if isinstance(call_id, str) else "",
+            "name": function.get("name", ""),
+            "arguments": arguments,
+        }
+    return _parse_chat_tool_call_parts(collected, tools, max_tools)
+
+
+def _parse_chat_tool_call_parts(
+    collected: Mapping[int, Mapping[str, Any]],
+    tools: Mapping[str, ToolDefinition],
+    max_tools: int,
+) -> tuple[ToolCall, ...]:
+    if len(collected) > max_tools:
+        raise LlamaCppProtocolError("Qwen3.5 returned too many tool calls")
+    calls: list[ToolCall] = []
+    for index in sorted(collected):
+        entry = collected[index]
+        name = entry.get("name")
+        tool = tools.get(name) if isinstance(name, str) else None
+        if tool is None or not tool.read_only:
+            raise LlamaCppProtocolError("Qwen3.5 returned an unregistered tool call")
+        raw_arguments = entry.get("arguments")
+        if raw_arguments == "":
+            arguments: Any = {}
+        else:
+            try:
+                arguments = json.loads(raw_arguments)
+            except (TypeError, json.JSONDecodeError) as error:
+                raise LlamaCppProtocolError(
+                    "Qwen3.5 returned malformed tool arguments"
+                ) from error
+        if not isinstance(arguments, dict):
+            raise LlamaCppProtocolError("Qwen3.5 tool arguments must be a JSON object")
+        try:
+            json.dumps(arguments, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise LlamaCppProtocolError(
+                "Qwen3.5 returned malformed tool arguments"
+            ) from error
+        required = tool.parameters.get("required", [])
+        if isinstance(required, list) and any(key not in arguments for key in required):
+            raise LlamaCppProtocolError("The Qwen3.5 tool call is missing a required argument")
+        call_id = entry.get("id")
+        if not isinstance(call_id, str) or not call_id or len(call_id) > 128:
+            call_id = uuid4().hex
+        calls.append(ToolCall(call_id, name, arguments))
+    return tuple(calls)
 
 
 def _parse_argument(value: str, tool: ToolDefinition, name: str) -> Any:

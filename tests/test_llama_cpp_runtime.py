@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import struct
 import tempfile
 import threading
 import unittest
@@ -26,9 +27,25 @@ from lumi.runtime.llama_cpp import (
     LlamaCppRuntimeError,
     VerifiedModelArtifact,
 )
+from lumi.runtime.acceleration import GpuDevice, choose_acceleration
 
 _GGUF_FILENAME = "Qwen_Qwen3.5-test-Q4_K_M.gguf"
-_GGUF_BYTES = b"small fake GGUF bytes"
+
+
+def _gguf_string(value: str) -> bytes:
+    encoded = value.encode("ascii")
+    return struct.pack("<Q", len(encoded)) + encoded
+
+
+_GGUF_BYTES = (
+    b"GGUF"
+    + struct.pack("<IQQ", 3, 0, 2)
+    + _gguf_string("general.architecture")
+    + struct.pack("<I", 8)
+    + _gguf_string("qwen3")
+    + _gguf_string("qwen3.block_count")
+    + struct.pack("<II", 4, 28)
+)
 
 
 def _spec(model_id: str) -> Qwen35ModelSpec:
@@ -68,7 +85,11 @@ class FakeModel:
         self.api = api
         self.model_path = model_path
         self.options = options
-        self.metadata = {"tokenizer.chat_template": "Qwen3.5 native Jinja chat template"}
+        self.chat_handler: Any = None
+        self.metadata = {
+            "tokenizer.chat_template": "Qwen3.5 native Jinja chat template",
+            "qwen3.block_count": 28,
+        }
 
     def token_eos(self) -> int:
         return 2
@@ -85,7 +106,7 @@ class FakeModel:
         self.api.tokenized_prompts.append((prompt, add_bos, special))
         return list(range(self.api.prompt_token_count))
 
-    def create_completion(self, **options: Any) -> dict[str, Any]:
+    def create_completion(self, **options: Any) -> Any:
         if not callable(options.get("stopping_criteria")):
             raise TypeError("llama.cpp stopping criteria must be callable")
         self.api.generation_started.set()
@@ -98,21 +119,56 @@ class FakeModel:
         if self.api.fail_generation:
             raise RuntimeError("simulated native generation failure")
         self.api.generation_calls += 1
+        if options.get("stream"):
+            return self._stream_completion(options)
         return {"choices": [{"text": self.api.output}]}
+
+    def create_chat_completion(self, **options: Any) -> Any:
+        if not callable(self.chat_handler):
+            raise RuntimeError("A chat handler is required")
+        self.api.chat_completion_options.append(options.copy())
+        return self.chat_handler(llama=self, **options)
+
+    def _stream_completion(self, options: dict[str, Any]):
+        if self.api.block_generation:
+            self.api.allow_generation.wait(timeout=3)
+            if options["stopping_criteria"]([], []):
+                return
+        chunks = self.api.stream_chunks if self.api.stream_chunks is not None else [self.api.output]
+        for index, chunk in enumerate(chunks):
+            should_fail = self.api.fail_after_stream_chunks == index
+            if self.api.fail_gpu_after_stream_chunks and not self.options.get("n_gpu_layers"):
+                should_fail = False
+            if should_fail:
+                raise RuntimeError("simulated mid-stream native generation failure")
+            if index == 0 and self.api.block_after_first_stream_chunk:
+                self.api.first_stream_chunk_started.set()
+            yield {"choices": [{"text": chunk}]}
+            if index == 0 and self.api.block_after_first_stream_chunk:
+                self.api.allow_next_stream_chunk.wait(timeout=3)
 
 
 class FakeLlamaAPI:
-    def __init__(self, output: str) -> None:
+    def __init__(self, output: str, *, stream_chunks: list[str] | None = None) -> None:
         self.output = output
+        self.stream_chunks = stream_chunks
         self.loads: list[str] = []
         self.model_options: list[dict[str, Any]] = []
         self.formatter_options: list[dict[str, Any]] = []
         self.formatted: list[dict[str, Any]] = []
         self.tokenized_prompts: list[tuple[bytes, bool, bool]] = []
         self.completion_options: list[dict[str, Any]] = []
+        self.chat_completion_options: list[dict[str, Any]] = []
+        self.chat_function_call: dict[str, Any] | None = None
         self.live_models: weakref.WeakSet[FakeModel] = weakref.WeakSet()
         self.prompt_token_count = 3
         self.fail_generation = False
+        self.fail_gpu_init = False
+        self.fail_after_stream_chunks: int | None = None
+        self.fail_gpu_after_stream_chunks = False
+        self.chat_stream_chunks: list[dict[str, Any]] | None = None
+        self.block_after_first_stream_chunk = False
+        self.gpu_devices: tuple[GpuDevice, ...] = ()
         self.block_generation = False
         self.generation_calls = 0
         self.formatter_stopping_criteria: list[Any] = []
@@ -120,10 +176,85 @@ class FakeLlamaAPI:
         self.generation_started = threading.Event()
         self.allow_generation = threading.Event()
         self.allow_generation.set()
+        self.first_stream_chunk_started = threading.Event()
+        self.allow_next_stream_chunk = threading.Event()
+        self.allow_next_stream_chunk.set()
         self.Jinja2ChatFormatter = lambda **options: FakeFormatter(self, **options)
+        self.chat_formatter_to_chat_completion_handler = self._make_chat_handler
+
+    def _make_chat_handler(self, formatter: Any):
+        def handle(
+            *,
+            llama: FakeModel,
+            messages: list[dict[str, Any]],
+            tools: list[dict[str, Any]] | None = None,
+            temperature: float = 0.0,
+            max_tokens: int = 0,
+            stream: bool = False,
+            **kwargs: Any,
+        ):
+            formatted = formatter(
+                messages=messages,
+                tools=tools,
+                enable_thinking=kwargs.get("enable_thinking", False),
+            )
+            prompt = llama.tokenize(
+                formatted.prompt.encode("utf-8"),
+                add_bos=not formatted.added_special,
+                special=True,
+            )
+            completion = llama.create_completion(
+                prompt=prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stop=formatted.stop,
+                stopping_criteria=formatted.stopping_criteria,
+                stream=stream,
+            )
+            if not stream:
+                message = {
+                    "role": "assistant",
+                    "content": completion["choices"][0]["text"],
+                }
+                if self.chat_function_call is not None:
+                    message["function_call"] = self.chat_function_call
+                return {
+                    "choices": [
+                        {
+                            "message": message
+                        }
+                    ]
+                }
+
+            if self.chat_stream_chunks is not None:
+                # Drive the native iterator for cancellation/failure behavior, then
+                # return explicit binding-shaped chunks for protocol edge cases.
+                list(completion)
+                return iter(self.chat_stream_chunks)
+
+            def stream_chat_chunks():
+                for chunk in completion:
+                    yield {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "content": chunk["choices"][0]["text"],
+                                    "reasoning_content": "private reasoning must not appear",
+                                }
+                            }
+                        ]
+                    }
+
+            return stream_chat_chunks()
+
+        return handle
 
     def Llama(self, **options: Any) -> FakeModel:
         model_path = options["model_path"]
+        if options["n_gpu_layers"] and self.fail_gpu_init:
+            self.loads.append(model_path)
+            self.model_options.append(options)
+            raise RuntimeError("simulated GPU initialization failure")
         if self.live_models:
             raise AssertionError("The previous native model must unload before switching")
         self.loads.append(model_path)
@@ -131,6 +262,9 @@ class FakeLlamaAPI:
         model = FakeModel(self, model_path, options)
         self.live_models.add(model)
         return model
+
+    def list_gpu_devices(self) -> tuple[GpuDevice, ...]:
+        return self.gpu_devices
 
 
 class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
@@ -264,13 +398,612 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(criteria([], []))
         await runtime.close()
 
-    async def test_thinking_is_forwarded_per_request(self) -> None:
+    async def test_thinking_is_applied_by_template_without_unsupported_binding_argument(self) -> None:
         api = FakeLlamaAPI("Answer")
         runtime = self.make_runtime(api)
         await runtime.open()
         await runtime.complete(self.make_request(thinking=False))
         await runtime.complete(self.make_request(thinking=True))
         self.assertEqual([item["enable_thinking"] for item in api.formatted], [False, True])
+        self.assertTrue(
+            all("enable_thinking" not in options for options in api.chat_completion_options)
+        )
+        await runtime.close()
+
+    async def test_automatic_acceleration_selects_gpu_and_honors_layer_cap(self) -> None:
+        api = FakeLlamaAPI("Answer")
+        api.gpu_devices = (
+            GpuDevice("cuda", "NVIDIA test device", 4_000_000_000, 8_000_000_000),
+        )
+        runtime = self.make_runtime(api, acceleration_mode="automatic", n_gpu_layers=12)
+        await runtime.open()
+
+        await runtime.complete(self.make_request())
+
+        offloaded = api.model_options[0]["n_gpu_layers"]
+        self.assertGreater(offloaded, 0)
+        self.assertEqual(offloaded, 12)
+        self.assertEqual(runtime.acceleration_status()["state"], "ready")
+        self.assertEqual(runtime.acceleration_status()["selectedBackend"], "cuda")
+        self.assertEqual(runtime.acceleration_status()["offloadedLayers"], offloaded)
+        self.assertEqual(runtime.acceleration_status()["totalLayers"], 28)
+        await runtime.close()
+
+    async def test_automatic_acceleration_uses_vram_for_partial_layer_offload(self) -> None:
+        choice = choose_acceleration(
+            "automatic",
+            (GpuDevice("cuda", "NVIDIA test device", 1_500_000_000, 4_000_000_000),),
+            model_size_bytes=1_400_000_000,
+            total_layers=28,
+        )
+
+        self.assertEqual(choice.backend, "cuda")
+        self.assertGreater(choice.offloaded_layers, 0)
+        self.assertLess(choice.offloaded_layers, choice.total_layers)
+
+    async def test_insufficient_vram_falls_back_to_cpu(self) -> None:
+        api = FakeLlamaAPI("Answer")
+        api.gpu_devices = (GpuDevice("vulkan", "AMD test GPU", 700_000_000, 1_000_000_000),)
+        runtime = self.make_runtime(api, acceleration_mode="gpu_preferred")
+        await runtime.open()
+
+        await runtime.complete(self.make_request())
+
+        self.assertEqual(api.model_options[0]["n_gpu_layers"], 0)
+        status = runtime.acceleration_status()
+        self.assertEqual(status["state"], "cpu_fallback")
+        self.assertEqual(status["selectedBackend"], "cpu")
+        self.assertIn("memory", status["fallbackReason"].casefold())
+        await runtime.close()
+
+    async def test_gpu_model_initialization_failure_retries_cpu(self) -> None:
+        api = FakeLlamaAPI("Answer")
+        api.gpu_devices = (
+            GpuDevice("cuda", "NVIDIA test device", 4_000_000_000, 8_000_000_000),
+        )
+        api.fail_gpu_init = True
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        answer = await runtime.complete(self.make_request())
+
+        self.assertEqual(answer.message.content, "Answer")
+        self.assertGreater(api.model_options[0]["n_gpu_layers"], 0)
+        self.assertEqual(api.model_options[1]["n_gpu_layers"], 0)
+        self.assertFalse(api.model_options[1]["offload_kqv"])
+        self.assertFalse(api.model_options[1]["op_offload"])
+        self.assertEqual(runtime.acceleration_status()["state"], "cpu_fallback")
+        await runtime.close()
+
+    async def test_cpu_only_mode_ignores_detected_gpu(self) -> None:
+        api = FakeLlamaAPI("Answer")
+        api.gpu_devices = (
+            GpuDevice("hip", "AMD Radeon test", 8_000_000_000, 12_000_000_000),
+        )
+        runtime = self.make_runtime(api, acceleration_mode="cpu_only")
+        await runtime.open()
+
+        with patch(
+            "lumi.runtime.llama_cpp._available_gpu_devices",
+            side_effect=AssertionError("CPU-only mode must not enumerate GPU devices"),
+        ) as detect_devices:
+            await runtime.complete(self.make_request())
+        detect_devices.assert_not_called()
+
+        self.assertEqual(api.model_options[0]["n_gpu_layers"], 0)
+        self.assertFalse(api.model_options[0]["offload_kqv"])
+        self.assertFalse(api.model_options[0]["op_offload"])
+        status = runtime.acceleration_status()
+        self.assertEqual(status["state"], "ready")
+        self.assertEqual(status["selectedBackend"], "cpu")
+        self.assertEqual(status["selectedDevice"], "CPU")
+        self.assertEqual(status["offloadedLayers"], 0)
+        self.assertIsNone(status["fallbackReason"])
+        await runtime.close()
+
+    async def test_stream_emits_incremental_visible_text_and_one_completion(self) -> None:
+        api = FakeLlamaAPI(
+            "unused",
+            stream_chunks=["<|channel|>final\nA short", " answer", "."],
+        )
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        events = [event async for event in runtime.stream(self.make_request())]
+
+        deltas = [event.text for event in events if event.kind == "delta"]
+        completions = [event for event in events if event.kind == "complete"]
+        self.assertEqual("".join(deltas), "A short answer.")
+        self.assertEqual(len(completions), 1)
+        self.assertEqual(completions[0].response.message.content, "A short answer.")
+        self.assertNotIn(
+            "private reasoning must not appear",
+            "".join(item for item in deltas if item is not None),
+        )
+        self.assertTrue(api.completion_options[0]["stream"])
+        self.assertTrue(api.chat_completion_options[0]["stream"])
+        await runtime.close()
+
+    async def test_stream_plain_content_without_tools_does_not_require_final_channel(self) -> None:
+        api = FakeLlamaAPI(
+            "unused",
+            stream_chunks=["A plain", " assistant", " response."],
+        )
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        events = [event async for event in runtime.stream(self.make_request())]
+
+        deltas = [event.text for event in events if event.kind == "delta"]
+        self.assertEqual("".join(deltas), "A plain assistant response.")
+        self.assertEqual(events[-1].response.message.content, "A plain assistant response.")
+        await runtime.close()
+
+    async def test_tool_enabled_plain_final_response_without_prompt_prefix_is_visible(self) -> None:
+        api = FakeLlamaAPI("unused", stream_chunks=["Safe response without a channel."])
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        events = [
+            event
+            async for event in runtime.stream(self.make_request(tools=(self.tool,)))
+        ]
+
+        self.assertEqual([event.kind for event in events], ["delta", "complete"])
+        self.assertEqual(events[0].text, "Safe response without a channel.")
+        self.assertEqual(events[1].response.message.content, "Safe response without a channel.")
+        await runtime.close()
+
+    async def test_thinking_enabled_stream_hides_prompt_prefixed_reasoning_with_tools(self) -> None:
+        api = FakeLlamaAPI(
+            "unused",
+            stream_chunks=["private reasoning</think>\n\nSafe answer after the prompt prefix."],
+        )
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        events = [
+            event
+            async for event in runtime.stream(
+                self.make_request(thinking=True, tools=(self.tool,))
+            )
+        ]
+
+        self.assertEqual([event.kind for event in events], ["delta", "complete"])
+        self.assertEqual(events[0].text, "Safe answer after the prompt prefix.")
+        self.assertEqual(
+            events[1].response.message.content,
+            "Safe answer after the prompt prefix.",
+        )
+        await runtime.close()
+
+    async def test_nonstream_tool_enabled_responses_follow_qwen_prompt_prefix(self) -> None:
+        cases = (
+            (False, "Safe answer without a prompt prefix.", "Safe answer without a prompt prefix."),
+            (
+                True,
+                "private reasoning</think>\n\nSafe answer after the prompt prefix.",
+                "Safe answer after the prompt prefix.",
+            ),
+        )
+        for thinking, output, expected in cases:
+            with self.subTest(thinking=thinking):
+                api = FakeLlamaAPI(output)
+                runtime = self.make_runtime(api)
+                await runtime.open()
+
+                response = await runtime.complete(
+                    self.make_request(thinking=thinking, tools=(self.tool,))
+                )
+
+                self.assertEqual(response.message.content, expected)
+                self.assertNotIn("private reasoning", response.message.content)
+                await runtime.close()
+
+    async def test_thinking_tool_call_body_without_prompt_prefix_hides_arguments(self) -> None:
+        api = FakeLlamaAPI(
+            "unused",
+            stream_chunks=[
+                "private reasoning</think>\n"
+                "<tool_call><function=catalog_search>"
+                "<parameter=query>Fate/Zero secret</parameter></function></tool_call>"
+            ],
+        )
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        events = [
+            event
+            async for event in runtime.stream(
+                self.make_request(thinking=True, tools=(self.tool,))
+            )
+        ]
+
+        self.assertEqual([event.kind for event in events], ["complete"])
+        self.assertEqual(events[0].response.message.content, "")
+        self.assertEqual(events[0].response.message.tool_calls[0].arguments, {"query": "Fate/Zero secret"})
+        await runtime.close()
+
+    async def test_stream_filters_reasoning_and_tool_call_transitions(self) -> None:
+        api = FakeLlamaAPI(
+            "unused",
+            stream_chunks=[
+                "<|channel|>analysis private planning\n",
+                "<|channel|>final Checking now.",
+                "<tool_call><function=catalog_search>",
+                "<parameter=query>Fate/Zero</parameter></function></tool_call>",
+                "<|channel|>final This text follows a tool call.",
+            ],
+        )
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        events = [event async for event in runtime.stream(self.make_request(tools=(self.tool,)))]
+
+        self.assertEqual([event.kind for event in events], ["delta", "reset", "complete"])
+        self.assertEqual(events[0].text, "Checking now.")
+        self.assertEqual(events[1].reason, "intermediate")
+        self.assertEqual(events[2].response.message.content, "")
+        self.assertEqual(events[2].response.message.tool_calls[0].name, "catalog_search")
+        await runtime.close()
+
+    async def test_stream_ignores_reasoning_and_assembles_structured_tool_deltas(self) -> None:
+        api = FakeLlamaAPI("unused")
+        api.chat_stream_chunks = [
+            {"choices": [{"delta": {"role": "assistant"}}]},
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "reasoning_content": "private thought",
+                            "content": "Visible draft before the tool call",
+                        }
+                    }
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call-1",
+                                    "function": {
+                                        "name": "catalog_search",
+                                        "arguments": '{"query":"Fate',
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "function": {"arguments": '/Zero"}'},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        ]
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        events = [event async for event in runtime.stream(self.make_request(tools=(self.tool,)))]
+
+        self.assertEqual([event.kind for event in events], ["delta", "reset", "complete"])
+        self.assertEqual(events[0].text, "Visible draft before the tool call")
+        self.assertEqual(events[1].reason, "intermediate")
+        visible_events = "".join(event.text or "" for event in events)
+        self.assertNotIn("Fate", visible_events)
+        self.assertNotIn("private thought", visible_events)
+        response = events[2].response
+        self.assertEqual(response.message.content, "")
+        self.assertEqual(response.message.tool_calls[0].call_id, "call-1")
+        self.assertEqual(response.message.tool_calls[0].name, "catalog_search")
+        self.assertEqual(response.message.tool_calls[0].arguments, {"query": "Fate/Zero"})
+        self.assertEqual(api.chat_completion_options[0]["tools"][0]["function"]["name"], "catalog_search")
+        await runtime.close()
+
+    async def test_structured_tool_call_resets_visible_preamble_before_control_chunks(self) -> None:
+        api = FakeLlamaAPI("unused")
+        api.chat_stream_chunks = [
+            {
+                "choices": [
+                    {"delta": {"content": "<|channel|>final Safe preamble"}}
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call-private",
+                                    "function": {
+                                        "name": "catalog_search",
+                                        "arguments": '{"query":"secret term"}',
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        ]
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        events = [event async for event in runtime.stream(self.make_request(tools=(self.tool,)))]
+
+        self.assertEqual([event.kind for event in events], ["delta", "reset", "complete"])
+        self.assertEqual(events[0].text, "Safe preamble")
+        self.assertEqual(events[1].reason, "intermediate")
+        visible_events = "".join(event.text or "" for event in events)
+        self.assertNotIn("secret term", visible_events)
+        self.assertEqual(events[2].response.message.content, "")
+        self.assertEqual(events[2].response.message.tool_calls[0].arguments, {"query": "secret term"})
+        await runtime.close()
+
+    async def test_stream_resets_unmarked_prefix_when_later_channel_changes_visibility(self) -> None:
+        api = FakeLlamaAPI(
+            "unused",
+            stream_chunks=[
+                "Unmarked prefix",
+                "<|channel|>analysis\nprivate reasoning",
+                "<|channel|>final\nVisible final answer",
+            ],
+        )
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        events = [event async for event in runtime.stream(self.make_request())]
+
+        assembled: list[str] = []
+        for event in events:
+            if event.kind == "reset":
+                assembled.clear()
+            elif event.kind == "delta":
+                assembled.append(event.text or "")
+        completion = events[-1].response.message.content
+        self.assertEqual(
+            [event.kind for event in events],
+            ["delta", "reset", "delta", "complete"],
+        )
+        self.assertEqual(assembled, ["Visible final answer"])
+        self.assertEqual("".join(assembled), completion)
+        self.assertNotIn("private reasoning", "".join(assembled))
+        await runtime.close()
+
+    async def test_unparsed_qwen_tool_tokens_reset_prefix_and_fail_closed(self) -> None:
+        api = FakeLlamaAPI("unused")
+        api.chat_stream_chunks = [
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "content": (
+                                '<|channel|>final Safe prefix <|tool_call_begin|>'
+                                'catalog_search <|tool_call_argument_begin|>'
+                                '{"query":"private argument"}<|tool_call_end|>'
+                            )
+                        }
+                    }
+                ]
+            }
+        ]
+        runtime = self.make_runtime(api)
+        await runtime.open()
+        events = []
+
+        with self.assertRaisesRegex(LlamaCppProtocolError, "unsupported tool-control"):
+            async for event in runtime.stream(self.make_request(tools=(self.tool,))):
+                events.append(event)
+
+        self.assertEqual([event.kind for event in events], ["delta", "reset"])
+        self.assertEqual(events[0].text, "Safe prefix")
+        self.assertEqual(events[1].reason, "intermediate")
+        self.assertNotIn("private argument", "".join(event.text or "" for event in events))
+        await runtime.close()
+
+    async def test_unparsed_qwen_tool_tokens_cannot_escape_nonstream_completion(self) -> None:
+        api = FakeLlamaAPI(
+            '<|channel|>final Visible <|tool_call_begin|>catalog_search '
+            '<|tool_call_argument_begin|>{"query":"private argument"}<|tool_call_end|>'
+        )
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        with self.assertRaisesRegex(LlamaCppProtocolError, "unsupported tool-control"):
+            await runtime.complete(self.make_request(tools=(self.tool,)))
+
+        await runtime.close()
+
+    async def test_legacy_function_call_is_rejected_without_returning_preamble(self) -> None:
+        api = FakeLlamaAPI("Visible preamble")
+        api.chat_function_call = {
+            "name": "catalog_search",
+            "arguments": '{"query":"private term"}',
+        }
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        with self.assertRaisesRegex(LlamaCppProtocolError, "unsupported legacy function call"):
+            await runtime.complete(self.make_request(tools=(self.tool,)))
+
+        await runtime.close()
+
+    async def test_legacy_stream_function_call_resets_and_rejects_without_arguments(self) -> None:
+        api = FakeLlamaAPI("unused")
+        api.chat_stream_chunks = [
+            {"choices": [{"delta": {"content": "Visible preamble"}}]},
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "function_call": {
+                                "name": "catalog_search",
+                                "arguments": '{"query":"private term"}',
+                            }
+                        }
+                    }
+                ]
+            },
+        ]
+        runtime = self.make_runtime(api)
+        await runtime.open()
+        events = []
+
+        with self.assertRaisesRegex(LlamaCppProtocolError, "unsupported legacy function call"):
+            async for event in runtime.stream(self.make_request(tools=(self.tool,))):
+                events.append(event)
+
+        self.assertEqual([event.kind for event in events], ["delta", "reset"])
+        self.assertEqual(events[0].text, "Visible preamble")
+        self.assertEqual(events[1].reason, "intermediate")
+        self.assertNotIn("private term", "".join(event.text or "" for event in events))
+        await runtime.close()
+
+    async def test_gpu_failure_after_visible_text_resets_then_retries_cpu(self) -> None:
+        api = FakeLlamaAPI(
+            "unused",
+            stream_chunks=["<|channel|>final\npartial GPU text", " finished"],
+        )
+        api.gpu_devices = (
+            GpuDevice("cuda", "NVIDIA test device", 4_000_000_000, 8_000_000_000),
+        )
+        api.fail_after_stream_chunks = 1
+        api.fail_gpu_after_stream_chunks = True
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        with patch(
+            "lumi.runtime.llama_cpp._available_gpu_devices",
+            return_value=api.gpu_devices,
+        ) as detect_devices:
+            events = [event async for event in runtime.stream(self.make_request())]
+        detect_devices.assert_called_once()
+
+        self.assertEqual(
+            [event.kind for event in events],
+            ["delta", "reset", "delta", "delta", "complete"],
+        )
+        self.assertEqual(events[0].text, "partial GPU text")
+        self.assertIsNone(events[1].text)
+        self.assertEqual(events[1].reason, "cpu_fallback")
+        self.assertEqual(events[2].text, "partial GPU text")
+        self.assertEqual(events[3].text, " finished")
+        self.assertEqual(
+            "".join(event.text or "" for event in events[2:-1]),
+            events[-1].response.message.content,
+        )
+        self.assertEqual(api.model_options[0]["n_gpu_layers"], 28)
+        self.assertEqual(api.model_options[-1]["n_gpu_layers"], 0)
+        self.assertEqual(runtime.acceleration_status()["state"], "cpu_fallback")
+        await runtime.close()
+
+    async def test_stream_exposes_only_final_channel_when_thinking_is_enabled(self) -> None:
+        api = FakeLlamaAPI(
+            "unused",
+            stream_chunks=[
+                "<|channel|>analysis\nprivate reasoning",
+                "<|channel|>final\nSafe answer with `code` and **Markdown**.",
+                "<|im_end|>",
+            ],
+        )
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        events = [
+            event
+            async for event in runtime.stream(self.make_request(thinking=True))
+        ]
+
+        deltas = [event.text for event in events if event.kind == "delta"]
+        completion = events[-1]
+        self.assertEqual("".join(deltas), "Safe answer with `code` and **Markdown**.")
+        self.assertEqual(completion.response.message.content, "Safe answer with `code` and **Markdown**.")
+        await runtime.close()
+
+    async def test_stream_cancellation_releases_native_generation_slot(self) -> None:
+        api = FakeLlamaAPI("unused")
+        api.block_generation = True
+        api.allow_generation.clear()
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        async def consume() -> None:
+            async for _event in runtime.stream(self.make_request()):
+                pass
+
+        consumer = asyncio.create_task(consume())
+        await asyncio.to_thread(api.generation_started.wait, 1)
+        consumer.cancel()
+        api.allow_generation.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await consumer
+        for _ in range(50):
+            if runtime._slot._value == 1:
+                break
+            await asyncio.sleep(0.02)
+        self.assertEqual(runtime._slot._value, 1)
+        await runtime.close()
+
+    async def test_closing_stream_cancels_blocked_native_iterator_without_slot_leak(self) -> None:
+        api = FakeLlamaAPI(
+            "unused",
+            stream_chunks=["<|channel|>final\nfirst", " second"],
+        )
+        api.block_after_first_stream_chunk = True
+        api.allow_next_stream_chunk.clear()
+        runtime = self.make_runtime(api)
+        await runtime.open()
+        stream = runtime.stream(self.make_request())
+
+        first = await anext(stream)
+        self.assertEqual(first.kind, "delta")
+        await stream.aclose()
+        api.allow_next_stream_chunk.set()
+        for _ in range(50):
+            if runtime._slot._value == 1:
+                break
+            await asyncio.sleep(0.02)
+
+        self.assertEqual(runtime._slot._value, 1)
+        await runtime.close()
+
+    async def test_tool_capable_stream_emits_delta_before_native_iterator_finishes(self) -> None:
+        api = FakeLlamaAPI(
+            "unused",
+            stream_chunks=["First visible", " second"],
+        )
+        api.block_after_first_stream_chunk = True
+        api.allow_next_stream_chunk.clear()
+        runtime = self.make_runtime(api)
+        await runtime.open()
+        stream = runtime.stream(self.make_request(tools=(self.tool,)))
+        first_event = asyncio.create_task(anext(stream))
+
+        self.assertTrue(await asyncio.to_thread(api.first_stream_chunk_started.wait, 1))
+        first = await asyncio.wait_for(first_event, timeout=1)
+        self.assertEqual(first.kind, "delta")
+        self.assertEqual(first.text, "First visible")
+        self.assertFalse(api.allow_next_stream_chunk.is_set())
+
+        api.allow_next_stream_chunk.set()
+        remainder = [event async for event in stream]
+        self.assertEqual([event.kind for event in remainder], ["delta", "complete"])
+        self.assertEqual(remainder[0].text, " second")
+        self.assertEqual(remainder[-1].response.message.content, "First visible second")
         await runtime.close()
 
     async def test_native_qwen_tool_call_is_normalized_and_reasoning_is_hidden(self) -> None:

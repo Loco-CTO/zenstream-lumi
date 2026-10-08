@@ -37,6 +37,10 @@ class UnsupportedModelError(ModelInstallationError):
     """The requested model ID is not in Lumi's pinned installation catalog."""
 
 
+class ModelInstallationCancelledError(ModelInstallationError):
+    """A model installation was explicitly cancelled by its host."""
+
+
 class ModelInstallationUnavailableError(ModelInstallationError):
     """An optional installer dependency or required platform feature is unavailable."""
 
@@ -187,6 +191,8 @@ class _SourceFetcher(Protocol):
         spec: Qwen35ModelSpec,
         destination: Path,
         progress: Callable[[int], None],
+        *,
+        cancel_event: threading.Event | None = None,
     ) -> _SourceFetchResult: ...
 
 
@@ -245,15 +251,18 @@ class Qwen35ModelInstaller:
         model_id: str,
         *,
         progress: Callable[[ModelInstallProgress], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> InstalledModelArtifact:
         """Install one pinned GGUF and return a digest-bound artifact."""
 
         spec = _require_spec(model_id)
         reporter = _ProgressReporter(spec.model_id, progress)
         with self._lock:
+            _raise_if_cancelled(cancel_event)
             reporter.report("validating", 100)
             existing = self._read_installed_artifact(spec, verify_files=True)
             if existing is not None:
+                _raise_if_cancelled(cancel_event)
                 reporter.report("complete", INSTALL_PROGRESS_TOTAL)
                 return existing
 
@@ -272,18 +281,33 @@ class Qwen35ModelInstaller:
             target.mkdir(parents=True)
             installation_complete = False
             try:
+                _raise_if_cancelled(cancel_event)
                 reporter.report("downloading", 300)
-                source_result = self._source_fetcher.fetch(
-                    spec,
-                    target,
-                    lambda fraction: reporter.report(
+                def report_download(fraction: int) -> None:
+                    _raise_if_cancelled(cancel_event)
+                    reporter.report(
                         "downloading",
                         300 + min(4_500, max(0, int(fraction))),
-                    ),
-                )
+                    )
+
+                if cancel_event is None:
+                    source_result = self._source_fetcher.fetch(
+                        spec, target, report_download
+                    )
+                else:
+                    source_result = self._source_fetcher.fetch(
+                        spec,
+                        target,
+                        report_download,
+                        cancel_event=cancel_event,
+                    )
+                _raise_if_cancelled(cancel_event)
                 self._clear_download_cache(spec)
                 reporter.report("verifying-source", 4_900)
-                self._verify_source(spec, target, source_result)
+                self._verify_source(
+                    spec, target, source_result, cancel_event=cancel_event
+                )
+                _raise_if_cancelled(cancel_event)
                 reporter.report("installing", 5_100)
                 reporter.report("verifying-install", 8_800)
                 file_records, output_size = self._verify_gguf_output(
@@ -293,7 +317,9 @@ class Qwen35ModelInstaller:
                         "verifying-output",
                         8_800 if total <= 0 else 8_800 + (complete * 900 // total),
                     ),
+                    cancel_event=cancel_event,
                 )
+                _raise_if_cancelled(cancel_event)
                 manifest = {
                     "schemaVersion": MODEL_MANIFEST_SCHEMA_VERSION,
                     "format": GGUF_FORMAT,
@@ -314,7 +340,9 @@ class Qwen35ModelInstaller:
                     stream.write(manifest_bytes)
                     stream.flush()
                     os.fsync(stream.fileno())
+                _raise_if_cancelled(cancel_event)
                 os.replace(temporary_manifest_path, manifest_path)
+                _raise_if_cancelled(cancel_event)
 
                 # The verified manifest is the activation marker. Write it only after
                 # the complete GGUF is in its persistent directory, then atomically
@@ -329,6 +357,9 @@ class Qwen35ModelInstaller:
                 )
                 reporter.report("complete", INSTALL_PROGRESS_TOTAL)
                 return result
+            except ModelInstallationCancelledError:
+                self._clear_download_cache(spec)
+                raise
             except ModelInstallationError:
                 raise
             except Exception as error:
@@ -529,7 +560,10 @@ class Qwen35ModelInstaller:
         spec: Qwen35ModelSpec,
         source_dir: Path,
         result: _SourceFetchResult,
+        *,
+        cancel_event: threading.Event | None = None,
     ) -> None:
+        _raise_if_cancelled(cancel_event)
         if result.revision != spec.revision:
             raise ModelInstallationError(
                 "The downloaded model source revision did not match its pin"
@@ -547,7 +581,7 @@ class Qwen35ModelInstaller:
         if record.size_bytes > spec.max_download_bytes:
             raise ModelInstallationError("The downloaded GGUF exceeded its size limit")
         path = source_dir.joinpath(*_safe_relative_path(spec.gguf_filename).parts)
-        digest, size = _hash_file_with_size(path)
+        digest, size = _hash_file_with_size(path, cancel_event=cancel_event)
         if size != record.size_bytes or digest != spec.gguf_sha256:
             raise ModelInstallationError("The downloaded Qwen3.5 GGUF failed Lumi's pinned hash")
         if record.sha256 and record.sha256 != digest:
@@ -558,12 +592,15 @@ class Qwen35ModelInstaller:
         spec: Qwen35ModelSpec,
         output_dir: Path,
         progress: Callable[[int, int], None],
+        *,
+        cancel_event: threading.Event | None = None,
     ) -> tuple[list[dict[str, object]], int]:
+        _raise_if_cancelled(cancel_event)
         names_and_paths = _walk_regular_files(output_dir)
         if len(names_and_paths) != 1 or names_and_paths[0][0] != spec.gguf_filename:
             raise ModelInstallationError("The installed output must contain only the pinned GGUF")
         relative_name, path = names_and_paths[0]
-        digest, size = _hash_file_with_size(path)
+        digest, size = _hash_file_with_size(path, cancel_event=cancel_event)
         if size != spec.download_size_bytes or size > spec.max_download_bytes:
             raise ModelInstallationError("The installed Qwen3.5 GGUF has an unexpected size")
         if digest != spec.gguf_sha256:
@@ -583,7 +620,10 @@ class _HuggingFaceSourceFetcher:
         spec: Qwen35ModelSpec,
         destination: Path,
         progress: Callable[[int], None],
+        *,
+        cancel_event: threading.Event | None = None,
     ) -> _SourceFetchResult:
+        _raise_if_cancelled(cancel_event)
         try:
             from huggingface_hub import HfApi, hf_hub_download
             from tqdm.auto import tqdm
@@ -603,6 +643,7 @@ class _HuggingFaceSourceFetcher:
             raise ModelInstallationError(
                 "The pinned Qwen3.5 GGUF source could not be read"
             ) from error
+        _raise_if_cancelled(cancel_event)
         if getattr(info, "sha", None) != spec.revision:
             raise ModelInstallationError(
                 "The official GGUF repository returned a different revision"
@@ -636,7 +677,9 @@ class _HuggingFaceSourceFetcher:
 
         def report_bytes(amount: int) -> None:
             nonlocal completed_bytes, last_reported
+            _raise_if_cancelled(cancel_event)
             with progress_lock:
+                _raise_if_cancelled(cancel_event)
                 completed_bytes += max(0, amount)
                 fraction = min(4_400, completed_bytes * 4_400 // size)
                 if fraction >= last_reported + 100:
@@ -658,6 +701,7 @@ class _HuggingFaceSourceFetcher:
                 return False
 
             def update(self, amount=1):
+                _raise_if_cancelled(cancel_event)
                 result = super().update(amount)
                 delta = self.n - self._reported_n
                 if delta > 0:
@@ -686,6 +730,7 @@ class _HuggingFaceSourceFetcher:
             raise ModelInstallationError("The Lumi model download cache escaped its root")
         cached_target = cache_directory.joinpath(*_safe_relative_path(spec.gguf_filename).parts)
         try:
+            _raise_if_cancelled(cancel_event)
             downloaded_path = Path(
                 hf_hub_download(
                     repo_id=spec.repository_id,
@@ -698,10 +743,13 @@ class _HuggingFaceSourceFetcher:
                     tqdm_class=DownloadProgress,
                 )
             )
+        except ModelInstallationCancelledError:
+            raise
         except Exception as error:
             raise ModelInstallationError(
                 "The pinned Qwen3.5 GGUF file could not be downloaded"
             ) from error
+        _raise_if_cancelled(cancel_event)
         try:
             resolved_download = downloaded_path.resolve()
             resolved_cached_target = cached_target.resolve()
@@ -785,17 +833,31 @@ def _safe_relative_path(value: str) -> PurePosixPath:
     return PurePosixPath(value)
 
 
-def _hash_file_with_size(path: Path) -> tuple[str, int]:
+def _hash_file_with_size(
+    path: Path,
+    *,
+    cancel_event: threading.Event | None = None,
+) -> tuple[str, int]:
     digest = hashlib.sha256()
     size = 0
     try:
         with path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(_HASH_CHUNK_BYTES), b""):
+            while True:
+                _raise_if_cancelled(cancel_event)
+                chunk = stream.read(_HASH_CHUNK_BYTES)
+                if not chunk:
+                    break
                 size += len(chunk)
                 digest.update(chunk)
+        _raise_if_cancelled(cancel_event)
     except OSError as error:
         raise ModelInstallationError("A Qwen3.5 model file could not be read") from error
     return digest.hexdigest(), size
+
+
+def _raise_if_cancelled(cancel_event: threading.Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise ModelInstallationCancelledError("The Lumi model installation was cancelled")
 
 
 def _hash_file(path: Path) -> str:

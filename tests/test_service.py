@@ -20,6 +20,7 @@ from lumi.contracts import (
     EvidenceTrust,
     ModelRequest,
     ModelResponse,
+    ModelStreamEvent,
     Source,
     ToolCall,
     ToolDefinition,
@@ -64,8 +65,11 @@ class FixtureRuntime:
         self.delay_seconds = 0.0
         self.cancelled = False
         self.started_event: asyncio.Event | None = None
+        self.complete_calls = 0
+        self.stream_rounds: list[list[ModelStreamEvent]] = []
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
+        self.complete_calls += 1
         self.requests.append(request)
         if self.started_event is not None:
             self.started_event.set()
@@ -77,6 +81,19 @@ class FixtureRuntime:
                 raise
         message = self.responses.pop(0) if self.responses else ChatMessage("assistant", "Answer.")
         return ModelResponse(message)
+
+    async def stream(self, request: ModelRequest):
+        self.requests.append(request)
+        if self.started_event is not None:
+            self.started_event.set()
+        events = self.stream_rounds.pop(0) if self.stream_rounds else [
+            ModelStreamEvent(
+                kind="complete",
+                response=ModelResponse(ChatMessage("assistant", "Streamed answer.")),
+            )
+        ]
+        for event in events:
+            yield event
 
 
 class FixtureTool:
@@ -155,7 +172,7 @@ class LumiServiceAPITests(unittest.TestCase):
             ),
             default_model="qwen3.5:2b",
         )
-        service = LumiConversationService(
+        self.service = LumiConversationService(
             self.store,
             self.runtime,
             ToolRegistry((self.catalog_tool, self.web_tool)),
@@ -164,7 +181,10 @@ class LumiServiceAPITests(unittest.TestCase):
         )
         from lumi.api import create_app
 
-        self.client = TestClient(create_app(service, _SERVICE_TOKEN), raise_server_exceptions=False)
+        self.client = TestClient(
+            create_app(self.service, _SERVICE_TOKEN),
+            raise_server_exceptions=False,
+        )
 
     def tearDown(self) -> None:
         self.client.close()
@@ -272,6 +292,66 @@ class LumiServiceAPITests(unittest.TestCase):
         self.assertEqual([item["role"] for item in messages], ["user", "assistant"])
         self.assertEqual(messages[0]["content"], "What is in my library?")
         self.assertEqual(messages[1]["content"], "Answer.")
+
+    def test_embedded_stream_forwards_safe_resets_and_runs_one_multi_tool_turn(self) -> None:
+        def completion(message: ChatMessage) -> ModelStreamEvent:
+            return ModelStreamEvent(kind="complete", response=ModelResponse(message))
+
+        self.runtime.stream_rounds = [
+            [
+                ModelStreamEvent(kind="delta", text="Checking the first source"),
+                completion(
+                    ChatMessage(
+                        "assistant",
+                        "",
+                        tool_calls=(ToolCall("call-1", "search_catalog", {"query": "first"}),),
+                    )
+                ),
+            ],
+            [
+                ModelStreamEvent(kind="delta", text="Checking another source"),
+                completion(
+                    ChatMessage(
+                        "assistant",
+                        "",
+                        tool_calls=(ToolCall("call-2", "search_catalog", {"query": "second"}),),
+                    )
+                ),
+            ],
+            [
+                ModelStreamEvent(kind="delta", text="Final streamed answer."),
+                completion(ChatMessage("assistant", "Final streamed answer.")),
+            ],
+        ]
+
+        async def collect():
+            return [
+                event
+                async for event in self.service.stream_chat_for_account(
+                    "account-1",
+                    "stream-conversation",
+                    "Explain the research result.",
+                )
+            ]
+
+        events = asyncio.run(collect())
+
+        self.assertEqual(
+            [event.kind for event in events],
+            ["delta", "reset", "delta", "reset", "delta", "complete"],
+        )
+        self.assertEqual(
+            [event.reason for event in events if event.kind == "reset"],
+            ["intermediate", "intermediate"],
+        )
+        turn = events[-1].turn
+        self.assertEqual(turn.answer.markdown, "Final streamed answer.")
+        self.assertEqual(len(self.runtime.requests), 3)
+        self.assertEqual(self.runtime.complete_calls, 0)
+        self.assertEqual(len(self.catalog_tool.calls), 2)
+        snapshot = self.store.get_snapshot("account-1", "stream-conversation", 10)
+        self.assertEqual([message.role for message in snapshot.messages], ["user", "assistant"])
+        self.assertEqual(snapshot.messages[-1].content, "Final streamed answer.")
 
     def test_chat_turn_timeout_cancels_inference_without_persisting_a_turn(self) -> None:
         self.runtime.delay_seconds = 5

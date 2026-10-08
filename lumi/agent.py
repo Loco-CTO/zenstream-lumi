@@ -7,7 +7,7 @@ import json
 import logging
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -21,6 +21,7 @@ from lumi.contracts import (
     EvidenceTrust,
     ModelRequest,
     ModelResponse,
+    StreamResetReason,
     Source,
     ToolCall,
     ToolDefinition,
@@ -1029,6 +1030,9 @@ class ChatAgent:
         context: ChatContext,
         history: list[ChatMessage],
         user_text: str,
+        *,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reset: Callable[[StreamResetReason], Awaitable[None]] | None = None,
     ) -> ChatAnswer:
         if not user_text.strip():
             raise ValueError("A user message cannot be empty")
@@ -1053,6 +1057,8 @@ class ChatAgent:
             history,
             user_text,
             enforce_local_recommendations=enforce_local_recommendations,
+            on_delta=None if enforce_local_recommendations else on_delta,
+            on_reset=None if enforce_local_recommendations else on_reset,
         )
 
     async def _answer_with_tools(
@@ -1062,6 +1068,8 @@ class ChatAgent:
         user_text: str,
         *,
         enforce_local_recommendations: bool,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reset: Callable[[StreamResetReason], Awaitable[None]] | None = None,
     ) -> ChatAnswer:
 
         trusted_entities = {
@@ -1124,6 +1132,19 @@ class ChatAgent:
         tool_call_counts: dict[str, int] = {}
         total_calls = 0
         tool_rounds = 0
+        streamed_text = False
+
+        async def stream_delta(text: str) -> None:
+            nonlocal streamed_text
+            if on_delta is not None:
+                streamed_text = True
+                await on_delta(text)
+
+        async def reset_stream(reason: StreamResetReason) -> None:
+            nonlocal streamed_text
+            streamed_text = False
+            if on_reset is not None:
+                await on_reset(reason)
         if relationship_entity is not None:
             prefetch_calls = [
                 ToolCall(
@@ -1177,8 +1198,16 @@ class ChatAgent:
 
         while True:
             try:
-                response = await self._complete(context, messages, definitions)
+                response = await self._complete(
+                    context,
+                    messages,
+                    definitions,
+                    on_delta=stream_delta if on_delta is not None else None,
+                    on_reset=reset_stream if on_delta is not None else None,
+                )
             except InferenceError:
+                if streamed_text:
+                    raise
                 return finish(
                     self._answer_after_inference_failure(
                         user_text,
@@ -1201,6 +1230,11 @@ class ChatAgent:
                         total_calls,
                     )
                 )
+
+            if streamed_text:
+                # A tool-bearing model response is control flow. Discard any
+                # partial preamble before dispatching tools and awaiting the final turn.
+                await reset_stream("intermediate")
 
             if tool_rounds >= self._limits.max_tool_rounds:
                 return finish(
@@ -1409,6 +1443,9 @@ class ChatAgent:
         context: ChatContext,
         messages: list[ChatMessage],
         definitions: tuple[ToolDefinition, ...],
+        *,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reset: Callable[[StreamResetReason], Awaitable[None]] | None = None,
     ) -> ModelResponse:
         request = ModelRequest(
             model=context.model,
@@ -1419,6 +1456,36 @@ class ChatAgent:
             output_tokens=self._limits.output_tokens,
         )
         try:
+            stream = getattr(self._runtime, "stream", None)
+            if on_delta is not None and callable(stream):
+                response: ModelResponse | None = None
+                async with asyncio.timeout(self._limits.inference_timeout_seconds):
+                    async for event in stream(request):
+                        kind = getattr(event, "kind", None)
+                        if kind == "delta":
+                            text = getattr(event, "text", None)
+                            if not isinstance(text, str) or not text:
+                                raise InferenceError("Runtime returned an invalid text delta")
+                            await on_delta(text)
+                        elif kind == "reset":
+                            if on_reset is None:
+                                raise InferenceError(
+                                    "Runtime reset a stream that cannot be recovered"
+                                )
+                            reason = getattr(event, "reason", None)
+                            if reason not in {"intermediate", "cpu_fallback"}:
+                                raise InferenceError("Runtime returned an invalid stream reset")
+                            await on_reset(reason)
+                        elif kind == "complete":
+                            candidate = getattr(event, "response", None)
+                            if not isinstance(candidate, ModelResponse) or response is not None:
+                                raise InferenceError("Runtime returned an invalid completion event")
+                            response = candidate
+                        else:
+                            raise InferenceError("Runtime returned an unsupported stream event")
+                if response is None:
+                    raise InferenceError("Runtime ended without a completion event")
+                return response
             return await asyncio.wait_for(
                 self._runtime.complete(request),
                 timeout=self._limits.inference_timeout_seconds,

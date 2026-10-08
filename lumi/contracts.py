@@ -224,8 +224,49 @@ class ModelResponse:
     message: ChatMessage
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    prompt_duration_ns: int | None = None
+    generation_duration_ns: int | None = None
     load_duration_ns: int | None = None
     total_duration_ns: int | None = None
+
+
+StreamResetReason = Literal["intermediate", "cpu_fallback"]
+
+
+@dataclass(frozen=True, slots=True)
+class ModelStreamEvent:
+    """A visible delta, partial-turn reset, or completed normalized response."""
+
+    kind: Literal["delta", "reset", "complete"]
+    text: str | None = None
+    response: ModelResponse | None = None
+    reason: StreamResetReason | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind == "delta":
+            if (
+                not isinstance(self.text, str)
+                or not self.text
+                or self.response is not None
+                or self.reason is not None
+            ):
+                raise ValueError("A model delta must contain only nonempty visible text")
+        elif self.kind == "reset":
+            if (
+                self.text is not None
+                or self.response is not None
+                or self.reason not in {"intermediate", "cpu_fallback"}
+            ):
+                raise ValueError("A model stream reset must contain only a safe reason")
+        elif self.kind == "complete":
+            if (
+                self.text is not None
+                or self.reason is not None
+                or not isinstance(self.response, ModelResponse)
+            ):
+                raise ValueError("A model completion must contain one normalized response")
+        else:
+            raise ValueError("Unsupported model stream event")
 
 
 class ChatRuntime(Protocol):

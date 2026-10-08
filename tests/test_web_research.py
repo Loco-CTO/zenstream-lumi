@@ -170,6 +170,7 @@ class WebResearchTests(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(first.content.split("\n", 1)[1])
         self.assertEqual(payload["results"][0]["rank"], 1)
         self.assertEqual(payload["results"][0]["provider"], "Example Search")
+        self.assertEqual(first.sources[0].website_name, "example.org")
         self.assertEqual(first.sources[0].favicon_url, "https://example.org/favicon.ico")
 
     async def test_default_search_retries_transient_provider_errors_then_caches(self) -> None:
