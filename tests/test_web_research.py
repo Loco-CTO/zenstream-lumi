@@ -15,7 +15,6 @@ import httpx
 
 from lumi.contracts import ChatContext, EvidenceTrust, Source
 from lumi.web_research import (
-    _PageDocument,
     OpenWebResultTool,
     SearXNGSearchTool,
     WebReadTool,
@@ -24,6 +23,7 @@ from lumi.web_research import (
     WebResearchSessions,
     _normalise_public_web_url,
     _page_document,
+    _PageDocument,
     _read_chunked,
     _read_http_response,
     _resolve_public_addresses,
