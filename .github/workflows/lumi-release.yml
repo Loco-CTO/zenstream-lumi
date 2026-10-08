@@ -98,7 +98,9 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Build and repair the pinned CPU-only llama.cpp runtime wheel
         run: |
-          dnf install -y gcc-c++
+          dnf install -y dnf-plugins-core gcc-c++
+          dnf config-manager --set-enabled powertools
+          dnf install -y libstdc++-static
           "$CC" --version
           "$CXX" --version
           PYTHON=/opt/python/cp312-cp312/bin/python
