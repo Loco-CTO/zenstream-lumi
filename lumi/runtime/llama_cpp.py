@@ -8,6 +8,7 @@ integration, then passes the managed model directories to this adapter.
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import gc
 import hashlib
 import json
@@ -20,7 +21,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType, SimpleNamespace
+from types import FunctionType, MappingProxyType, SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -823,9 +824,9 @@ class LlamaCppChatRuntime(ChatRuntime):
         except LlamaCppRuntimeError:
             total_layers = 0
         if self.config.acceleration_mode == "cpu_only" or self._forced_cpu_reason is not None:
-            # CPU-only must not initialize or enumerate compiled GPU backends as
-            # part of Lumi's device-selection path. The same bypass applies when
-            # recovering from a failed GPU so a CPU reload does not reprobe it.
+            # Avoid GPU enumeration during device selection. llama-cpp-python
+            # still initializes its shared backend registry in Llama.__init__,
+            # but the model itself is explicitly restricted to the CPU device.
             choice = _cpu_choice(total_layers, self._forced_cpu_reason)
         else:
             devices = _available_gpu_devices(api)
@@ -839,7 +840,7 @@ class LlamaCppChatRuntime(ChatRuntime):
         self._acceleration = choice
         self._acceleration_state = "cpu_fallback" if choice.fallback_reason else "ready"
 
-        def load_native(n_gpu_layers: int) -> Any:
+        def load_native(n_gpu_layers: int, native_device_name: str | None) -> Any:
             options = dict(
                 model_path=str(model_path),
                 n_ctx=self.config.n_ctx,
@@ -853,14 +854,13 @@ class LlamaCppChatRuntime(ChatRuntime):
                 verbose=False,
             )
             if n_gpu_layers == 0:
-                # The pinned Python wrapper lacks llama.cpp's `--device none`.
-                # Disable every offload path it does expose in CPU mode.
+                # Keep all model operations and cache placement on the CPU.
                 options["offload_kqv"] = False
                 options["op_offload"] = False
-            return api.Llama(**options)
+            return _load_llama_with_device(api, options, native_device_name or "CPU")
 
         try:
-            model = load_native(choice.offloaded_layers)
+            model = load_native(choice.offloaded_layers, choice.native_device_name)
         except Exception as error:
             if not choice.uses_gpu:
                 self._acceleration_state = "unavailable"
@@ -873,7 +873,7 @@ class LlamaCppChatRuntime(ChatRuntime):
             self._acceleration = _cpu_choice(total_layers, fallback_reason)
             self._acceleration_state = "cpu_fallback"
             try:
-                model = load_native(0)
+                model = load_native(0, "CPU")
             except Exception as cpu_error:
                 self._acceleration_state = "unavailable"
                 raise LlamaCppRuntimeError(
@@ -917,6 +917,7 @@ class LlamaCppChatRuntime(ChatRuntime):
             import llama_cpp
             import llama_cpp._ggml as llama_ggml
             from llama_cpp._ctypes_extensions import load_shared_library
+            from llama_cpp import llama_cpp as llama_cpp_bindings
             from llama_cpp.llama_chat_format import (
                 Jinja2ChatFormatter,
                 chat_formatter_to_chat_completion_handler,
@@ -930,6 +931,7 @@ class LlamaCppChatRuntime(ChatRuntime):
             Jinja2ChatFormatter=Jinja2ChatFormatter,
             chat_formatter_to_chat_completion_handler=chat_formatter_to_chat_completion_handler,
             llama_cpp=llama_cpp,
+            llama_cpp_bindings=llama_cpp_bindings,
             ggml=llama_ggml.libggml,
             ggml_base=load_shared_library(
                 "ggml-base", Path(llama_cpp.__file__).resolve().parent / "lib"
@@ -943,6 +945,86 @@ class LlamaCppChatRuntime(ChatRuntime):
         if self._acceleration_state != "unavailable":
             self._acceleration_state = "not_loaded"
             self._acceleration = _cpu_choice(0, None)
+
+
+def _load_llama_with_device(api: Any, options: dict[str, Any], device_name: str) -> Any:
+    """Restrict llama.cpp model loading to one selected backend device.
+
+    llama-cpp-python 0.3.35 exposes ``llama_model_params.devices`` in its ctypes
+    structure but omits it from the high-level ``Llama`` constructor. Install a
+    constructor-local binding proxy so the list is applied before native model
+    loading without changing the process-wide binding module.
+    """
+
+    bindings = getattr(api, "llama_cpp_bindings", None)
+    default_params = getattr(bindings, "llama_model_default_params", None)
+    llama_type = getattr(api, "Llama", None)
+    original_init = getattr(llama_type, "__init__", None)
+    original_globals = getattr(original_init, "__globals__", None)
+    if (
+        not callable(default_params)
+        or not isinstance(llama_type, type)
+        or not isinstance(original_globals, dict)
+        or original_globals.get("llama_cpp") is not bindings
+    ):
+        raise LlamaCppRuntimeError("The embedded runtime cannot restrict model devices")
+
+    device_lists: list[Any] = []
+
+    def default_params_for_device() -> Any:
+        params = default_params()
+        device_handle = _backend_device_handle(api, device_name)
+        device_list = (ctypes.c_void_p * 2)(device_handle, None)
+        params.devices = ctypes.cast(device_list, ctypes.c_void_p).value
+        device_lists.append(device_list)
+        return params
+
+    class DevicePinnedBindings:
+        def __getattr__(self, name: str) -> Any:
+            if name == "llama_model_default_params":
+                return default_params_for_device
+            return getattr(bindings, name)
+
+    init_globals = dict(original_globals)
+    init_globals["llama_cpp"] = DevicePinnedBindings()
+    device_pinned_init = FunctionType(
+        original_init.__code__,
+        init_globals,
+        name=original_init.__name__,
+        argdefs=original_init.__defaults__,
+        closure=original_init.__closure__,
+    )
+    device_pinned_init.__kwdefaults__ = original_init.__kwdefaults__
+    device_pinned_init.__annotations__ = original_init.__annotations__.copy()
+    device_pinned_type = type(
+        f"_LumiDevicePinned{llama_type.__name__}",
+        (llama_type,),
+        {"__init__": device_pinned_init},
+    )
+    model = device_pinned_type(**options)
+    model._lumi_device_lists = tuple(device_lists)
+    return model
+
+
+def _backend_device_handle(api: Any, device_name: str) -> int:
+    libraries = tuple(
+        library
+        for library in (getattr(api, "ggml", None), getattr(api, "ggml_base", None))
+        if library is not None
+    )
+    for library in libraries:
+        try:
+            get_device = getattr(library, "ggml_backend_dev_by_name")
+        except AttributeError:
+            continue
+        get_device.restype = ctypes.c_void_p
+        get_device.argtypes = [ctypes.c_char_p]
+        handle = get_device(device_name.encode("utf-8"))
+        if isinstance(handle, ctypes.c_void_p):
+            handle = handle.value
+        if handle:
+            return int(handle)
+    raise LlamaCppRuntimeError(f"The selected llama.cpp device is unavailable: {device_name}")
 
 
 def _available_gpu_devices(api: Any) -> tuple[GpuDevice, ...]:

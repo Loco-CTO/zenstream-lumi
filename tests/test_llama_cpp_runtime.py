@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import hashlib
 import json
 import struct
@@ -9,7 +10,7 @@ import threading
 import unittest
 import weakref
 from pathlib import Path
-from types import SimpleNamespace
+from types import FunctionType, SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -30,6 +31,41 @@ from lumi.runtime.llama_cpp import (
 )
 
 _GGUF_FILENAME = "Qwen_Qwen3.5-test-Q4_K_M.gguf"
+
+
+class _FakeModelParams(ctypes.Structure):
+    _fields_ = [("devices", ctypes.c_void_p)]
+
+
+class _FakeNativeFunction:
+    def __init__(self, callback):
+        self.callback = callback
+        self.restype = None
+        self.argtypes = None
+
+    def __call__(self, *args):
+        return self.callback(*args)
+
+
+def _fake_llama_init(self, **options: Any) -> None:
+    api = self._api
+    params = llama_cpp.llama_model_default_params()
+    if params.devices:
+        devices = ctypes.cast(params.devices, ctypes.POINTER(ctypes.c_void_p))
+        api.native_device_lists.append((devices[0], devices[1]))
+    else:
+        api.native_device_lists.append((None, None))
+    model_path = options["model_path"]
+    if options["n_gpu_layers"] and api.fail_gpu_init:
+        api.loads.append(model_path)
+        api.model_options.append(options)
+        raise RuntimeError("simulated GPU initialization failure")
+    if api.live_models:
+        raise AssertionError("The previous native model must unload before switching")
+    api.loads.append(model_path)
+    api.model_options.append(options)
+    FakeModel.__init__(self, api, model_path, options)
+    api.live_models.add(self)
 
 
 def _gguf_string(value: str) -> bytes:
@@ -169,6 +205,39 @@ class FakeLlamaAPI:
         self.chat_stream_chunks: list[dict[str, Any]] | None = None
         self.block_after_first_stream_chunk = False
         self.gpu_devices: tuple[GpuDevice, ...] = ()
+        self.native_device_lists: list[tuple[int | None, int | None]] = []
+        self.native_device_handles = {
+            b"CPU": 100,
+            b"CUDA0": 101,
+            b"Vulkan0": 102,
+            b"HIP0": 103,
+            b"CUDA1": 104,
+        }
+        self.ggml = SimpleNamespace(
+            ggml_backend_dev_by_name=_FakeNativeFunction(
+                lambda name: self.native_device_handles.get(name)
+            )
+        )
+        self.ggml_base = None
+        self.llama_cpp_bindings = SimpleNamespace(
+            llama_model_default_params=self._model_default_params
+        )
+        llama_globals = dict(globals())
+        llama_globals["llama_cpp"] = self.llama_cpp_bindings
+        fake_init = FunctionType(
+            _fake_llama_init.__code__,
+            llama_globals,
+            name=_fake_llama_init.__name__,
+            argdefs=_fake_llama_init.__defaults__,
+            closure=_fake_llama_init.__closure__,
+        )
+        fake_init.__kwdefaults__ = _fake_llama_init.__kwdefaults__
+        fake_init.__annotations__ = _fake_llama_init.__annotations__.copy()
+        self.Llama = type(
+            "FakeLlama",
+            (FakeModel,),
+            {"__init__": fake_init, "_api": self},
+        )
         self.block_generation = False
         self.generation_calls = 0
         self.formatter_stopping_criteria: list[Any] = []
@@ -249,19 +318,9 @@ class FakeLlamaAPI:
 
         return handle
 
-    def Llama(self, **options: Any) -> FakeModel:
-        model_path = options["model_path"]
-        if options["n_gpu_layers"] and self.fail_gpu_init:
-            self.loads.append(model_path)
-            self.model_options.append(options)
-            raise RuntimeError("simulated GPU initialization failure")
-        if self.live_models:
-            raise AssertionError("The previous native model must unload before switching")
-        self.loads.append(model_path)
-        self.model_options.append(options)
-        model = FakeModel(self, model_path, options)
-        self.live_models.add(model)
-        return model
+    @staticmethod
+    def _model_default_params() -> _FakeModelParams:
+        return _FakeModelParams()
 
     def list_gpu_devices(self) -> tuple[GpuDevice, ...]:
         return self.gpu_devices
@@ -415,8 +474,10 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_automatic_acceleration_selects_gpu_and_honors_layer_cap(self) -> None:
         api = FakeLlamaAPI("Answer")
         api.gpu_devices = (
-            GpuDevice("cuda", "NVIDIA test device", 4_000_000_000, 8_000_000_000),
+            GpuDevice("cuda", "NVIDIA test device", 2_000_000_000, 8_000_000_000, "CUDA0"),
+            GpuDevice("cuda", "NVIDIA test device 2", 4_000_000_000, 8_000_000_000, "CUDA1"),
         )
+        default_params = api.llama_cpp_bindings.llama_model_default_params
         runtime = self.make_runtime(api, acceleration_mode="automatic", n_gpu_layers=12)
         await runtime.open()
 
@@ -427,6 +488,8 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offloaded, 12)
         self.assertEqual(runtime.acceleration_status()["state"], "ready")
         self.assertEqual(runtime.acceleration_status()["selectedBackend"], "cuda")
+        self.assertEqual(api.native_device_lists, [(104, None)])
+        self.assertIs(api.llama_cpp_bindings.llama_model_default_params, default_params)
         self.assertEqual(runtime.acceleration_status()["offloadedLayers"], offloaded)
         self.assertEqual(runtime.acceleration_status()["totalLayers"], 28)
         await runtime.close()
@@ -445,13 +508,16 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_insufficient_vram_falls_back_to_cpu(self) -> None:
         api = FakeLlamaAPI("Answer")
-        api.gpu_devices = (GpuDevice("vulkan", "AMD test GPU", 700_000_000, 1_000_000_000),)
+        api.gpu_devices = (
+            GpuDevice("vulkan", "AMD test GPU", 700_000_000, 1_000_000_000, "Vulkan0"),
+        )
         runtime = self.make_runtime(api, acceleration_mode="gpu_preferred")
         await runtime.open()
 
         await runtime.complete(self.make_request())
 
         self.assertEqual(api.model_options[0]["n_gpu_layers"], 0)
+        self.assertEqual(api.native_device_lists, [(100, None)])
         status = runtime.acceleration_status()
         self.assertEqual(status["state"], "cpu_fallback")
         self.assertEqual(status["selectedBackend"], "cpu")
@@ -461,7 +527,7 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_gpu_model_initialization_failure_retries_cpu(self) -> None:
         api = FakeLlamaAPI("Answer")
         api.gpu_devices = (
-            GpuDevice("cuda", "NVIDIA test device", 4_000_000_000, 8_000_000_000),
+            GpuDevice("cuda", "NVIDIA test device", 4_000_000_000, 8_000_000_000, "CUDA0"),
         )
         api.fail_gpu_init = True
         runtime = self.make_runtime(api)
@@ -472,6 +538,7 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer.message.content, "Answer")
         self.assertGreater(api.model_options[0]["n_gpu_layers"], 0)
         self.assertEqual(api.model_options[1]["n_gpu_layers"], 0)
+        self.assertEqual(api.native_device_lists, [(101, None), (100, None)])
         self.assertFalse(api.model_options[1]["offload_kqv"])
         self.assertFalse(api.model_options[1]["op_offload"])
         self.assertEqual(runtime.acceleration_status()["state"], "cpu_fallback")
@@ -480,7 +547,7 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_cpu_only_mode_ignores_detected_gpu(self) -> None:
         api = FakeLlamaAPI("Answer")
         api.gpu_devices = (
-            GpuDevice("hip", "AMD Radeon test", 8_000_000_000, 12_000_000_000),
+            GpuDevice("hip", "AMD Radeon test", 8_000_000_000, 12_000_000_000, "HIP0"),
         )
         runtime = self.make_runtime(api, acceleration_mode="cpu_only")
         await runtime.open()
@@ -493,6 +560,7 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
         detect_devices.assert_not_called()
 
         self.assertEqual(api.model_options[0]["n_gpu_layers"], 0)
+        self.assertEqual(api.native_device_lists, [(100, None)])
         self.assertFalse(api.model_options[0]["offload_kqv"])
         self.assertFalse(api.model_options[0]["op_offload"])
         status = runtime.acceleration_status()
@@ -892,7 +960,7 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
             stream_chunks=["<|channel|>final\npartial GPU text", " finished"],
         )
         api.gpu_devices = (
-            GpuDevice("cuda", "NVIDIA test device", 4_000_000_000, 8_000_000_000),
+            GpuDevice("cuda", "NVIDIA test device", 4_000_000_000, 8_000_000_000, "CUDA0"),
         )
         api.fail_after_stream_chunks = 1
         api.fail_gpu_after_stream_chunks = True

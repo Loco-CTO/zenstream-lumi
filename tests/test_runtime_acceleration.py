@@ -19,7 +19,13 @@ class _NativeFunction:
 class _NativeLibrary:
     def __init__(self) -> None:
         device_types = {1: 0, 2: 1, 3: 2, 4: 1}
-        names = {1: b"CPU", 2: b"NVIDIA GeForce", 3: b"AMD Radeon", 4: b"Unknown accelerator"}
+        names = {1: b"CPU", 2: b"CUDA0", 3: b"Vulkan0", 4: b"Unknown accelerator"}
+        descriptions = {
+            1: b"CPU",
+            2: b"NVIDIA GeForce",
+            3: b"AMD Radeon",
+            4: b"Unknown accelerator",
+        }
         backend_names = {101: b"CPU", 102: b"CUDA", 103: b"Vulkan", 104: b"OpenCL"}
         memory = {
             2: (1_500_000_000, 4_000_000_000),
@@ -31,7 +37,9 @@ class _NativeLibrary:
         self.ggml_backend_dev_get = _NativeFunction(lambda index: index + 1)
         self.ggml_backend_dev_type = _NativeFunction(lambda pointer: device_types[pointer])
         self.ggml_backend_dev_name = _NativeFunction(lambda pointer: names[pointer])
-        self.ggml_backend_dev_description = _NativeFunction(lambda pointer: names[pointer])
+        self.ggml_backend_dev_description = _NativeFunction(
+            lambda pointer: descriptions[pointer]
+        )
         self.ggml_backend_dev_backend_reg = _NativeFunction(lambda pointer: pointer + 100)
         self.ggml_backend_reg_name = _NativeFunction(lambda pointer: backend_names[pointer])
 
@@ -47,8 +55,10 @@ class RuntimeAccelerationTests(unittest.TestCase):
 
         self.assertEqual([device.backend for device in devices], ["cuda", "vulkan"])
         self.assertEqual(devices[0].name, "NVIDIA GeForce")
+        self.assertEqual(devices[0].native_device_name, "CUDA0")
         self.assertEqual(devices[0].free_vram_bytes, 1_500_000_000)
         self.assertEqual(devices[1].total_vram_bytes, 8_000_000_000)
+        self.assertEqual(devices[1].native_device_name, "Vulkan0")
 
     def test_detection_supports_binding_split_across_ggml_and_ggml_base(self) -> None:
         native = _NativeLibrary()
@@ -71,8 +81,8 @@ class RuntimeAccelerationTests(unittest.TestCase):
 
     def test_automatic_prefers_cuda_and_offloads_only_the_safe_vram_budget(self) -> None:
         devices = (
-            GpuDevice("vulkan", "AMD Radeon", 7_000_000_000, 8_000_000_000),
-            GpuDevice("cuda", "NVIDIA GeForce", 1_500_000_000, 4_000_000_000),
+            GpuDevice("vulkan", "AMD Radeon", 7_000_000_000, 8_000_000_000, "Vulkan0"),
+            GpuDevice("cuda", "NVIDIA GeForce", 1_500_000_000, 4_000_000_000, "CUDA0"),
         )
 
         choice = choose_acceleration(
@@ -80,13 +90,14 @@ class RuntimeAccelerationTests(unittest.TestCase):
         )
 
         self.assertEqual(choice.backend, "cuda")
+        self.assertEqual(choice.native_device_name, "CUDA0")
         self.assertGreater(choice.offloaded_layers, 0)
         self.assertLess(choice.offloaded_layers, 28)
 
     def test_vulkan_is_selected_when_cuda_is_unavailable(self) -> None:
         choice = choose_acceleration(
             "gpu_preferred",
-            (GpuDevice("vulkan", "AMD Radeon", 5_000_000_000, 8_000_000_000),),
+            (GpuDevice("vulkan", "AMD Radeon", 5_000_000_000, 8_000_000_000, "Vulkan0"),),
             model_size_bytes=1_400_000_000,
             total_layers=28,
         )

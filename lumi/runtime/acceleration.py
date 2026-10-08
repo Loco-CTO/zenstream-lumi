@@ -20,12 +20,19 @@ class GpuDevice:
     name: str
     free_vram_bytes: int
     total_vram_bytes: int
+    native_device_name: str | None = None
 
     def __post_init__(self) -> None:
         if self.backend not in SUPPORTED_GPU_BACKENDS:
             raise ValueError("Unsupported GPU backend")
         if not self.name or len(self.name) > 160:
             raise ValueError("GPU device name is invalid")
+        if self.native_device_name is not None and (
+            not isinstance(self.native_device_name, str)
+            or not self.native_device_name
+            or len(self.native_device_name) > 160
+        ):
+            raise ValueError("Native GPU device name is invalid")
         if (
             isinstance(self.free_vram_bytes, bool)
             or isinstance(self.total_vram_bytes, bool)
@@ -48,6 +55,7 @@ class AccelerationChoice:
     device_memory_free_bytes: int
     device_memory_total_bytes: int
     fallback_reason: str | None = None
+    native_device_name: str | None = None
 
     @property
     def uses_gpu(self) -> bool:
@@ -115,6 +123,7 @@ def choose_acceleration(
                 total_layers=total_layers,
                 device_memory_free_bytes=selected.free_vram_bytes,
                 device_memory_total_bytes=selected.total_vram_bytes,
+                native_device_name=selected.native_device_name or selected.name,
             )
         if best_candidate is None or selected.free_vram_bytes > best_candidate[0].free_vram_bytes:
             best_candidate = (selected, int(safe_layers))
@@ -214,6 +223,7 @@ def detect_gpu_devices(binding: object) -> tuple[GpuDevice, ...]:
                     name=(description or name)[:160],
                     free_vram_bytes=int(free_memory.value),
                     total_vram_bytes=int(total_memory.value),
+                    native_device_name=name,
                 )
             )
         except (OSError, TypeError, ValueError):
@@ -269,4 +279,5 @@ def _cpu_choice(
         device_memory_free_bytes=device.free_vram_bytes if device else 0,
         device_memory_total_bytes=device.total_vram_bytes if device else 0,
         fallback_reason=fallback_reason,
+        native_device_name="CPU",
     )
