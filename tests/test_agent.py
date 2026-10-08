@@ -71,22 +71,32 @@ class ScopedTool(SearchCatalogTool):
         result: ToolResult,
         *,
         max_calls_per_turn: int = 1,
+        argument_key: str = "query",
     ) -> None:
         super().__init__(result)
         self.data_scope = data_scope
         self.max_calls_per_turn = max_calls_per_turn
+        self.argument_key = argument_key
         self.definition = ToolDefinition(
             name=name,
             description="A scoped read-only test tool.",
             parameters={
                 "type": "object",
-                "properties": {"query": {"type": "string"}},
-                "required": ["query"],
+                "properties": {argument_key: {"type": "string"}},
+                "required": [argument_key],
                 "additionalProperties": False,
             },
             data_scope=data_scope,
             read_only=True,
         )
+
+    def validate_arguments(self, arguments: Mapping[str, object]) -> Mapping[str, object]:
+        if set(arguments) != {self.argument_key}:
+            raise ValueError(f"Expected only {self.argument_key}")
+        value = arguments[self.argument_key]
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{self.argument_key} must be a non-empty string")
+        return {self.argument_key: value.strip()}
 
 
 def chat_context() -> ChatContext:
@@ -230,12 +240,14 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(tool.calls), 1)
         self.assertEqual(answer.tool_calls, 2)
 
-    async def test_web_search_is_blocked_after_any_local_lookup(self) -> None:
+    async def test_web_search_can_follow_a_local_lookup(self) -> None:
         local_tool = SearchCatalogTool()
+        source = Source("https://example.org/frieren", "example.org", "Frieren update")
         web_tool = ScopedTool(
             "web_search",
             "external_search",
-            ToolResult("External result", EvidenceTrust.EXTERNAL),
+            ToolResult("External result", EvidenceTrust.EXTERNAL, sources=(source,)),
+            max_calls_per_turn=3,
         )
         runtime = FakeRuntime(
             [
@@ -247,9 +259,16 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                 ChatMessage(
                     "assistant",
                     "",
-                    tool_calls=(ToolCall("call-2", "web_search", {"query": "watch history"}),),
+                    tool_calls=(ToolCall("call-2", "web_search", {"query": "current updates"}),),
                 ),
-                ChatMessage("assistant", "I can answer from the local lookup."),
+                ChatMessage(
+                    "assistant",
+                    "",
+                    tool_calls=(
+                        ToolCall("planned-search", "web_search", {"query": "Frieren current updates"}),
+                    ),
+                ),
+                ChatMessage("assistant", "The local catalog result and current update agree."),
             ]
         )
 
@@ -259,12 +278,11 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         ).answer(chat_context(), [], "Tell me about this series")
 
         self.assertEqual(len(local_tool.calls), 1)
-        self.assertEqual(web_tool.calls, [])
-        blocked = json.loads(runtime.requests[2].messages[-1].content)
-        self.assertIn("must happen before", blocked["content"])
-        self.assertEqual(answer.sources, ())
+        self.assertEqual(len(web_tool.calls), 1)
+        self.assertEqual(web_tool.calls[0][1]["query"], "Frieren current updates")
+        self.assertEqual(answer.sources, (source,))
 
-    async def test_web_search_planner_never_receives_prior_conversation_history(self) -> None:
+    async def test_web_search_planner_uses_bounded_history_and_sends_minimal_public_query(self) -> None:
         search_tool = ScopedTool(
             "web_search",
             "external_search",
@@ -291,7 +309,7 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                         ToolCall(
                             "safe-search",
                             "web_search",
-                            {"query": "recent updates about something like that"},
+                            {"query": "SecretFavorite recent official updates"},
                         ),
                     ),
                 ),
@@ -309,17 +327,21 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         )
 
         planner_messages = runtime.requests[1].messages
-        self.assertEqual([message.role for message in planner_messages], ["system", "user"])
-        self.assertEqual(planner_messages[1].content, user_text)
-        self.assertNotIn(
-            "SecretFavorite", " ".join(message.content for message in planner_messages)
+        self.assertEqual(
+            [message.role for message in planner_messages],
+            ["system", "user", "assistant", "user"],
         )
+        planner_dialogue = " ".join(message.content for message in planner_messages)
+        self.assertIn("SecretFavorite", planner_dialogue)
+        self.assertIn(user_text, planner_dialogue)
         self.assertEqual(
             search_tool.calls[0][1]["query"],
-            "recent updates about something like that",
+            "SecretFavorite recent official updates",
         )
+        self.assertNotIn("my favorite", search_tool.calls[0][1]["query"].lower())
+        self.assertNotIn("watch history", search_tool.calls[0][1]["query"].lower())
 
-    async def test_web_search_can_be_followed_by_result_fetch_but_search_is_one_shot(self) -> None:
+    async def test_web_search_can_repeat_and_read_a_result_within_turn_limits(self) -> None:
         search_source = Source(
             "https://example.org/article", "example.org", "Search snippet title"
         )
@@ -332,11 +354,13 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
             ToolResult("Search snippet", EvidenceTrust.EXTERNAL, sources=(search_source,)),
         )
         fetch_tool = ScopedTool(
-            "open_web_result",
+            "web_read",
             "external_fetch",
             ToolResult("Fetched page text", EvidenceTrust.EXTERNAL, sources=(fetched_source,)),
             max_calls_per_turn=2,
+            argument_key="url",
         )
+        search_tool.max_calls_per_turn = 3
         runtime = FakeRuntime(
             [
                 ChatMessage(
@@ -359,8 +383,19 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                     "assistant",
                     "",
                     tool_calls=(
-                        ToolCall("call-2", "open_web_result", {"query": "result-1"}),
+                        ToolCall("call-2", "web_read", {"url": "https://example.org/article"}),
                         ToolCall("call-3", "web_search", {"query": "follow-up from page text"}),
+                    ),
+                ),
+                ChatMessage(
+                    "assistant",
+                    "",
+                    tool_calls=(
+                        ToolCall(
+                            "planned-follow-up",
+                            "web_search",
+                            {"query": "Frieren source material and adaptation status"},
+                        ),
                     ),
                 ),
                 ChatMessage("assistant", "The retrieved source discusses the topic."),
@@ -372,30 +407,33 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
             ToolRegistry([search_tool, fetch_tool]),
         ).answer(chat_context(), [], "What is this show about?")
 
-        self.assertEqual(len(search_tool.calls), 1)
+        self.assertEqual(len(search_tool.calls), 2)
         self.assertEqual(len(fetch_tool.calls), 1)
         self.assertEqual(answer.sources, (fetched_source,))
-        blocked = json.loads(runtime.requests[3].messages[-1].content)
-        self.assertIn("one web-search call", blocked["content"])
+        self.assertEqual(
+            search_tool.calls[1][1]["query"],
+            "Frieren source material and adaptation status",
+        )
 
     async def test_web_page_limit_is_enforced_per_tool(self) -> None:
         page_tool = ScopedTool(
-            "open_web_result",
+            "web_read",
             "external_fetch",
             ToolResult("Fetched page", EvidenceTrust.EXTERNAL),
             max_calls_per_turn=1,
+            argument_key="url",
         )
         runtime = FakeRuntime(
             [
                 ChatMessage(
                     "assistant",
                     "",
-                    tool_calls=(ToolCall("call-1", "open_web_result", {"query": "result-1"}),),
+                    tool_calls=(ToolCall("call-1", "web_read", {"url": "https://example.org/one"}),),
                 ),
                 ChatMessage(
                     "assistant",
                     "",
-                    tool_calls=(ToolCall("call-2", "open_web_result", {"query": "result-2"}),),
+                    tool_calls=(ToolCall("call-2", "web_read", {"url": "https://example.org/two"}),),
                 ),
                 ChatMessage("assistant", "I have enough page evidence."),
             ]

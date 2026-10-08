@@ -22,7 +22,7 @@ The Lumi installer downloads one GGUF from a commit-pinned repository for each s
 
 The `Lumi release` GitHub Actions workflow runs the package suite on pull requests and publishes a GitHub Release when a matching stable `vMAJOR.MINOR.PATCH` tag is pushed. The tag must match `project.version` in `pyproject.toml`. Each release contains `lumi-runtime.zip` and host-specific, SHA-256 recorded dependency wheels; it never contains Qwen checkpoints or model weights.
 
-The release manifest keeps native runtime wheels separate from the deferred model-download dependency wheels. Orchestrator downloads and loads the CPU runtime only after an administrator enables Lumi. It downloads the small Hugging Face client dependency set only after an administrator explicitly starts a model installation. No checkpoint conversion, PyTorch, Transformers, model API URL, or remote inference service is used. Web research remains optional and is enabled only by the administrator's SearXNG setting.
+The release manifest keeps native runtime wheels separate from the deferred model-download dependency wheels. Orchestrator downloads and loads the CPU runtime only after an administrator enables Lumi. It downloads the small Hugging Face client dependency set only after an administrator explicitly starts a model installation. No checkpoint conversion, PyTorch, Transformers, model API URL, or remote inference service is used. Built-in public web search is included in the Lumi runtime; an administrator may optionally override its search provider with SearXNG.
 
 For local native runtime development, install the optional extra (building llama.cpp from source may require CMake and a C++ compiler):
 
@@ -66,7 +66,7 @@ Retrieved webpage content is untrusted evidence. Lumi never sends browser creden
 
 ## Web research
 
-Web research is optional. When no SearXNG URL is configured, `build_web_research_tools()` returns no tools, while local catalog tools, chat, inference, and model installation remain available. Orchestrator may enable bounded search and page retrieval by supplying an administrator-configured trusted SearXNG origin. Lumi submits focused queries derived from the current question, not private conversation history or ZenStream results. Retrieved pages are untrusted; page requests validate public destinations and redirects, send no Orchestrator credentials, and apply size and timeout limits.
+Web search and page retrieval use the bundled DDGS-compatible adapter by default, with no account, API key, endpoint URL, proxy, or separate search service. An administrator may optionally configure a trusted SearXNG origin as the search-provider override. `web_search` accepts one focused query at a time; Lumi can reformulate it or search in another language within bounded per-turn limits. A local planning pass uses only a bounded recent conversation window to resolve follow-ups, and sends the search provider only the minimum public query. `web_read(url)` fetches public HTTP(S) pages, revalidates every redirect, and applies response size and time limits. Retrieved pages are untrusted evidence; Lumi sends no Orchestrator credentials, complete watch history, usernames, private library inventories, or full conversation transcripts to external websites.
 
 ## Development status
 

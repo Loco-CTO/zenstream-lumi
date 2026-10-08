@@ -146,11 +146,19 @@ def _supports_target(
     abi_tag: str,
     platform_tag: str,
 ) -> bool:
-    return (
-        wheel.python_tag in {python_tag, "py3"}
-        and wheel.abi_tag in {abi_tag, "none"}
-        and _supports_platform_target(wheel.platform_tag, platform_tag)
-    )
+    if wheel.python_tag not in {python_tag, "py3"} or wheel.abi_tag not in {abi_tag, "none"}:
+        wheel_minor = re.fullmatch(r"cp3(\d+)", wheel.python_tag)
+        target_minor = re.fullmatch(r"cp3(\d+)", python_tag)
+        stable_abi_compatible = (
+            wheel.abi_tag == "abi3"
+            and wheel_minor is not None
+            and target_minor is not None
+            and abi_tag == python_tag
+            and int(wheel_minor.group(1)) <= int(target_minor.group(1))
+        )
+        if not stable_abi_compatible:
+            return False
+    return _supports_platform_target(wheel.platform_tag, platform_tag)
 
 
 def _manylinux_platform(platform_tag: str) -> tuple[tuple[int, int], str] | None:

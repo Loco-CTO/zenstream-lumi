@@ -128,12 +128,14 @@ class OrchestratorToolTests(unittest.IsolatedAsyncioTestCase):
                 "zenstream_continue_watching",
                 "zenstream_next_up",
                 "zenstream_favorites",
+                "web_search",
+                "web_read",
             ),
         )
         self.assertEqual(runtime.requests[1].messages[-1].role, "tool")
         self.assertIn(EvidenceTrust.LOCAL.value, runtime.requests[1].messages[-1].content)
 
-    async def test_registry_uses_six_local_routes_without_search_configuration(self) -> None:
+    async def test_registry_includes_zero_config_search_and_page_reader(self) -> None:
         app = FastAPI()
         observed: list[tuple[str, str]] = []
 
@@ -189,7 +191,15 @@ class OrchestratorToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(set(observed), expected)
         self.assertEqual(len(observed), len(expected))
-        self.assertIsNone(registry.get("web_search"))
+        search = registry.get("web_search")
+        page_reader = registry.get("web_read")
+        self.assertIsNotNone(search)
+        self.assertIsNotNone(page_reader)
+        assert search is not None and page_reader is not None
+        self.assertEqual(search.definition.data_scope, "external_search")
+        self.assertTrue(search.definition.read_only)
+        self.assertEqual(page_reader.definition.data_scope, "external_fetch")
+        self.assertTrue(page_reader.definition.read_only)
         self.assertIsNone(registry.get("open_web_result"))
 
     async def test_factory_uses_a_separate_configured_web_transport(self) -> None:
@@ -231,7 +241,7 @@ class OrchestratorToolTests(unittest.IsolatedAsyncioTestCase):
         assert tool is not None
         result = await tool.execute(
             make_context(),
-            tool.validate_arguments({"queries": [{"query": "current media news"}]}),
+            tool.validate_arguments({"query": "current media news"}),
         )
 
         self.assertIs(result.trust, EvidenceTrust.EXTERNAL)

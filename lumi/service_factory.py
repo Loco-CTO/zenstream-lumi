@@ -62,8 +62,8 @@ def build_zenstream_tool_registry(
 
     The resulting registry can be passed directly to ``LumiConversationService``. The
     optional transports are intended for in-process tests. Production uses HTTPX's default
-    network transport with environment proxy settings disabled. Web search stays disabled
-    until service configuration supplies a SearXNG URL.
+    network transport with environment proxy settings disabled. Built-in DDGS search is the
+    default; a configured SearXNG URL may override it.
     """
 
     from lumi.orchestrator_tools import (
