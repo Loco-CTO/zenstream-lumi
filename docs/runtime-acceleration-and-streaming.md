@@ -48,9 +48,9 @@ The default prompt is Chinese. Add `--thinking` to exercise Qwen3.5's hidden rea
 - full completion token rates when the binding supplies those metrics; visible answer throughput excludes hidden reasoning and tool-call tokens;
 - end-to-end embedded-runtime latency and exact model/revision/quantization provenance;
 - peak process resident memory where the OS exposes it;
-- best-effort NVIDIA system-wide VRAM use when `nvidia-smi` is available; this may include other processes and is not per-process attribution;
+- best-effort system-wide NVIDIA VRAM use via `nvidia-smi` and AMD GPU-memory use via `amd-smi`, with legacy `rocm-smi` as a fallback; both may include other processes and are not per-process attribution. AMD SMI can report shared GTT memory on APUs instead of dedicated VRAM;
 - selected backend and fallback status for each mode.
 
-System-wide NVIDIA VRAM changes observed during CPU-only trials are unattributed host measurements. They may reflect other processes, device initialization, or system activity and must not be reported as Lumi's CPU-mode VRAM use.
+System-wide GPU-memory changes observed during CPU-only trials are unattributed host measurements. They may reflect other processes, device initialization, or system activity and must not be reported as Lumi's CPU-mode GPU-memory use. A null measurement means the vendor CLI was unavailable, failed, or returned an unrecognized format; if both vendor values are null, GPU memory was not measured.
 
 Unavailable native timing or resource probes are reported as `null`, not as zero. `runtimeEndToEndMs` measures the embedded model call only. Lumi tool execution, web retrieval, Orchestrator persistence, HTTP/SSE delivery, and browser paint need a separate service/UI benchmark on the running application. Measure on an otherwise idle host when comparing memory. Model weights and benchmark outputs belong in local data/output directories, not the repository.

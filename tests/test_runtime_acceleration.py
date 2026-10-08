@@ -4,6 +4,10 @@ import unittest
 from types import SimpleNamespace
 
 from lumi.runtime.acceleration import GpuDevice, choose_acceleration, detect_gpu_devices
+from lumi.runtime.llama_cpp import (
+    LlamaCppBackendInitializationError,
+    _initialize_backend_registry,
+)
 
 
 class _NativeFunction:
@@ -50,6 +54,43 @@ class _NativeLibrary:
 
 
 class RuntimeAccelerationTests(unittest.TestCase):
+    def test_backend_registry_initialization_marks_pinned_binding_ready_once(self) -> None:
+        calls = 0
+
+        def initialize() -> None:
+            nonlocal calls
+            calls += 1
+
+        llama_type = type("Llama", (), {"_Llama__backend_initialized": False})
+        api = SimpleNamespace(
+            Llama=llama_type,
+            llama_cpp=SimpleNamespace(llama_backend_init=initialize),
+        )
+
+        _initialize_backend_registry(api)
+        _initialize_backend_registry(api)
+
+        self.assertEqual(calls, 1)
+        self.assertTrue(llama_type._Llama__backend_initialized)
+
+    def test_python_backend_registry_failure_is_not_silently_treated_as_cpu_only(self) -> None:
+        def initialize() -> None:
+            raise RuntimeError("simulated native registry exception")
+
+        llama_type = type("Llama", (), {"_Llama__backend_initialized": False})
+        api = SimpleNamespace(
+            Llama=llama_type,
+            llama_cpp=SimpleNamespace(llama_backend_init=initialize),
+        )
+
+        with self.assertRaisesRegex(
+            LlamaCppBackendInitializationError,
+            "CPU fallback is unavailable in this process",
+        ):
+            _initialize_backend_registry(api)
+
+        self.assertFalse(llama_type._Llama__backend_initialized)
+
     def test_detection_includes_cuda_and_vulkan_gpu_devices_but_skips_cpu_and_unknown(self) -> None:
         devices = detect_gpu_devices(type("Binding", (), {"_lib": _NativeLibrary()})())
 

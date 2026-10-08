@@ -73,6 +73,10 @@ class LlamaCppProtocolError(LlamaCppRuntimeError):
     """The model runtime returned output outside the supported Qwen3.5 format."""
 
 
+class LlamaCppBackendInitializationError(LlamaCppRuntimeError):
+    """The process-wide llama.cpp backend registry could not be initialized."""
+
+
 class _CombinedStoppingCriteria(list[Callable[[Any, Any], bool]]):
     """Combine the chat-template and cancellation checks in llama.cpp's callable API."""
 
@@ -534,6 +538,10 @@ class LlamaCppChatRuntime(ChatRuntime):
             self._loaded = self._load_model(request.model)
             loaded = self._loaded
             load_duration_ns = loaded.load_duration_ns
+        if cancellation.is_set():
+            # A cold native model load cannot be interrupted safely. Do not let a
+            # disconnected request continue into prompt preparation or inference.
+            raise asyncio.CancelledError
         assert loaded is not None
 
         tools_by_name = {tool.name: tool for tool in request.tools}
@@ -612,6 +620,8 @@ class LlamaCppChatRuntime(ChatRuntime):
             started_ns = time.perf_counter_ns()
             loaded.model.chat_handler = chat_handler
             try:
+                if cancellation.is_set():
+                    raise asyncio.CancelledError
                 result = loaded.model.create_chat_completion(
                     messages=messages,
                     tools=tools or None,
@@ -823,10 +833,15 @@ class LlamaCppChatRuntime(ChatRuntime):
             total_layers = _read_gguf_layer_count(model_path)
         except LlamaCppRuntimeError:
             total_layers = 0
+        try:
+            _initialize_backend_registry(api)
+        except LlamaCppBackendInitializationError as error:
+            self._acceleration = _cpu_choice(total_layers, str(error))
+            self._acceleration_state = "unavailable"
+            raise
         if self.config.acceleration_mode == "cpu_only" or self._forced_cpu_reason is not None:
-            # Avoid GPU enumeration during device selection. llama-cpp-python
-            # still initializes its shared backend registry in Llama.__init__,
-            # but the model itself is explicitly restricted to the CPU device.
+            # Avoid GPU enumeration during device selection while still preparing
+            # llama-cpp-python's process-wide backend registry exactly once.
             choice = _cpu_choice(total_layers, self._forced_cpu_reason)
         else:
             devices = _available_gpu_devices(api)
@@ -1037,14 +1052,39 @@ def _available_gpu_devices(api: Any) -> tuple[GpuDevice, ...]:
             return tuple(device for device in devices if isinstance(device, GpuDevice))
         except Exception:
             return ()
+    return detect_gpu_devices(api)
+
+
+def _initialize_backend_registry(api: Any) -> None:
+    """Initialize llama.cpp's process-wide backend registry once, with a clear error.
+
+    llama-cpp-python 0.3.35 calls ``llama_backend_init`` inside ``Llama.__init__``.
+    Lumi initializes it before probing devices so a Python-level failure is not
+    mistaken for a normal CPU-only host. After success, set the wrapper's matching
+    class flag to avoid repeating the same global initialization in its constructor.
+    """
+
+    llama_type = getattr(api, "Llama", None)
+    backend_initialized_attribute = "_Llama__backend_initialized"
+    if (
+        isinstance(llama_type, type)
+        and getattr(llama_type, backend_initialized_attribute, False)
+    ):
+        return
+
     native_module = getattr(api, "llama_cpp", None)
     backend_init = getattr(native_module, "llama_backend_init", None)
-    if callable(backend_init):
-        try:
-            backend_init()
-        except Exception:
-            return ()
-    return detect_gpu_devices(api)
+    if not callable(backend_init):
+        return
+    try:
+        backend_init()
+    except Exception as error:
+        raise LlamaCppBackendInitializationError(
+            "The llama.cpp backend registry could not initialize; CPU fallback is "
+            "unavailable in this process"
+        ) from error
+    if isinstance(llama_type, type):
+        setattr(llama_type, backend_initialized_attribute, True)
 
 
 def _metadata_layer_count(metadata: Any) -> int | None:

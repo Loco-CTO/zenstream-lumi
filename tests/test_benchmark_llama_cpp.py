@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -142,6 +143,117 @@ class BenchmarkStreamMeasurementTests(unittest.TestCase):
                 _run_immediate(
                     benchmark_llama_cpp._measure_run(runtime, object(), 2)
                 )
+
+
+class AmdGpuMemoryMeasurementTests(unittest.TestCase):
+    def test_amd_smi_json_sums_reported_device_memory_in_megabytes(self) -> None:
+        output = json.dumps(
+            [
+                {"gpu": 0, "vram_used": {"value": 12, "unit": "MB"}},
+                {"gpu": 1, "vram_used": {"value": 20, "unit": "MiB"}},
+            ]
+        )
+
+        used_bytes = benchmark_llama_cpp._parse_amd_gpu_memory_json(
+            output, default_unit="MB"
+        )
+
+        self.assertEqual(used_bytes, 32 * 1024**2)
+
+    def test_nested_apu_gtt_memory_is_reported_instead_of_claiming_vram(self) -> None:
+        output = json.dumps(
+            {"gpu": 0, "gtt_usage": {"used": {"value": 1.5, "unit": "GB"}}}
+        )
+
+        used_bytes = benchmark_llama_cpp._parse_amd_gpu_memory_json(
+            output, default_unit="MB"
+        )
+
+        self.assertEqual(used_bytes, round(1.5 * 1024**3))
+
+    def test_legacy_rocm_smi_byte_fields_are_supported(self) -> None:
+        output = json.dumps(
+            {
+                "card0": {
+                    "VRAM Total Memory (B)": 8_000_000,
+                    "VRAM Used Memory (B)": 1_000_000,
+                },
+                "card1": {
+                    "VRAM Total Memory (B)": 8_000_000,
+                    "VRAM Used Memory (B)": 2_000_000,
+                },
+            }
+        )
+
+        used_bytes = benchmark_llama_cpp._parse_amd_gpu_memory_json(
+            output, default_unit="B"
+        )
+
+        self.assertEqual(used_bytes, 3_000_000)
+
+    def test_amd_probe_uses_amd_smi_and_reports_its_source(self) -> None:
+        output = json.dumps([{"gpu": 0, "vram_used": {"value": 7, "unit": "MB"}}])
+        with (
+            patch.object(
+                benchmark_llama_cpp.shutil,
+                "which",
+                side_effect=lambda command: "amd-smi.exe" if command == "amd-smi" else None,
+            ),
+            patch.object(
+                benchmark_llama_cpp.subprocess,
+                "run",
+                return_value=SimpleNamespace(returncode=0, stdout=output),
+            ) as run,
+        ):
+            sample = benchmark_llama_cpp._system_amd_gpu_memory_sample()
+
+        self.assertEqual(sample, ("amd-smi", 7 * 1024**2))
+        self.assertEqual(run.call_args.args[0][1:], ["monitor", "--vram-usage", "--json"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 2)
+
+    def test_amd_probe_falls_back_to_legacy_rocm_smi(self) -> None:
+        output = json.dumps({"card0": {"VRAM Used Memory (B)": 1_234}})
+        with (
+            patch.object(
+                benchmark_llama_cpp.shutil,
+                "which",
+                side_effect=lambda command: "rocm-smi.exe" if command == "rocm-smi" else None,
+            ),
+            patch.object(
+                benchmark_llama_cpp.subprocess,
+                "run",
+                return_value=SimpleNamespace(returncode=0, stdout=output),
+            ) as run,
+        ):
+            sample = benchmark_llama_cpp._system_amd_gpu_memory_sample()
+
+        self.assertEqual(sample, ("rocm-smi", 1_234))
+        self.assertEqual(
+            run.call_args.args[0][1:], ["--showmeminfo", "vram", "--json"]
+        )
+
+    def test_unavailable_or_unrecognized_amd_metrics_stay_unmeasured(self) -> None:
+        with patch.object(benchmark_llama_cpp.shutil, "which", return_value=None):
+            self.assertIsNone(benchmark_llama_cpp._system_amd_gpu_memory_sample())
+
+        self.assertIsNone(
+            benchmark_llama_cpp._parse_amd_gpu_memory_json(
+                '{"gpu": 0, "vram_percent": 50}', default_unit="MB"
+            )
+        )
+
+    def test_resource_report_identifies_amd_source_and_systemwide_values(self) -> None:
+        sampler = benchmark_llama_cpp._ResourceSampler(interval_seconds=1)
+        sampler.amd_memory_before = 1_000
+        sampler.amd_memory_peak = 2_500
+        sampler.amd_memory_sources.add("amd-smi")
+
+        result = sampler.result()
+
+        self.assertEqual(result["systemAmdGpuMemoryUsedBeforeBytes"], 1_000)
+        self.assertEqual(result["systemAmdGpuMemoryUsedPeakBytes"], 2_500)
+        self.assertEqual(result["systemAmdGpuMemoryUsedIncreaseBytes"], 1_500)
+        self.assertEqual(result["systemAmdGpuMemoryMeasurementSource"], "amd-smi")
 
 
 if __name__ == "__main__":

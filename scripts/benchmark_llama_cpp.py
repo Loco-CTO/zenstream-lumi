@@ -11,8 +11,10 @@ import asyncio
 import ctypes
 import hashlib
 import json
+import math
 import os
 import platform
+import re
 import shutil
 import statistics
 import subprocess
@@ -154,8 +156,155 @@ def _system_nvidia_vram_used_bytes() -> int | None:
     return sum(values) if values else None
 
 
+def _normalize_metric_key(value: object) -> str:
+    return "".join(character.lower() for character in str(value) if character.isalnum())
+
+
+def _metric_value_bytes(value: object, default_unit: str) -> int | None:
+    """Convert a numeric AMD SMI metric to bytes, respecting its reported unit."""
+
+    unit = default_unit
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if _normalize_metric_key(key) in {"unit", "units"} and isinstance(nested, str):
+                unit = nested
+                break
+        for key in ("value", "used", "usage"):
+            if key in value:
+                return _metric_value_bytes(value[key], unit)
+        return None
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        amount = float(value)
+    elif isinstance(value, str):
+        match = re.fullmatch(r"\s*([+]?(?:\d+(?:\.\d*)?|\.\d+))\s*([A-Za-z]+)?\s*", value)
+        if match is None:
+            return None
+        amount = float(match.group(1))
+        if match.group(2):
+            unit = match.group(2)
+    else:
+        return None
+
+    if not math.isfinite(amount) or amount < 0:
+        return None
+    normalized_unit = unit.strip().lower()
+    factors = {
+        "b": 1,
+        "byte": 1,
+        "bytes": 1,
+        "kb": 1024,
+        "kib": 1024,
+        "mb": 1024**2,
+        "mib": 1024**2,
+        "gb": 1024**3,
+        "gib": 1024**3,
+    }
+    factor = factors.get(normalized_unit)
+    return round(amount * factor) if factor is not None else None
+
+
+def _amd_memory_metric_unit(key: str, default_unit: str) -> str:
+    if key.endswith("bytes") or key.endswith("memoryb") or key.endswith("usedb"):
+        return "B"
+    if key.endswith("mib"):
+        return "MiB"
+    if key.endswith("mb"):
+        return "MB"
+    if key.endswith("gib"):
+        return "GiB"
+    if key.endswith("gb"):
+        return "GB"
+    return default_unit
+
+
+def _parse_amd_gpu_memory_json(output: str, *, default_unit: str) -> int | None:
+    """Sum recognized per-device AMD VRAM/GTT used fields from AMD SMI JSON."""
+
+    try:
+        payload = json.loads(output)
+    except (TypeError, ValueError):
+        return None
+
+    values: list[int] = []
+
+    def visit(node: object, memory_kind: str | None = None) -> None:
+        if isinstance(node, list):
+            for item in node:
+                visit(item, memory_kind)
+            return
+        if not isinstance(node, dict):
+            return
+
+        for key, value in node.items():
+            normalized = _normalize_metric_key(key)
+            if normalized.startswith("vram"):
+                kind = "vram"
+            elif normalized.startswith("gtt"):
+                kind = "gtt"
+            else:
+                kind = memory_kind
+
+            if kind and "used" in normalized and "total" not in normalized:
+                if any(marker in normalized for marker in ("percent", "pct", "util", "ratio")):
+                    continue
+                amount = _metric_value_bytes(
+                    value, _amd_memory_metric_unit(normalized, default_unit)
+                )
+                if amount is not None:
+                    values.append(amount)
+                continue
+
+            if kind and normalized in {"used", "usage"}:
+                amount = _metric_value_bytes(value, default_unit)
+                if amount is not None:
+                    values.append(amount)
+                continue
+
+            if normalized in {"vram", "vramusage", "gtt", "gttusage"}:
+                visit(value, kind)
+            else:
+                visit(value, memory_kind)
+
+    visit(payload)
+    return sum(values) if values else None
+
+
+def _system_amd_gpu_memory_sample() -> tuple[str, int] | None:
+    """Read best-effort system AMD GPU memory use via AMD SMI or legacy ROCm SMI."""
+
+    probes = (
+        ("amd-smi", ("monitor", "--vram-usage", "--json"), "MB"),
+        ("rocm-smi", ("--showmeminfo", "vram", "--json"), "B"),
+    )
+    for command, arguments, default_unit in probes:
+        executable = shutil.which(command)
+        if executable is None:
+            continue
+        try:
+            result = subprocess.run(
+                [executable, *arguments],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=2,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode != 0:
+            continue
+        used_bytes = _parse_amd_gpu_memory_json(result.stdout, default_unit=default_unit)
+        if used_bytes is not None:
+            return command, used_bytes
+    return None
+
+
 class _ResourceSampler:
-    """Best-effort periodic RAM and NVIDIA VRAM sampling for one mode trial."""
+    """Best-effort periodic RAM and vendor-reported GPU memory sampling."""
 
     def __init__(self, interval_seconds: float) -> None:
         self._interval_seconds = interval_seconds
@@ -165,18 +314,32 @@ class _ResourceSampler:
         self.rss_peak: int | None = None
         self.vram_before: int | None = None
         self.vram_peak: int | None = None
+        self.amd_memory_before: int | None = None
+        self.amd_memory_peak: int | None = None
+        self.amd_memory_sources: set[str] = set()
 
     def _sample(self) -> None:
         rss = _process_rss_bytes()
         vram = _system_nvidia_vram_used_bytes()
+        amd_memory = _system_amd_gpu_memory_sample()
         if rss is not None:
             self.rss_peak = max(self.rss_peak or rss, rss)
         if vram is not None:
             self.vram_peak = max(self.vram_peak or vram, vram)
+        if amd_memory is not None:
+            source, used_bytes = amd_memory
+            self.amd_memory_sources.add(source)
+            if self.amd_memory_before is None:
+                self.amd_memory_before = used_bytes
+            self.amd_memory_peak = max(self.amd_memory_peak or used_bytes, used_bytes)
 
     def start(self) -> None:
         self.rss_before = _process_rss_bytes()
         self.vram_before = _system_nvidia_vram_used_bytes()
+        amd_memory = _system_amd_gpu_memory_sample()
+        if amd_memory is not None:
+            source, self.amd_memory_before = amd_memory
+            self.amd_memory_sources.add(source)
         self._sample()
         self._thread = threading.Thread(target=self._run, name="lumi-benchmark-sampler")
         self._thread.start()
@@ -191,7 +354,7 @@ class _ResourceSampler:
             self._thread.join(timeout=max(2.0, self._interval_seconds * 3))
         self._sample()
 
-    def result(self) -> dict[str, int | None]:
+    def result(self) -> dict[str, int | str | None]:
         rss_delta = (
             max(0, self.rss_peak - self.rss_before)
             if self.rss_peak is not None and self.rss_before is not None
@@ -202,6 +365,11 @@ class _ResourceSampler:
             if self.vram_peak is not None and self.vram_before is not None
             else None
         )
+        amd_memory_delta = (
+            max(0, self.amd_memory_peak - self.amd_memory_before)
+            if self.amd_memory_peak is not None and self.amd_memory_before is not None
+            else None
+        )
         return {
             "processRssBeforeBytes": self.rss_before,
             "processRssPeakBytes": self.rss_peak,
@@ -209,6 +377,14 @@ class _ResourceSampler:
             "systemNvidiaVramUsedBeforeBytes": self.vram_before,
             "systemNvidiaVramUsedPeakBytes": self.vram_peak,
             "systemNvidiaVramUsedIncreaseBytes": vram_delta,
+            "systemAmdGpuMemoryUsedBeforeBytes": self.amd_memory_before,
+            "systemAmdGpuMemoryUsedPeakBytes": self.amd_memory_peak,
+            "systemAmdGpuMemoryUsedIncreaseBytes": amd_memory_delta,
+            "systemAmdGpuMemoryMeasurementSource": (
+                ", ".join(sorted(self.amd_memory_sources))
+                if self.amd_memory_sources
+                else None
+            ),
         }
 
 
@@ -427,7 +603,7 @@ async def _run(arguments: argparse.Namespace) -> dict[str, Any]:
         )
 
     return {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "model": {
             "id": arguments.model,
             **provenance,
@@ -444,7 +620,16 @@ async def _run(arguments: argparse.Namespace) -> dict[str, Any]:
         "resourceMeasurementNotes": [
             "Process RSS is sampled from the OS when the platform exposes it.",
             "NVIDIA VRAM is sampled system-wide with nvidia-smi and may include other processes.",
-            "AMD/ROCm VRAM is unavailable; this harness does not currently have a rocm-smi probe.",
+            (
+                "AMD GPU memory is sampled system-wide with amd-smi, falling back to legacy "
+                "rocm-smi when available; it may include other processes. AMD SMI can report "
+                "shared GTT memory for APUs instead of dedicated VRAM."
+            ),
+            (
+                "A vendor's GPU-memory fields are null when its CLI is unavailable, fails, or "
+                "returns an unrecognized schema. If both NVIDIA and AMD measurements are null, "
+                "GPU memory was not measured."
+            ),
             (
                 "llama-cpp-python 0.3.35 does not expose full streamed completion token counts. "
                 "visibleOutputTokensPerSecond re-tokenizes only the visible final answer, so it "
