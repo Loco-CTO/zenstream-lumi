@@ -206,7 +206,8 @@ class ModelInstallationTests(unittest.TestCase):
 
             artifact = installer.install_model(_MODEL_ID)
 
-        self.assertEqual(calls, [cache_directory, cache_directory])
+        resolved_cache_directory = cache_directory.resolve()
+        self.assertEqual(calls, [resolved_cache_directory, resolved_cache_directory])
         self.assertTrue(Path(artifact.directory).is_dir())
         self.assertFalse(cache_directory.exists())
         self.assertFalse(cache_root.exists())
