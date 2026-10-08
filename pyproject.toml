@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zenstream-lumi"
-version = "0.3.0"
+version = "0.3.1"
 description = "Local, read-only conversational media assistant for ZenStream"
 readme = "README.md"
 requires-python = ">=3.12"
