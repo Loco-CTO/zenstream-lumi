@@ -916,8 +916,8 @@ class LlamaCppChatRuntime(ChatRuntime):
 
             import llama_cpp
             import llama_cpp._ggml as llama_ggml
-            from llama_cpp._ctypes_extensions import load_shared_library
             from llama_cpp import llama_cpp as llama_cpp_bindings
+            from llama_cpp._ctypes_extensions import load_shared_library
             from llama_cpp.llama_chat_format import (
                 Jinja2ChatFormatter,
                 chat_formatter_to_chat_completion_handler,
@@ -1014,7 +1014,7 @@ def _backend_device_handle(api: Any, device_name: str) -> int:
     )
     for library in libraries:
         try:
-            get_device = getattr(library, "ggml_backend_dev_by_name")
+            get_device = library.ggml_backend_dev_by_name
         except AttributeError:
             continue
         get_device.restype = ctypes.c_void_p

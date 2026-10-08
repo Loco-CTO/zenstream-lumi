@@ -31,6 +31,8 @@ from lumi.runtime.llama_cpp import (
 )
 
 _GGUF_FILENAME = "Qwen_Qwen3.5-test-Q4_K_M.gguf"
+# Each fake Llama constructor receives its own binding in a copied globals dict.
+llama_cpp: Any = None
 
 
 class _FakeModelParams(ctypes.Structure):
