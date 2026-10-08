@@ -14,8 +14,8 @@ from lumi.agent import (
     _recommendation_locale,
 )
 from lumi.contracts import (
-    ChatContext,
     ChatAnswer,
+    ChatContext,
     ChatMessage,
     EntityReference,
     EvidenceTrust,
@@ -524,7 +524,8 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                 ChatMessage(
                     "assistant",
                     'Rejected Film is not a match :::zenstream{type="movie" id="movie-1"}. '
-                    'I recommend Verified Film because its political intrigue matches your request, '
+                    'I recommend Verified Film because its political intrigue '
+                    'matches your request, '
                     'released in 2027 and rated 9.8 '
                     ':::zenstream{type="movie" id="movie-2"}.',
                 ),
