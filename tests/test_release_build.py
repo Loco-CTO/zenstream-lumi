@@ -148,10 +148,10 @@ class LumiReleaseBuildTests(unittest.TestCase):
             root = Path(temporary)
             wheelhouse = self._wheelhouse(root)
             output = root / "release"
-            manifest = build_release(project_root, wheelhouse, output, "v0.3.1")
+            manifest = build_release(project_root, wheelhouse, output, "v0.3.2")
 
             self.assertEqual(manifest["schemaVersion"], 1)
-            self.assertEqual(manifest["tag"], "v0.3.1")
+            self.assertEqual(manifest["tag"], "v0.3.2")
             self.assertEqual(len(manifest["runtimeDependencies"]), 30)
             self.assertEqual(len(manifest["installerDependencies"]), 5)
             runtime_names = {
@@ -229,9 +229,9 @@ class LumiReleaseBuildTests(unittest.TestCase):
                 )
 
             self.assertGreater(len(list(wheelhouse.rglob("*.whl"))), 128)
-            manifest = build_release(project_root, wheelhouse, root / "out", "v0.3.1")
+            manifest = build_release(project_root, wheelhouse, root / "out", "v0.3.2")
 
-        self.assertEqual(manifest["tag"], "v0.3.1")
+        self.assertEqual(manifest["tag"], "v0.3.2")
         self.assertGreater(len(manifest["installerDependencies"]), 2)
 
     def test_rejects_a_tag_that_does_not_match_project_version(self) -> None:
@@ -253,7 +253,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
             )
             missing.unlink()
             with self.assertRaisesRegex(ReleaseBuildError, "no llama-cpp-python wheel"):
-                build_release(project_root, wheelhouse, root / "out", "v0.3.1")
+                build_release(project_root, wheelhouse, root / "out", "v0.3.2")
 
     def test_ignores_nested_vendored_distribution_metadata(self) -> None:
         project_root = Path(__file__).resolve().parents[1]
@@ -274,7 +274,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
                     "Metadata-Version: 2.1\nName: jaraco-text\nVersion: 3.12.1\n\n",
                 )
 
-            manifest = build_release(project_root, wheelhouse, root / "out", "v0.3.1")
+            manifest = build_release(project_root, wheelhouse, root / "out", "v0.3.2")
 
         installer_names = {
             entry["distribution"].lower() for entry in manifest["installerDependencies"]
@@ -296,7 +296,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
                 wheel.unlink()
                 replacement.replace(wheel)
             with self.assertRaisesRegex(ReleaseBuildError, "no compiled llama library"):
-                build_release(project_root, wheelhouse, root / "out", "v0.3.1")
+                build_release(project_root, wheelhouse, root / "out", "v0.3.2")
 
 
 if __name__ == "__main__":
