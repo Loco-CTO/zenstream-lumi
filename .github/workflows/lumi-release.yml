@@ -162,7 +162,7 @@ jobs:
           "diskcache==5.6.3"
           "jinja2==3.1.6"
           "numpy==2.5.3"
-          "typing_extensions==4.15.0"
+          "typing_extensions==4.16.0"
       - name: Download pinned CPU model installer wheels and their dependencies
         run: >-
           python -m pip download
@@ -193,9 +193,15 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Download all platform wheelhouses
+      - name: Download CPU runtime wheels
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
+          pattern: llama-cpp-*
+          path: build/wheels/runtime
+      - name: Download all platform dependency wheelhouses
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: wheels-*
           path: build/wheels
       - name: Create the verified Lumi release archive
         run: python scripts/build_release.py --tag "${GITHUB_REF_NAME}" --wheelhouse build/wheels --output dist/release

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zenstream-lumi"
-version = "0.2.0"
+version = "0.2.1"
 description = "Local, read-only conversational media assistant for ZenStream"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -25,7 +25,7 @@ embedded = [
     "jinja2==3.1.6",
     "llama-cpp-python==0.3.35",
     "numpy==2.5.3",
-    "typing_extensions==4.15.0",
+    "typing_extensions==4.16.0",
 ]
 model-install = ["huggingface-hub==1.10.0"]
 
