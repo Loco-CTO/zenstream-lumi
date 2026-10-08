@@ -100,13 +100,10 @@ def _wheel_identity(path: Path) -> WheelAsset:
     if len(parts) < 5:
         raise ReleaseBuildError(f"wheel filename is invalid: {path.name}")
     distribution, version, python_tag, abi_tag, platform_tag = parts[-5:]
-    if not all(
-        re.fullmatch(r"[A-Za-z0-9_.+]+", item) for item in (distribution, version)
-    ):
+    if not all(re.fullmatch(r"[A-Za-z0-9_.+]+", item) for item in (distribution, version)):
         raise ReleaseBuildError(f"wheel identity is invalid: {path.name}")
     if not all(
-        re.fullmatch(r"[A-Za-z0-9_.]+", item)
-        for item in (python_tag, abi_tag, platform_tag)
+        re.fullmatch(r"[A-Za-z0-9_.]+", item) for item in (python_tag, abi_tag, platform_tag)
     ):
         raise ReleaseBuildError(f"wheel tags are invalid: {path.name}")
 
@@ -181,10 +178,7 @@ def _supports_platform_target(wheel_platform_tag: str, target_platform_tag: str)
         if candidate is None:
             continue
         candidate_baseline, candidate_architecture = candidate
-        if (
-            candidate_architecture == target_architecture
-            and candidate_baseline <= target_baseline
-        ):
+        if candidate_architecture == target_architecture and candidate_baseline <= target_baseline:
             return True
     return False
 
@@ -218,18 +212,24 @@ def _collect_wheels(
     if not any(assets_by_group.values()):
         raise ReleaseBuildError("the release wheelhouse is empty or exceeds the asset limit")
 
-    runtime_names = {
-        _canonical_distribution(name) for name in release["runtime-distributions"]
+    runtime_names = {_canonical_distribution(name) for name in release["runtime-distributions"]}
+    native_runtime_names = {
+        _canonical_distribution(name) for name in release.get("runtime-native-distributions", [])
     }
-    installer_roots = {
-        _canonical_distribution(name) for name in release["installer-distributions"]
-    }
+    installer_roots = {_canonical_distribution(name) for name in release["installer-distributions"]}
     runtime = list(assets_by_group["runtime"].values())
     installer = list(assets_by_group["installer"].values())
     runtime_found = {_canonical_distribution(wheel.distribution) for wheel in runtime}
     installer_found = {_canonical_distribution(wheel.distribution) for wheel in installer}
     if not runtime_names.issubset(runtime_found) or not installer_roots.issubset(installer_found):
         raise ReleaseBuildError("the wheelhouse is missing a required Lumi dependency")
+    if not native_runtime_names.issubset(runtime_names):
+        raise ReleaseBuildError(
+            "native runtime dependencies must be declared as runtime dependencies"
+        )
+    for wheel in runtime:
+        if _canonical_distribution(wheel.distribution) in native_runtime_names:
+            _validate_native_runtime_wheel(wheel)
 
     if len(runtime) + len(installer) > _MAX_WHEEL_ASSETS:
         raise ReleaseBuildError("the release wheelhouse is empty or exceeds the asset limit")
@@ -245,6 +245,14 @@ def _collect_wheels(
                     raise ReleaseBuildError(
                         f"no {distribution} wheel for {python_tag}/{platform_tag}"
                     )
+        for distribution in native_runtime_names:
+            if not any(
+                _canonical_distribution(wheel.distribution) == distribution
+                and wheel.platform_tag != "any"
+                and _supports_target(wheel, python_tag, abi_tag, platform_tag)
+                for wheel in runtime
+            ):
+                raise ReleaseBuildError(f"no host-specific {distribution} wheel for {platform_tag}")
 
     runtime_versions: dict[str, set[str]] = {}
     installer_versions: dict[str, set[str]] = {}
@@ -253,9 +261,9 @@ def _collect_wheels(
             wheel.version
         )
     for wheel in installer:
-        installer_versions.setdefault(
-            _canonical_distribution(wheel.distribution), set()
-        ).add(wheel.version)
+        installer_versions.setdefault(_canonical_distribution(wheel.distribution), set()).add(
+            wheel.version
+        )
     for distribution in runtime_versions.keys() & installer_versions.keys():
         if runtime_versions[distribution] != installer_versions[distribution]:
             raise ReleaseBuildError(
@@ -280,6 +288,30 @@ def _collect_wheels(
     runtime.sort(key=lambda wheel: wheel.path.name)
     installer = sorted(installer_by_name.values(), key=lambda wheel: wheel.path.name)
     return runtime, installer
+
+
+def _validate_native_runtime_wheel(wheel: WheelAsset) -> None:
+    try:
+        with zipfile.ZipFile(wheel.path) as archive:
+            has_runtime_library = any(
+                name.startswith("llama_cpp/lib/") and _is_llama_runtime_library(name)
+                for name in archive.namelist()
+            )
+    except (OSError, zipfile.BadZipFile) as error:
+        raise ReleaseBuildError(
+            f"native runtime wheel archive is invalid: {wheel.path.name}"
+        ) from error
+    if not has_runtime_library:
+        raise ReleaseBuildError(
+            f"native runtime wheel has no compiled llama library: {wheel.path.name}"
+        )
+
+
+def _is_llama_runtime_library(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1].lower()
+    if not name.startswith(("llama.", "libllama.")):
+        return False
+    return name.endswith((".dll", ".dylib", ".so")) or ".so." in name
 
 
 def _package_files(package_root: Path) -> dict[str, tuple[bytes, str]]:
@@ -318,9 +350,7 @@ def build_release(
         "tag": tag,
         "runtimeApiVersion": release["runtime-api-version"],
         "minimumOrchestratorVersion": release["minimum-orchestrator-version"],
-        "maximumOrchestratorVersionExclusive": release[
-            "maximum-orchestrator-version-exclusive"
-        ],
+        "maximumOrchestratorVersionExclusive": release["maximum-orchestrator-version-exclusive"],
         "files": {
             relative: {"size": len(payload), "sha256": digest}
             for relative, (payload, digest) in package_files.items()
@@ -354,7 +384,7 @@ def build_release(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tag", required=True, help="Stable release tag, for example v0.1.2")
+    parser.add_argument("--tag", required=True, help="Stable release tag, for example v0.2.0")
     parser.add_argument(
         "--check-tag",
         action="store_true",
@@ -384,5 +414,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

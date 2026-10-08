@@ -34,7 +34,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Install package test dependencies
-        run: python -m pip install -e ".[dev,service,embedded]"
+        run: python -m pip install -e ".[dev,service]"
       - name: Check release tag
         if: startsWith(github.ref, 'refs/tags/')
         run: python scripts/build_release.py --tag "${GITHUB_REF_NAME}" --check-tag
@@ -46,10 +46,72 @@ jobs:
       - name: Compile package and release script
         run: python -m compileall -q lumi scripts tests
 
+  native-windows:
+    name: Build CPU runtime wheel (Windows x64)
+    needs: tests
+    runs-on: windows-latest
+    env:
+      CMAKE_ARGS: -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_CUDA=OFF
+      CMAKE_GENERATOR: Visual Studio 17 2022
+      CMAKE_GENERATOR_PLATFORM: x64
+    steps:
+      - name: Check out Lumi
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Build the pinned CPU-only llama.cpp runtime wheel
+        run: >-
+          python -m pip wheel
+          --no-deps
+          --no-binary=llama-cpp-python
+          --wheel-dir dist/wheels/runtime
+          "llama-cpp-python==0.3.35"
+      - name: Save the platform runtime wheel
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: llama-cpp-windows-x64
+          path: dist/wheels/runtime/*.whl
+          if-no-files-found: error
+          retention-days: 1
+
+  native-linux:
+    name: Build CPU runtime wheel (${{ matrix.target }})
+    needs: tests
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ matrix.container }}
+    env:
+      CMAKE_ARGS: -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_CUDA=OFF
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, runner: ubuntu-24.04, container: quay.io/pypa/manylinux_2_28_x86_64:latest, platform: manylinux_2_28_x86_64 }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm, container: quay.io/pypa/manylinux_2_28_aarch64:latest, platform: manylinux_2_28_aarch64 }
+    steps:
+      - name: Check out Lumi
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Build and repair the pinned CPU-only llama.cpp runtime wheel
+        run: |
+          PYTHON=/opt/python/cp312-cp312/bin/python
+          "$PYTHON" -m pip wheel --no-deps --no-binary=llama-cpp-python --wheel-dir dist/wheels/runtime "llama-cpp-python==0.3.35"
+          auditwheel repair --plat "${{ matrix.platform }}" --wheel-dir dist/wheels/repaired dist/wheels/runtime/*.whl
+          rm dist/wheels/runtime/*.whl
+          mv dist/wheels/repaired/*.whl dist/wheels/runtime/
+      - name: Save the platform runtime wheel
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: llama-cpp-${{ matrix.target }}
+          path: dist/wheels/runtime/*.whl
+          if-no-files-found: error
+          retention-days: 1
+
   release-wheels:
     name: Build dependency wheelhouse (Python ${{ matrix.python }} on ${{ matrix.target }})
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: tests
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+    needs: [tests, native-windows, native-linux]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -71,24 +133,26 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
-      - name: Download pinned runtime wheels and their dependencies
+      - name: Download the platform-specific llama.cpp runtime wheel
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: llama-cpp-${{ matrix.target }}
+          path: dist/wheels/runtime
+      - name: Download pinned runtime dependencies
         run: >-
           python -m pip download
           --only-binary=:all:
           --dest dist/wheels/runtime
+          "diskcache==5.6.3"
+          "jinja2==3.1.6"
           "numpy==2.5.3"
-          "onnxruntime-genai==0.17.1"
+          "typing_extensions==4.15.0"
       - name: Download pinned CPU model installer wheels and their dependencies
         run: >-
           python -m pip download
           --only-binary=:all:
           --dest dist/wheels/installer
-          --find-links https://download.pytorch.org/whl/cpu/torch/
           "huggingface-hub==1.10.0"
-          "onnx-ir==0.2.1"
-          "numpy==2.5.3"
-          "torch==2.11.0+cpu"
-          "transformers==5.2.0"
       - name: Save wheelhouse artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:

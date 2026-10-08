@@ -1,4 +1,4 @@
-"""Install pinned, official Qwen3.5 checkpoints as verified ORT GenAI models.
+"""Install pinned, verified Qwen3.5 GGUF models for in-process llama.cpp.
 
 The module has no download or conversion side effects at import time. Install-time
 dependencies are optional so Lumi can still be used without model installation enabled.
@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 INSTALL_PROGRESS_TOTAL = 10_000
 MODEL_INSTALL_API_VERSION = 1
 MODEL_MANIFEST_FILENAME = "lumi-model-manifest.json"
-MODEL_MANIFEST_SCHEMA_VERSION = 1
-ORT_GENAI_BUILDER_VERSION = "0.17.1"
+MODEL_MANIFEST_SCHEMA_VERSION = 2
+GGUF_FORMAT = "llama.cpp-gguf"
 
 
 class ModelInstallationError(RuntimeError):
@@ -95,18 +95,18 @@ class ModelInstallOption:
 
 @dataclass(frozen=True, slots=True)
 class Qwen35ModelSpec:
-    """Immutable source pins for one text-only Qwen3.5 CPU export."""
+    """Immutable source and artifact pins for one supported Qwen3.5 GGUF."""
 
     model_id: str
     directory_name: str
     label: str
     repository_id: str
     revision: str
-    architecture: str
-    model_type: str
-    source_files: tuple[str, ...]
-    weight_sha256: tuple[tuple[str, str], ...]
-    max_source_bytes: int
+    gguf_filename: str
+    quantization: str
+    gguf_sha256: str
+    download_size_bytes: int
+    max_download_bytes: int
     supports_thinking: bool = True
 
     @property
@@ -117,96 +117,53 @@ class Qwen35ModelSpec:
         return {
             "repositoryId": self.repository_id,
             "revision": self.revision,
-            "files": list(self.source_files),
-            "weightSha256": dict(self.weight_sha256),
+            "filename": self.gguf_filename,
+            "quantization": self.quantization,
+            "sha256": self.gguf_sha256,
+            "size": self.download_size_bytes,
         }
 
-
-_COMMON_SOURCE_FILES = (
-    "LICENSE",
-    "chat_template.jinja",
-    "config.json",
-    "merges.txt",
-    "model.safetensors.index.json",
-    "preprocessor_config.json",
-    "tokenizer.json",
-    "tokenizer_config.json",
-    "video_preprocessor_config.json",
-    "vocab.json",
-)
 
 _MODEL_SPECS: dict[str, Qwen35ModelSpec] = {
     "qwen3.5:0.8b": Qwen35ModelSpec(
         model_id="qwen3.5:0.8b",
         directory_name="qwen3.5-0.8b",
         label="Qwen3.5 0.8B",
-        repository_id="Qwen/Qwen3.5-0.8B",
-        revision="2fc06364715b967f1860aea9cf38778875588b17",
-        architecture="Qwen3_5ForConditionalGeneration",
-        model_type="qwen3_5_text",
-        source_files=(
-            *_COMMON_SOURCE_FILES,
-            "model.safetensors-00001-of-00001.safetensors",
-        ),
-        weight_sha256=(
-            (
-                "model.safetensors-00001-of-00001.safetensors",
-                "04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696",
-            ),
-        ),
-        max_source_bytes=2_000_000_000,
+        repository_id="bartowski/Qwen_Qwen3.5-0.8B-GGUF",
+        revision="167243f271bba42ffec2e50e982cb3614d6a0b05",
+        gguf_filename="Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
+        quantization="Q4_K_M",
+        gguf_sha256="fb044e93939a70469c905781334f5de1e6c8b608ced6cbc8c9249bd4127d9526",
+        download_size_bytes=579_615_840,
+        max_download_bytes=600_000_000,
     ),
     "qwen3.5:2b": Qwen35ModelSpec(
         model_id="qwen3.5:2b",
         directory_name="qwen3.5-2b",
         label="Qwen3.5 2B",
-        repository_id="Qwen/Qwen3.5-2B",
-        revision="15852e8c16360a2fea060d615a32b45270f8a8fc",
-        architecture="Qwen3_5ForConditionalGeneration",
-        model_type="qwen3_5_text",
-        source_files=(
-            *_COMMON_SOURCE_FILES,
-            "model.safetensors-00001-of-00001.safetensors",
-        ),
-        weight_sha256=(
-            (
-                "model.safetensors-00001-of-00001.safetensors",
-                "aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1",
-            ),
-        ),
-        max_source_bytes=5_000_000_000,
+        repository_id="bartowski/Qwen_Qwen3.5-2B-GGUF",
+        revision="0719ef0c2bc06b5da2cccfec9dc26b8328f8afbd",
+        gguf_filename="Qwen_Qwen3.5-2B-Q4_K_M.gguf",
+        quantization="Q4_K_M",
+        gguf_sha256="57a1085840f497d764a7fc5d346922dbde961efb54cc792ea81d694fd846a1d8",
+        download_size_bytes=1_396_198_496,
+        max_download_bytes=1_450_000_000,
     ),
     "qwen3.5:4b": Qwen35ModelSpec(
         model_id="qwen3.5:4b",
         directory_name="qwen3.5-4b",
         label="Qwen3.5 4B",
-        repository_id="Qwen/Qwen3.5-4B",
-        revision="c7429d5a8ed57f4a9cfdaf1af76a8943eba0ae97",
-        architecture="Qwen3_5ForConditionalGeneration",
-        model_type="qwen3_5_text",
-        source_files=(
-            *_COMMON_SOURCE_FILES,
-            "generation_config.json",
-            "model.safetensors-00001-of-00002.safetensors",
-            "model.safetensors-00002-of-00002.safetensors",
-        ),
-        weight_sha256=(
-            (
-                "model.safetensors-00001-of-00002.safetensors",
-                "26a93f066e1916adb13453dae5a0c707c0fbc71299ed98779571a907b8e74c61",
-            ),
-            (
-                "model.safetensors-00002-of-00002.safetensors",
-                "cb544bd9bfae93dc59b0f22b292f5933573854a7f9b97835c67060d7d910e188",
-            ),
-        ),
-        max_source_bytes=10_000_000_000,
+        repository_id="bartowski/Qwen_Qwen3.5-4B-GGUF",
+        revision="ba06320255db2dbec194dad738d066be90dabf29",
+        gguf_filename="Qwen_Qwen3.5-4B-Q4_K_M.gguf",
+        quantization="Q4_K_M",
+        gguf_sha256="13c16f426047e2de38cd075bdade4a7bcbc8c774384876f677740cda65f8a983",
+        download_size_bytes=3_013_027_808,
+        max_download_bytes=3_100_000_000,
     ),
 }
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-_GIT_BLOB_RE = re.compile(r"^[0-9a-f]{40}$")
-_MAX_MODEL_OUTPUT_BYTES = 20_000_000_000
 _HASH_CHUNK_BYTES = 1024 * 1024
 
 
@@ -215,8 +172,8 @@ class _SourceFileRecord:
     path: str
     size_bytes: int
     sha256: str
-    blob_id: str | None
-    lfs_sha256: str | None
+    blob_id: str | None = None
+    lfs_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,16 +189,6 @@ class _SourceFetcher(Protocol):
         destination: Path,
         progress: Callable[[int], None],
     ) -> _SourceFetchResult: ...
-
-
-class _ModelConverter(Protocol):
-    def convert(
-        self,
-        spec: Qwen35ModelSpec,
-        source_dir: Path,
-        output_dir: Path,
-        cache_dir: Path,
-    ) -> None: ...
 
 
 class _ProgressReporter:
@@ -266,11 +213,11 @@ class _ProgressReporter:
 
 
 class Qwen35ModelInstaller:
-    """Download and convert only Lumi's pinned Qwen3.5 CPU model catalog.
+    """Download and activate only Lumi's pinned Qwen3.5 GGUF model catalog.
 
     Use one installer instance for a host process. Its methods are synchronous because
-    source transfer and CPU conversion are blocking; async hosts should run them through
-    their bounded worker/control lane.
+    source transfer and hashing are blocking; async hosts should run them through their
+    bounded worker/control lane.
     """
 
     def __init__(
@@ -278,13 +225,14 @@ class Qwen35ModelInstaller:
         root: str | os.PathLike[str],
         *,
         source_fetcher: _SourceFetcher | None = None,
-        converter: _ModelConverter | None = None,
     ) -> None:
         self._root = Path(root).expanduser().resolve()
         self._validate_root()
         self._root.mkdir(parents=True, exist_ok=True)
-        self._source_fetcher = source_fetcher or _HuggingFaceSourceFetcher()
-        self._converter = converter or _OrtGenAIModelConverter()
+        self._download_cache_root = self._root / ".lumi-hub-cache"
+        self._source_fetcher = source_fetcher or _HuggingFaceSourceFetcher(
+            self._download_cache_root
+        )
         self._lock = threading.RLock()
 
     def list_models(self) -> tuple[ModelInstallOption, ...]:
@@ -299,7 +247,7 @@ class Qwen35ModelInstaller:
         *,
         progress: Callable[[ModelInstallProgress], None] | None = None,
     ) -> InstalledModelArtifact:
-        """Install an official pinned checkpoint and return a digest-bound artifact."""
+        """Install one pinned GGUF and return a digest-bound artifact."""
 
         spec = _require_spec(model_id)
         reporter = _ProgressReporter(spec.model_id, progress)
@@ -325,10 +273,8 @@ class Qwen35ModelInstaller:
             stage = Path(tempfile.mkdtemp(prefix=f"{spec.directory_name}-", dir=stage_root))
             source_dir = stage / "source"
             output_dir = stage / "output"
-            cache_dir = stage / "builder-cache"
             source_dir.mkdir()
             output_dir.mkdir()
-            cache_dir.mkdir()
             try:
                 reporter.report("downloading", 300)
                 source_result = self._source_fetcher.fetch(
@@ -339,12 +285,15 @@ class Qwen35ModelInstaller:
                         300 + min(4_500, max(0, int(fraction))),
                     ),
                 )
+                self._clear_download_cache(spec)
                 reporter.report("verifying-source", 4_900)
-                source_records = self._verify_source(spec, source_dir, source_result)
-                reporter.report("converting", 5_100)
-                self._converter.convert(spec, source_dir, output_dir, cache_dir)
-                reporter.report("verifying-output", 8_800)
-                file_records, output_size = self._verify_conversion_output(
+                self._verify_source(spec, source_dir, source_result)
+                reporter.report("installing", 5_100)
+                source_path = source_dir / spec.gguf_filename
+                output_path = output_dir / spec.gguf_filename
+                os.replace(source_path, output_path)
+                reporter.report("verifying-install", 8_800)
+                file_records, output_size = self._verify_gguf_output(
                     spec,
                     output_dir,
                     lambda complete, total: reporter.report(
@@ -354,20 +303,12 @@ class Qwen35ModelInstaller:
                 )
                 manifest = {
                     "schemaVersion": MODEL_MANIFEST_SCHEMA_VERSION,
-                    "format": "onnxruntime-genai",
+                    "format": GGUF_FORMAT,
                     "modelId": spec.model_id,
-                    "modelType": spec.model_type,
-                    "builder": {
-                        "distribution": "onnxruntime-genai",
-                        "version": ORT_GENAI_BUILDER_VERSION,
-                        "executionProvider": "cpu",
-                        "precision": "int4",
-                        "linearAttentionOp": "linear_attention",
-                    },
+                    "quantization": spec.quantization,
                     "source": {
                         **spec.source_manifest(),
                         "manifestSha256": spec.pinned_source_manifest_sha256,
-                        "verifiedFiles": source_records,
                     },
                     "files": file_records,
                 }
@@ -424,6 +365,26 @@ class Qwen35ModelInstaller:
         if _is_within(self._root, package_root):
             raise ValueError("Qwen3.5 model files must be stored outside the Lumi package")
 
+    def _clear_download_cache(self, spec: Qwen35ModelSpec) -> None:
+        cache_root = self._download_cache_root
+        cache_directory = cache_root / spec.directory_name
+        if cache_root.is_symlink() or _is_junction(cache_root) or os.path.ismount(cache_root):
+            raise ModelInstallationError("The Lumi download cache directory is unsafe")
+        if not cache_root.exists():
+            return
+        if (
+            cache_directory.is_symlink()
+            or _is_junction(cache_directory)
+            or os.path.ismount(cache_directory)
+            or not _is_within(cache_directory.resolve(), self._root)
+        ):
+            raise ModelInstallationError("The Lumi model download cache is unsafe")
+        _remove_tree_no_follow(cache_directory)
+        try:
+            cache_root.rmdir()
+        except OSError:
+            pass
+
     def _model_path(self, spec: Qwen35ModelSpec) -> Path:
         candidate = self._root / spec.directory_name
         if not _is_within(candidate.resolve(), self._root):
@@ -441,7 +402,7 @@ class Qwen35ModelInstaller:
             supports_thinking=spec.supports_thinking,
             directory=artifact.directory if artifact else None,
             manifest_sha256=artifact.manifest_sha256 if artifact else None,
-            size_bytes=artifact.size_bytes if artifact else 0,
+            size_bytes=artifact.size_bytes if artifact else spec.download_size_bytes,
         )
 
     def _read_installed_artifact(
@@ -464,9 +425,9 @@ class Qwen35ModelInstaller:
         if (
             not isinstance(manifest, Mapping)
             or manifest.get("schemaVersion") != MODEL_MANIFEST_SCHEMA_VERSION
-            or manifest.get("format") != "onnxruntime-genai"
+            or manifest.get("format") != GGUF_FORMAT
             or manifest.get("modelId") != spec.model_id
-            or manifest.get("modelType") != spec.model_type
+            or manifest.get("quantization") != spec.quantization
         ):
             return None
         source = manifest.get("source")
@@ -475,19 +436,10 @@ class Qwen35ModelInstaller:
             or source.get("manifestSha256") != spec.pinned_source_manifest_sha256
             or source.get("repositoryId") != spec.repository_id
             or source.get("revision") != spec.revision
-            or source.get("files") != list(spec.source_files)
-            or source.get("weightSha256") != dict(spec.weight_sha256)
-            or not _source_records_match_pin(source.get("verifiedFiles"), spec)
-        ):
-            return None
-        builder = manifest.get("builder")
-        if (
-            not isinstance(builder, Mapping)
-            or builder.get("distribution") != "onnxruntime-genai"
-            or builder.get("version") != ORT_GENAI_BUILDER_VERSION
-            or builder.get("executionProvider") != "cpu"
-            or builder.get("precision") != "int4"
-            or builder.get("linearAttentionOp") != "linear_attention"
+            or source.get("filename") != spec.gguf_filename
+            or source.get("quantization") != spec.quantization
+            or source.get("sha256") != spec.gguf_sha256
+            or source.get("size") != spec.download_size_bytes
         ):
             return None
         manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
@@ -495,11 +447,7 @@ class Qwen35ModelInstaller:
             files, total_size = self._read_manifest_files(target, manifest, verify_files)
         except (OSError, ValueError, ModelInstallationError):
             return None
-        if not files or "genai_config.json" not in files:
-            return None
-        if not ("chat_template.jinja" in files or "tokenizer_config.json" in files):
-            return None
-        if not any(name.lower().endswith(".onnx") for name in files):
+        if set(files) != {spec.gguf_filename}:
             return None
         manifest_size = manifest_path.stat(follow_symlinks=False).st_size
         return InstalledModelArtifact(
@@ -573,135 +521,54 @@ class Qwen35ModelInstaller:
         spec: Qwen35ModelSpec,
         source_dir: Path,
         result: _SourceFetchResult,
-    ) -> list[dict[str, object]]:
+    ) -> None:
         if result.revision != spec.revision:
             raise ModelInstallationError(
                 "The downloaded model source revision did not match its pin"
             )
-        records = {record.path: record for record in result.files}
-        if set(records) != set(spec.source_files):
+        if len(result.files) != 1 or result.files[0].path != spec.gguf_filename:
             raise ModelInstallationError(
-                "The downloaded model files did not match Lumi's source manifest"
+                "The downloaded GGUF did not match Lumi's pinned source manifest"
             )
         actual_paths = {name for name, _ in _walk_regular_files(source_dir)}
-        if actual_paths != set(spec.source_files):
-            raise ModelInstallationError("The downloaded model directory contains unexpected files")
-        expected_weights = dict(spec.weight_sha256)
-        verified: list[dict[str, object]] = []
-        total_size = 0
-        for relative_name in spec.source_files:
-            record = records[relative_name]
-            path = source_dir.joinpath(*PurePosixPath(relative_name).parts)
-            if record.path != relative_name or record.size_bytes < 0:
-                raise ModelInstallationError("The downloaded model file metadata is invalid")
-            digest, blob_id, size = _hash_source_file(path)
-            if size != record.size_bytes or (record.sha256 and digest != record.sha256):
-                raise ModelInstallationError(
-                    "A downloaded Qwen3.5 source file changed after transfer"
-                )
-            if record.lfs_sha256 is not None:
-                if not _SHA256_RE.fullmatch(record.lfs_sha256) or digest != record.lfs_sha256:
-                    raise ModelInstallationError(
-                        "A downloaded Qwen3.5 source file failed its LFS hash check"
-                    )
-            else:
-                if record.blob_id is None or not _GIT_BLOB_RE.fullmatch(record.blob_id):
-                    raise ModelInstallationError(
-                        "A downloaded Qwen3.5 source file has no pinned Git blob"
-                    )
-                if blob_id != record.blob_id:
-                    raise ModelInstallationError(
-                        "A downloaded Qwen3.5 source file failed its Git blob check"
-                    )
-            expected_weight = expected_weights.get(relative_name)
-            if expected_weight is not None and digest != expected_weight:
-                raise ModelInstallationError(
-                    "A Qwen3.5 checkpoint file failed Lumi's pinned SHA-256"
-                )
-            total_size += size
-            if total_size > spec.max_source_bytes:
-                raise ModelInstallationError(
-                    "The downloaded Qwen3.5 source exceeded its size limit"
-                )
-            verified.append(
-                {
-                    "path": relative_name,
-                    "size": size,
-                    "sha256": digest,
-                    "gitBlobId": record.blob_id,
-                    "lfsSha256": record.lfs_sha256,
-                }
-            )
+        if actual_paths != {spec.gguf_filename}:
+            raise ModelInstallationError("The downloaded GGUF directory contains unexpected files")
+        record = result.files[0]
+        if record.size_bytes != spec.download_size_bytes:
+            raise ModelInstallationError("The downloaded GGUF size did not match Lumi's pin")
+        if record.size_bytes > spec.max_download_bytes:
+            raise ModelInstallationError("The downloaded GGUF exceeded its size limit")
+        path = source_dir.joinpath(*_safe_relative_path(spec.gguf_filename).parts)
+        digest, size = _hash_file_with_size(path)
+        if size != record.size_bytes or digest != spec.gguf_sha256:
+            raise ModelInstallationError("The downloaded Qwen3.5 GGUF failed Lumi's pinned hash")
+        if record.sha256 and record.sha256 != digest:
+            raise ModelInstallationError("The downloaded GGUF changed after transfer")
 
-        try:
-            config = json.loads((source_dir / "config.json").read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ModelInstallationError("The pinned Qwen3.5 config is invalid") from error
-        if (
-            not isinstance(config, Mapping)
-            or config.get("model_type") != "qwen3_5"
-            or config.get("architectures") != [spec.architecture]
-        ):
-            raise ModelInstallationError(
-                "The official Qwen3.5 model architecture did not match the pin"
-            )
-        return verified
-
-    def _verify_conversion_output(
+    def _verify_gguf_output(
         self,
         spec: Qwen35ModelSpec,
         output_dir: Path,
         progress: Callable[[int, int], None],
     ) -> tuple[list[dict[str, object]], int]:
         names_and_paths = _walk_regular_files(output_dir)
-        if not names_and_paths or any(
-            name == MODEL_MANIFEST_FILENAME for name, _ in names_and_paths
-        ):
-            raise ModelInstallationError(
-                "The ONNX Runtime GenAI builder produced an invalid output directory"
-            )
-        config_path = output_dir / "genai_config.json"
-        if not config_path.is_file() or config_path.is_symlink():
-            raise ModelInstallationError(
-                "The ONNX Runtime GenAI builder did not produce its runtime config"
-            )
-        try:
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ModelInstallationError(
-                "The generated ONNX Runtime GenAI config is invalid"
-            ) from error
-        model_config = config.get("model") if isinstance(config, Mapping) else None
-        if not isinstance(model_config, Mapping) or model_config.get("type") != spec.model_type:
-            raise ModelInstallationError(
-                "The builder output did not identify the pinned Qwen3.5 text model"
-            )
-        if not any(name.lower().endswith(".onnx") for name, _ in names_and_paths):
-            raise ModelInstallationError(
-                "The ONNX Runtime GenAI builder produced no ONNX model graph"
-            )
-        if not (output_dir / "chat_template.jinja").is_file() and not (
-            output_dir / "tokenizer_config.json"
-        ).is_file():
-            raise ModelInstallationError(
-                "The ONNX Runtime GenAI builder produced no tokenizer template"
-            )
-
-        total_size = sum(path.stat(follow_symlinks=False).st_size for _, path in names_and_paths)
-        if total_size > _MAX_MODEL_OUTPUT_BYTES:
-            raise ModelInstallationError("The generated Qwen3.5 model exceeded its size limit")
-        verified: list[dict[str, object]] = []
-        complete = 0
-        for relative_name, path in names_and_paths:
-            digest, size = _hash_file_with_size(path)
-            complete += size
-            verified.append({"path": relative_name, "size": size, "sha256": digest})
-            progress(complete, total_size)
-        return verified, total_size
+        if len(names_and_paths) != 1 or names_and_paths[0][0] != spec.gguf_filename:
+            raise ModelInstallationError("The installed output must contain only the pinned GGUF")
+        relative_name, path = names_and_paths[0]
+        digest, size = _hash_file_with_size(path)
+        if size != spec.download_size_bytes or size > spec.max_download_bytes:
+            raise ModelInstallationError("The installed Qwen3.5 GGUF has an unexpected size")
+        if digest != spec.gguf_sha256:
+            raise ModelInstallationError("The installed Qwen3.5 GGUF failed Lumi's pinned hash")
+        progress(size, size)
+        return [{"path": relative_name, "size": size, "sha256": digest}], size
 
 
 class _HuggingFaceSourceFetcher:
-    """Download the allowlisted files from a commit-pinned official HF repo."""
+    """Download exactly one GGUF from its commit-pinned Hugging Face repository."""
+
+    def __init__(self, cache_root: Path) -> None:
+        self._cache_root = cache_root
 
     def fetch(
         self,
@@ -714,7 +581,7 @@ class _HuggingFaceSourceFetcher:
             from tqdm.auto import tqdm
         except ImportError as error:
             raise ModelInstallationUnavailableError(
-                "Install Lumi's model-install extra to download and convert Qwen3.5 models"
+                "Install Lumi's model-install extra to download Qwen3.5 GGUF models"
             ) from error
 
         try:
@@ -726,55 +593,34 @@ class _HuggingFaceSourceFetcher:
             )
         except Exception as error:
             raise ModelInstallationError(
-                "The pinned Qwen3.5 source manifest could not be read"
+                "The pinned Qwen3.5 GGUF source could not be read"
             ) from error
         if getattr(info, "sha", None) != spec.revision:
             raise ModelInstallationError(
-                "The official Qwen3.5 source returned a different revision"
+                "The official GGUF repository returned a different revision"
             )
         siblings = {item.rfilename: item for item in (getattr(info, "siblings", None) or ())}
-        if not set(spec.source_files).issubset(siblings):
-            raise ModelInstallationError("The pinned Qwen3.5 source is missing required files")
+        sibling = siblings.get(spec.gguf_filename)
+        if sibling is None:
+            raise ModelInstallationError("The pinned Qwen3.5 GGUF file is missing")
 
-        sizes: dict[str, int] = {}
-        upstream: dict[str, tuple[str | None, str | None]] = {}
-        total_size = 0
-        pinned_weights = dict(spec.weight_sha256)
-        for relative_name in spec.source_files:
-            sibling = siblings[relative_name]
-            size_value = getattr(sibling, "size", None)
-            lfs_info = getattr(sibling, "lfs", None)
-            lfs_sha256 = getattr(lfs_info, "sha256", None) if lfs_info else None
-            if size_value is None and lfs_info is not None:
-                size_value = getattr(lfs_info, "size", None)
-            blob_id = getattr(sibling, "blob_id", None)
-            if isinstance(size_value, bool) or not isinstance(size_value, int) or size_value < 0:
-                raise ModelInstallationError("The pinned Qwen3.5 source has invalid file sizes")
-            if lfs_sha256 is not None:
-                lfs_sha256 = str(lfs_sha256).lower()
-                if not _SHA256_RE.fullmatch(lfs_sha256):
-                    raise ModelInstallationError(
-                        "The pinned Qwen3.5 source has invalid LFS metadata"
-                    )
-            if relative_name in pinned_weights and lfs_sha256 != pinned_weights[relative_name]:
-                raise ModelInstallationError(
-                    "The official Qwen3.5 checkpoint hash no longer matches Lumi's pin"
-                )
-            if relative_name not in pinned_weights and lfs_sha256 is None:
-                blob_id = str(blob_id or "").lower()
-                if not _GIT_BLOB_RE.fullmatch(blob_id):
-                    raise ModelInstallationError("A pinned Qwen3.5 source file has no Git blob ID")
-            if relative_name in pinned_weights and lfs_sha256 is None:
-                raise ModelInstallationError(
-                    "A Qwen3.5 checkpoint file has no verifiable LFS digest"
-                )
-            sizes[relative_name] = size_value
-            upstream[relative_name] = (str(blob_id).lower() if blob_id else None, lfs_sha256)
-            total_size += size_value
-        if total_size > spec.max_source_bytes:
-            raise ModelInstallationError("The pinned Qwen3.5 source exceeded its size limit")
-        if total_size <= 0:
-            raise ModelInstallationError("The pinned Qwen3.5 source manifest is empty")
+        size = getattr(sibling, "size", None)
+        lfs = getattr(sibling, "lfs", None)
+        lfs_size = getattr(lfs, "size", None) if lfs is not None else None
+        if size is None:
+            size = lfs_size
+        digest = getattr(lfs, "sha256", None) if lfs is not None else None
+        if (
+            isinstance(size, bool)
+            or not isinstance(size, int)
+            or size != spec.download_size_bytes
+            or size > spec.max_download_bytes
+            or not isinstance(digest, str)
+            or digest.lower() != spec.gguf_sha256
+        ):
+            raise ModelInstallationError(
+                "The pinned GGUF metadata no longer matches Lumi's size and hash"
+            )
 
         completed_bytes = 0
         last_reported = -100
@@ -784,13 +630,13 @@ class _HuggingFaceSourceFetcher:
             nonlocal completed_bytes, last_reported
             with progress_lock:
                 completed_bytes += max(0, amount)
-                fraction = min(4_400, completed_bytes * 4_400 // total_size)
+                fraction = min(4_400, completed_bytes * 4_400 // size)
                 if fraction >= last_reported + 100:
                     last_reported = fraction
                     progress(fraction)
 
         class DownloadProgress(tqdm):
-            """Capture Hub file progress without writing to a terminal."""
+            """Capture Hub download progress without writing to a terminal."""
 
             def __init__(self, *args, **kwargs):
                 kwargs["disable"] = False
@@ -811,105 +657,76 @@ class _HuggingFaceSourceFetcher:
                     self._reported_n = self.n
                 return result
 
-        records: list[_SourceFileRecord] = []
-        for relative_name in spec.source_files:
-            target = destination.joinpath(*_safe_relative_path(relative_name).parts)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                downloaded_path = Path(
-                    hf_hub_download(
-                        repo_id=spec.repository_id,
-                        filename=relative_name,
-                        revision=spec.revision,
-                        local_dir=destination,
-                        token=False,
-                        endpoint="https://huggingface.co",
-                        tqdm_class=DownloadProgress,
-                    )
-                )
-            except Exception as error:
-                raise ModelInstallationError(
-                    "A pinned Qwen3.5 source file could not be downloaded"
-                ) from error
-            if downloaded_path != target:
-                raise ModelInstallationError(
-                    "The model source returned an unexpected local file path"
-                )
-            blob_id, lfs_sha256 = upstream[relative_name]
-            records.append(
-                _SourceFileRecord(
-                    path=relative_name,
-                    size_bytes=sizes[relative_name],
-                    sha256=lfs_sha256 or "",
-                    blob_id=blob_id,
-                    lfs_sha256=lfs_sha256,
+        target = destination.joinpath(*_safe_relative_path(spec.gguf_filename).parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        cache_directory = self._cache_root / spec.directory_name
+        if (
+            self._cache_root.is_symlink()
+            or _is_junction(self._cache_root)
+            or os.path.ismount(self._cache_root)
+        ):
+            raise ModelInstallationError("The Lumi download cache directory is unsafe")
+        if (
+            cache_directory.is_symlink()
+            or _is_junction(cache_directory)
+            or os.path.ismount(cache_directory)
+        ):
+            raise ModelInstallationError("The Lumi model download cache is unsafe")
+        self._cache_root.mkdir(parents=True, exist_ok=True)
+        cache_directory.mkdir(parents=True, exist_ok=True)
+        if not _is_within(cache_directory.resolve(), self._cache_root.resolve()):
+            raise ModelInstallationError("The Lumi model download cache escaped its root")
+        cached_target = cache_directory.joinpath(*_safe_relative_path(spec.gguf_filename).parts)
+        try:
+            downloaded_path = Path(
+                hf_hub_download(
+                    repo_id=spec.repository_id,
+                    filename=spec.gguf_filename,
+                    revision=spec.revision,
+                    local_dir=cache_directory,
+                    cache_dir=cache_directory,
+                    token=False,
+                    endpoint="https://huggingface.co",
+                    tqdm_class=DownloadProgress,
                 )
             )
-
-        cache_metadata = destination / ".cache"
-        if cache_metadata.exists() or cache_metadata.is_symlink():
-            _remove_tree_no_follow(cache_metadata)
+        except Exception as error:
+            raise ModelInstallationError(
+                "The pinned Qwen3.5 GGUF file could not be downloaded"
+            ) from error
+        try:
+            resolved_download = downloaded_path.resolve()
+            resolved_cached_target = cached_target.resolve()
+            resolved_cache_directory = cache_directory.resolve()
+        except OSError as error:
+            raise ModelInstallationError(
+                "The GGUF source returned an unsafe local file path"
+            ) from error
+        resolved_download = _normalise_windows_path_for_comparison(resolved_download)
+        resolved_cached_target = _normalise_windows_path_for_comparison(resolved_cached_target)
+        resolved_cache_directory = _normalise_windows_path_for_comparison(resolved_cache_directory)
+        if (
+            downloaded_path.is_symlink()
+            or not downloaded_path.is_file()
+            or resolved_download != resolved_cached_target
+            or not _is_within(resolved_download, resolved_cache_directory)
+        ):
+            raise ModelInstallationError("The GGUF source returned an unexpected local file path")
+        try:
+            os.replace(downloaded_path, target)
+        except OSError as error:
+            raise ModelInstallationError(
+                "The downloaded GGUF could not be moved into Lumi staging"
+            ) from error
         progress(4_500)
-        return _SourceFetchResult(spec.revision, tuple(records))
-
-
-class _OrtGenAIModelConverter:
-    def convert(
-        self,
-        spec: Qwen35ModelSpec,
-        source_dir: Path,
-        output_dir: Path,
-        cache_dir: Path,
-    ) -> None:
-        try:
-            from importlib.metadata import PackageNotFoundError, version
-
-            installed_version = version("onnxruntime-genai")
-        except (ImportError, PackageNotFoundError) as error:
-            raise ModelInstallationUnavailableError(
-                "Install Lumi's model-install extra to convert Qwen3.5 models"
-            ) from error
-        if installed_version != ORT_GENAI_BUILDER_VERSION:
-            raise ModelInstallationUnavailableError(
-                f"Qwen3.5 installation requires ONNX Runtime GenAI {ORT_GENAI_BUILDER_VERSION}"
-            )
-        try:
-            from onnxruntime_genai.models.builder import create_model, parse_extra_options
-        except ImportError as error:
-            raise ModelInstallationUnavailableError(
-                "The ONNX Runtime GenAI model builder dependencies are unavailable"
-            ) from error
-
-        model_name = None
-        precision = "int4"
-        execution_provider = "cpu"
-        cache_path = str(cache_dir)
-        extra_options = parse_extra_options(
-            model_name,
-            str(source_dir),
-            str(output_dir),
-            precision,
-            execution_provider,
-            cache_path,
-            [
-                "hf_remote=false",
-                "linear_attn_op=linear_attention",
-                "use_paged_attention=false",
-            ],
-        )
-        create_model(
-            model_name,
-            str(source_dir),
-            str(output_dir),
-            precision,
-            execution_provider,
-            cache_path,
-            **extra_options,
+        return _SourceFetchResult(
+            spec.revision,
+            (_SourceFileRecord(spec.gguf_filename, size, spec.gguf_sha256),),
         )
 
 
 def supported_models() -> tuple[ModelInstallOption, ...]:
-    """Return only the model IDs with pinned source and official CPU builder support."""
+    """Return the fixed allowlist of pinned Qwen3.5 GGUF model choices."""
 
     return tuple(
         ModelInstallOption(
@@ -919,6 +736,7 @@ def supported_models() -> tuple[ModelInstallOption, ...]:
             revision=spec.revision,
             installed=False,
             supports_thinking=spec.supports_thinking,
+            size_bytes=spec.download_size_bytes,
         )
         for spec in _MODEL_SPECS.values()
     )
@@ -931,46 +749,6 @@ def _require_spec(model_id: str) -> Qwen35ModelSpec:
     if spec is None:
         raise UnsupportedModelError("The selected Qwen3.5 model is unavailable")
     return spec
-
-
-def _source_records_match_pin(entries: object, spec: Qwen35ModelSpec) -> bool:
-    if not isinstance(entries, list):
-        return False
-    records: dict[str, Mapping[str, object]] = {}
-    for entry in entries:
-        if not isinstance(entry, Mapping):
-            return False
-        path = entry.get("path")
-        size = entry.get("size")
-        digest = entry.get("sha256")
-        git_blob = entry.get("gitBlobId")
-        lfs_digest = entry.get("lfsSha256")
-        if (
-            not isinstance(path, str)
-            or path in records
-            or isinstance(size, bool)
-            or not isinstance(size, int)
-            or size < 0
-            or not isinstance(digest, str)
-            or not _SHA256_RE.fullmatch(digest)
-        ):
-            return False
-        if lfs_digest is not None:
-            if not isinstance(lfs_digest, str) or not _SHA256_RE.fullmatch(lfs_digest):
-                return False
-            if digest != lfs_digest:
-                return False
-        elif not isinstance(git_blob, str) or not _GIT_BLOB_RE.fullmatch(git_blob):
-            return False
-        records[path] = entry
-
-    if set(records) != set(spec.source_files):
-        return False
-    for filename, expected_digest in spec.weight_sha256:
-        entry = records[filename]
-        if entry.get("sha256") != expected_digest or entry.get("lfsSha256") != expected_digest:
-            return False
-    return True
 
 
 def _canonical_json(value: object) -> bytes:
@@ -1008,34 +786,12 @@ def _hash_file_with_size(path: Path) -> tuple[str, int]:
                 size += len(chunk)
                 digest.update(chunk)
     except OSError as error:
-        raise ModelInstallationError("A generated Qwen3.5 file could not be read") from error
+        raise ModelInstallationError("A Qwen3.5 model file could not be read") from error
     return digest.hexdigest(), size
 
 
 def _hash_file(path: Path) -> str:
     return _hash_file_with_size(path)[0]
-
-
-def _hash_source_file(path: Path) -> tuple[str, str, int]:
-    digest = hashlib.sha256()
-    size = 0
-    try:
-        file_stat = path.stat(follow_symlinks=False)
-        if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
-            raise ModelInstallationError(
-                "A downloaded Qwen3.5 source file is not a private regular file"
-            )
-        size = file_stat.st_size
-        git_blob = hashlib.sha1(f"blob {size}\0".encode("ascii"))
-        with path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(_HASH_CHUNK_BYTES), b""):
-                digest.update(chunk)
-                git_blob.update(chunk)
-    except OSError as error:
-        raise ModelInstallationError(
-            "A downloaded Qwen3.5 source file could not be read"
-        ) from error
-    return digest.hexdigest(), git_blob.hexdigest(), size
 
 
 def _sha256_file(path: Path) -> str:
@@ -1085,6 +841,20 @@ def _is_within(path: Path, parent: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _normalise_windows_path_for_comparison(path: Path) -> Path:
+    """Compare equivalent ordinary and extended-length Windows paths safely."""
+
+    value = os.fspath(path)
+    if os.name != "nt":
+        return Path(value)
+    lowered = value.lower()
+    if lowered.startswith("\\\\?\\unc\\"):
+        value = "\\\\" + value[8:]
+    elif value.startswith("\\\\?\\"):
+        value = value[4:]
+    return Path(os.path.normcase(value))
 
 
 def _remove_tree_no_follow(path: Path) -> None:
