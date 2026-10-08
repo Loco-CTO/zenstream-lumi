@@ -10,7 +10,10 @@ from pathlib import Path
 from scripts.build_release import ReleaseBuildError, build_release
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-_PROJECT_VERSION = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())["project"]["version"]
+_PROJECT_METADATA = tomllib.loads(
+    (PROJECT_ROOT / "pyproject.toml").read_text()
+)
+_PROJECT_VERSION = _PROJECT_METADATA["project"]["version"]
 RELEASE_TAG = f"v{_PROJECT_VERSION}"
 
 

@@ -641,8 +641,14 @@ class ChatAgent:
                     "I couldn't retrieve a verified local recommendation right now. "
                     "Try again or search for a title or genre."
                 ),
-                "ja": "今は確認済みのローカルおすすめを取得できませんでした。もう一度お試しいただくか、作品名やジャンルで検索してください。",
-                "vi": "Hiện mình chưa lấy được đề xuất trong thư viện đã xác minh. Hãy thử lại hoặc tìm theo tên phim hay thể loại.",
+                "ja": (
+                    "今は確認済みのローカルおすすめを取得できませんでした。"
+                    "もう一度お試しいただくか、作品名やジャンルで検索してください。"
+                ),
+                "vi": (
+                    "Hiện mình chưa lấy được đề xuất trong thư viện đã xác minh. "
+                    "Hãy thử lại hoặc tìm theo tên phim hay thể loại."
+                ),
             }[locale]
             markdown = lead
             references = {}
@@ -653,7 +659,10 @@ class ChatAgent:
                     "I recommend this title because it appears in your permission-filtered "
                     "ZenStream Home recommendations:"
                 ),
-                "ja": "アクセス可能なローカルのおすすめ一覧に掲載されているため、この作品をおすすめします:",
+                "ja": (
+                    "アクセス可能なローカルのおすすめ一覧に掲載されているため、"
+                    "この作品をおすすめします:"
+                ),
                 "vi": (
                     "Mình gợi ý phim này vì nó xuất hiện trong mục đề xuất ZenStream mà bạn "
                     "có quyền truy cập:"
