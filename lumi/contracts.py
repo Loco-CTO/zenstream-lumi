@@ -21,6 +21,7 @@ ENTITY_TYPES = frozenset(
         "season",
         "episode",
         "album",
+        "release",
         "artist",
         "track",
         "collection",

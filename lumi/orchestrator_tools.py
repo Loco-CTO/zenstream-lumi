@@ -307,13 +307,24 @@ def _compact_item(value: object) -> dict[str, Any] | None:
                 compact[key] = selected
     user_state = value.get("userState")
     if isinstance(user_state, dict):
-        state: dict[str, bool | int] = {}
+        state: dict[str, bool | int | float | str] = {}
         for key in ("favorite", "played"):
             if type(user_state.get(key)) is bool:
                 state[key] = user_state[key]
         play_count = user_state.get("playCount")
         if type(play_count) is int and 0 <= play_count <= 1_000_000_000:
             state["playCount"] = play_count
+        for key in ("positionSeconds", "durationSeconds"):
+            seconds = user_state.get(key)
+            if (
+                type(seconds) in {int, float}
+                and math.isfinite(seconds)
+                and 0 <= seconds <= 10_000_000
+            ):
+                state[key] = seconds
+        last_played = _bounded_text(user_state.get("lastPlayedAt"), 40)
+        if last_played:
+            state["lastPlayedAt"] = last_played
         if state:
             compact["userState"] = state
     return compact

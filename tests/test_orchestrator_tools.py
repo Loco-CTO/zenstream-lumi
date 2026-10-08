@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from typing import Any
 
@@ -134,6 +135,64 @@ class OrchestratorToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(runtime.requests[1].messages[-1].role, "tool")
         self.assertIn(EvidenceTrust.LOCAL.value, runtime.requests[1].messages[-1].content)
+
+    async def test_release_results_preserve_trusted_references_and_bounded_progress(self) -> None:
+        app = FastAPI()
+
+        @app.post("/api/internal/lumi/tools/catalog-search")
+        async def catalog_search(_: Request) -> JSONResponse:
+            return JSONResponse(
+                {
+                    "items": [
+                        {
+                            **media_item(
+                                "release-9",
+                                entity_type="release",
+                                title="A local soundtrack",
+                            ),
+                            "userState": {
+                                "favorite": True,
+                                "played": False,
+                                "playCount": 2,
+                                "positionSeconds": 12.5,
+                                "durationSeconds": 184.0,
+                                "lastPlayedAt": "2026-10-07T19:00:00Z",
+                                "privatePath": "C:/private/media.mkv",
+                            },
+                        }
+                    ],
+                    "total": 1,
+                }
+            )
+
+        registry = build_zenstream_tool_registry(
+            "http://orchestrator.test:9090",
+            SERVICE_TOKEN,
+            transport=httpx.ASGITransport(app=app),
+        )
+        search = registry.get("zenstream_catalog_search")
+        assert search is not None
+        result = await search.execute(
+            make_context(),
+            search.validate_arguments({"query": "soundtrack", "type": "release"}),
+        )
+
+        self.assertEqual(
+            result.entities,
+            (EntityReference("release", "release-9", "A local soundtrack"),),
+        )
+        payload = json.loads(result.content)
+        self.assertEqual(
+            payload["items"][0]["userState"],
+            {
+                "favorite": True,
+                "played": False,
+                "playCount": 2,
+                "positionSeconds": 12.5,
+                "durationSeconds": 184.0,
+                "lastPlayedAt": "2026-10-07T19:00:00Z",
+            },
+        )
 
     async def test_registry_includes_zero_config_search_and_page_reader(self) -> None:
         app = FastAPI()
