@@ -383,8 +383,10 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
         await runtime.complete(self.make_request(model="qwen3.5:2b"))
         await runtime.complete(self.make_request(model="qwen3.5:4b"))
         self.assertEqual(len(api.loads), 2)
-        self.assertTrue(api.loads[0].endswith("qwen3.5-2b\\" + _GGUF_FILENAME))
-        self.assertTrue(api.loads[1].endswith("qwen3.5-4b\\" + _GGUF_FILENAME))
+        self.assertEqual(Path(api.loads[0]).parent.name, "qwen3.5-2b")
+        self.assertEqual(Path(api.loads[0]).name, _GGUF_FILENAME)
+        self.assertEqual(Path(api.loads[1]).parent.name, "qwen3.5-4b")
+        self.assertEqual(Path(api.loads[1]).name, _GGUF_FILENAME)
         self.assertEqual(len(api.live_models), 1)
         await runtime.close()
 
