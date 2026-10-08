@@ -497,7 +497,7 @@ class SearXNGSearchTool:
                         "Built-in public web search is unavailable because its bundled provider "
                         "is missing."
                     ) from error
-                except (OSError, TimeoutError, asyncio.TimeoutError) as error:
+                except (OSError, TimeoutError) as error:
                     if attempt == 1:
                         raise WebResearchError(
                             "Public web search is temporarily unavailable after a retry."
@@ -811,7 +811,11 @@ class _VisibleTextParser(HTMLParser):
         if tag == "meta" and not hidden:
             metadata_name = (attributes.get("name") or attributes.get("property") or "").lower()
             content = (attributes.get("content") or "").strip()
-            if content and metadata_name in {"og:title", "twitter:title"} and not self.meta_title_parts:
+            if (
+                content
+                and metadata_name in {"og:title", "twitter:title"}
+                and not self.meta_title_parts
+            ):
                 self.meta_title_parts.append(content[:240])
             elif (
                 content
@@ -1004,7 +1008,9 @@ async def _fetch_page(
                     if destination is None:
                         raise WebResearchError("The webpage redirect destination is not allowed.")
                     if initial.scheme == "https" and destination.scheme != "https":
-                        raise WebResearchError("HTTPS webpages cannot redirect to an insecure page.")
+                        raise WebResearchError(
+                            "HTTPS webpages cannot redirect to an insecure page."
+                        )
                     if redirect_count == 4:
                         raise WebResearchError("The webpage exceeded Lumi's redirect limit.")
                     redirect_url = destination.url

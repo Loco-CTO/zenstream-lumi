@@ -75,15 +75,16 @@ class WebResearchTests(unittest.IsolatedAsyncioTestCase):
         configured = build_web_research_tools(
             WebResearchConfig(searxng_url="https://search.example.org")
         )
-        self.assertEqual(tuple(tool.definition.name for tool in configured), ("web_search", "web_read"))
+        self.assertEqual(
+            tuple(tool.definition.name for tool in configured),
+            ("web_search", "web_read"),
+        )
 
     async def test_searxng_override_normalizes_results_to_lumi_contract(self) -> None:
         requests: list[httpx.Request] = []
 
         def respond(request: httpx.Request) -> httpx.Response:
             requests.append(request)
-            form = parse_qs(request.content.decode("ascii"))
-            query = form["q"][0]
             return httpx.Response(
                 200,
                 json={
@@ -432,14 +433,20 @@ class WebResearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(redirected.trust, EvidenceTrust.LOCAL)
         self.assertIn("redirect destination is not allowed", redirected.content)
 
-    async def test_web_read_follows_revalidated_public_redirects_and_removes_boilerplate(self) -> None:
+    async def test_web_read_follows_revalidated_public_redirects_and_removes_boilerplate(
+        self,
+    ) -> None:
         def response(body: bytes) -> asyncio.StreamReader:
             reader = asyncio.StreamReader()
             reader.feed_data(body)
             reader.feed_eof()
             return reader
 
-        html = b"<html><head><title>Final story</title></head><body><nav>menu</nav><p>Article text</p><footer>legal links</footer></body></html>"
+        html = (
+            b"<html><head><title>Final story</title></head><body>"
+            b"<nav>menu</nav><p>Article text</p><footer>legal links</footer>"
+            b"</body></html>"
+        )
         redirect_reader = response(
             b"HTTP/1.1 301 Moved Permanently\r\n"
             b"Location: https://news.example.org/final\r\n\r\n"
@@ -586,7 +593,10 @@ class WebResearchTests(unittest.IsolatedAsyncioTestCase):
                 reader = asyncio.StreamReader()
                 reader.feed_data(
                     b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-                    + f"Content-Encoding: {encoding}\r\nContent-Length: {len(body)}\r\n\r\n".encode()
+                    + (
+                        f"Content-Encoding: {encoding}\r\n"
+                        f"Content-Length: {len(body)}\r\n\r\n"
+                    ).encode()
                     + body
                 )
                 reader.feed_eof()

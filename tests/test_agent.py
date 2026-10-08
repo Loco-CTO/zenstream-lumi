@@ -265,7 +265,11 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                     "assistant",
                     "",
                     tool_calls=(
-                        ToolCall("planned-search", "web_search", {"query": "Frieren current updates"}),
+                        ToolCall(
+                            "planned-search",
+                            "web_search",
+                            {"query": "Frieren current updates"},
+                        ),
                     ),
                 ),
                 ChatMessage("assistant", "The local catalog result and current update agree."),
@@ -282,7 +286,9 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(web_tool.calls[0][1]["query"], "Frieren current updates")
         self.assertEqual(answer.sources, (source,))
 
-    async def test_web_search_planner_uses_bounded_history_and_sends_minimal_public_query(self) -> None:
+    async def test_web_search_planner_uses_bounded_history_and_sends_minimal_public_query(
+        self,
+    ) -> None:
         search_tool = ScopedTool(
             "web_search",
             "external_search",
