@@ -12,7 +12,6 @@ import os
 import re
 import shutil
 import stat
-import tempfile
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -260,26 +259,23 @@ class Qwen35ModelInstaller:
 
             target = self._model_path(spec)
             if target.exists() or target.is_symlink():
-                raise ModelInstallationError(
-                    "A Lumi model directory exists but does not match its verified manifest"
-                )
+                if (
+                    target.is_symlink()
+                    or _is_junction(target)
+                    or not target.is_dir()
+                    or os.path.ismount(target)
+                ):
+                    raise ModelInstallationError("The Lumi model directory failed its path check")
+                _walk_regular_files(target)
+                _remove_tree_no_follow(target)
 
-            stage_root = self._root / ".lumi-staging"
-            if stage_root.is_symlink() or _is_junction(stage_root) or os.path.ismount(stage_root):
-                raise ModelInstallationError("The Lumi model staging directory is unsafe")
-            stage_root.mkdir(parents=True, exist_ok=True)
-            if not _is_within(stage_root.resolve(), self._root):
-                raise ModelInstallationError("Lumi staging escaped the model root")
-            stage = Path(tempfile.mkdtemp(prefix=f"{spec.directory_name}-", dir=stage_root))
-            source_dir = stage / "source"
-            output_dir = stage / "output"
-            source_dir.mkdir()
-            output_dir.mkdir()
+            target.mkdir(parents=True)
+            installation_complete = False
             try:
                 reporter.report("downloading", 300)
                 source_result = self._source_fetcher.fetch(
                     spec,
-                    source_dir,
+                    target,
                     lambda fraction: reporter.report(
                         "downloading",
                         300 + min(4_500, max(0, int(fraction))),
@@ -287,15 +283,12 @@ class Qwen35ModelInstaller:
                 )
                 self._clear_download_cache(spec)
                 reporter.report("verifying-source", 4_900)
-                self._verify_source(spec, source_dir, source_result)
+                self._verify_source(spec, target, source_result)
                 reporter.report("installing", 5_100)
-                source_path = source_dir / spec.gguf_filename
-                output_path = output_dir / spec.gguf_filename
-                os.replace(source_path, output_path)
                 reporter.report("verifying-install", 8_800)
                 file_records, output_size = self._verify_gguf_output(
                     spec,
-                    output_dir,
+                    target,
                     lambda complete, total: reporter.report(
                         "verifying-output",
                         8_800 if total <= 0 else 8_800 + (complete * 900 // total),
@@ -314,16 +307,19 @@ class Qwen35ModelInstaller:
                 }
                 manifest_bytes = _canonical_json(manifest)
                 manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
-                manifest_path = output_dir / MODEL_MANIFEST_FILENAME
-                with manifest_path.open("xb") as stream:
+                reporter.report("activating", 9_850)
+                manifest_path = target / MODEL_MANIFEST_FILENAME
+                temporary_manifest_path = target / f".{MODEL_MANIFEST_FILENAME}.tmp"
+                with temporary_manifest_path.open("xb") as stream:
                     stream.write(manifest_bytes)
                     stream.flush()
                     os.fsync(stream.fileno())
+                os.replace(temporary_manifest_path, manifest_path)
 
-                reporter.report("activating", 9_850)
-                if target.exists() or target.is_symlink():
-                    raise ModelInstallationError("The Lumi model directory appeared during install")
-                os.replace(output_dir, target)
+                # The verified manifest is the activation marker. Write it only after
+                # the complete GGUF is in its persistent directory, then atomically
+                # publish it so a restart never treats a partial download as installed.
+                installation_complete = True
                 installed_size = output_size + len(manifest_bytes)
                 result = InstalledModelArtifact(
                     model_id=spec.model_id,
@@ -340,11 +336,17 @@ class Qwen35ModelInstaller:
                     "The selected Qwen3.5 model could not be installed"
                 ) from error
             finally:
-                _remove_tree_no_follow(stage)
-                try:
-                    stage_root.rmdir()
-                except OSError:
-                    pass
+                if not installation_complete and target.exists():
+                    if (
+                        target.is_symlink()
+                        or _is_junction(target)
+                        or not target.is_dir()
+                        or os.path.ismount(target)
+                    ):
+                        raise ModelInstallationError(
+                            "The incomplete Lumi model directory failed its path check"
+                        )
+                    _remove_tree_no_follow(target)
 
     def remove_model(self, model_id: str) -> bool:
         """Remove the exact managed model directory, including corrupt installations."""
@@ -805,12 +807,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _walk_regular_files(root: Path) -> list[tuple[str, Path]]:
-    if (
-        root.is_symlink()
-        or _is_junction(root)
-        or not root.is_dir()
-        or os.path.ismount(root)
-    ):
+    if root.is_symlink() or _is_junction(root) or not root.is_dir() or os.path.ismount(root):
         raise ModelInstallationError("A model directory is not a private directory")
     root = root.resolve()
     result: list[tuple[str, Path]] = []

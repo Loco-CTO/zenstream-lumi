@@ -111,7 +111,13 @@ class ModelInstallationTests(unittest.TestCase):
         events = []
         with patch("lumi.model_installation._MODEL_SPECS", {_MODEL_ID: spec}):
             installer = self.installer(spec, fetcher)
-            artifact = installer.install_model(_MODEL_ID, progress=events.append)
+
+            def record_progress(event):
+                events.append(event)
+                if event.stage != "complete":
+                    self.assertFalse(installer.list_models()[0].installed)
+
+            artifact = installer.install_model(_MODEL_ID, progress=record_progress)
             self.assertIsInstance(artifact, InstalledModelArtifact)
             self.assertEqual(artifact.model_id, _MODEL_ID)
             self.assertEqual(installer.list_models()[0].label, "Qwen3.5 0.8B")
@@ -136,6 +142,40 @@ class ModelInstallationTests(unittest.TestCase):
             self.assertTrue(fetcher.called)
             self.assertFalse((self.root / ".lumi-staging").exists())
             self.assertTrue(installer.list_models()[0].installed)
+
+    def test_install_does_not_require_a_directory_rename(self) -> None:
+        spec = _test_spec()
+        original_replace = os.replace
+
+        def reject_directory_rename(source, destination):
+            if Path(source).is_dir():
+                raise PermissionError(5, "directory activation is unavailable")
+            return original_replace(source, destination)
+
+        with (
+            patch("lumi.model_installation._MODEL_SPECS", {_MODEL_ID: spec}),
+            patch(
+                "lumi.model_installation.os.replace",
+                side_effect=reject_directory_rename,
+            ),
+        ):
+            installer = self.installer(spec)
+            artifact = installer.install_model(_MODEL_ID)
+            self.assertTrue(Path(artifact.directory).is_dir())
+            self.assertTrue(installer.list_models()[0].installed)
+
+    def test_install_recovers_a_stale_legacy_model_directory(self) -> None:
+        spec = _test_spec()
+        model_directory = self.root / spec.directory_name
+        model_directory.mkdir(parents=True)
+        (model_directory / "model.onnx").write_bytes(b"legacy ONNX model")
+
+        with patch("lumi.model_installation._MODEL_SPECS", {_MODEL_ID: spec}):
+            installer = self.installer(spec)
+            artifact = installer.install_model(_MODEL_ID)
+            self.assertTrue(installer.list_models()[0].installed)
+            self.assertFalse((model_directory / "model.onnx").exists())
+            self.assertTrue((Path(artifact.directory) / _GGUF_FILENAME).is_file())
 
     def test_huggingface_download_cache_survives_retry_and_clears_after_success(self) -> None:
         spec = _test_spec()
