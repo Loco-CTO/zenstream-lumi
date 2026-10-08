@@ -105,8 +105,15 @@ jobs:
           "$CXX" --version
           PYTHON=/opt/python/cp312-cp312/bin/python
           "$PYTHON" -m pip wheel --no-deps --no-binary=llama-cpp-python --wheel-dir dist/wheels/runtime "llama-cpp-python==0.3.35"
-          LD_LIBRARY_PATH="$PWD/llama_cpp/lib:/usr/lib64:/usr/lib" auditwheel show dist/wheels/runtime/*.whl
-          LD_LIBRARY_PATH="$PWD/llama_cpp/lib:/usr/lib64:/usr/lib" auditwheel repair --plat "${{ matrix.platform }}" --wheel-dir dist/wheels/repaired dist/wheels/runtime/*.whl
+          mkdir -p dist/wheels/expanded
+          "$PYTHON" -m zipfile -e dist/wheels/runtime/*.whl dist/wheels/expanded
+          NATIVE_LIB_DIR="$PWD/dist/wheels/expanded/llama_cpp/lib"
+          test -d "$NATIVE_LIB_DIR"
+          NATIVE_LIBS="$(find "$NATIVE_LIB_DIR" -maxdepth 1 -name 'libggml*.so*' -print)"
+          test -n "$NATIVE_LIBS"
+          printf '%s\n' "$NATIVE_LIBS"
+          LD_LIBRARY_PATH="$NATIVE_LIB_DIR:/usr/lib64:/usr/lib" auditwheel show dist/wheels/runtime/*.whl
+          LD_LIBRARY_PATH="$NATIVE_LIB_DIR:/usr/lib64:/usr/lib" auditwheel repair --plat "${{ matrix.platform }}" --wheel-dir dist/wheels/repaired dist/wheels/runtime/*.whl
           rm dist/wheels/runtime/*.whl
           mv dist/wheels/repaired/*.whl dist/wheels/runtime/
       - name: Save the platform runtime wheel
