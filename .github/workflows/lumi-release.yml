@@ -122,7 +122,7 @@ jobs:
           cd /tmp/shaderc
           "$manylinux_python" utils/git-sync-deps
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON
-          cmake --build build --target glslc --parallel 2
+          cmake --build build --target glslc_exe --parallel 2
           build/glslc/glslc --version
           mkdir -p "$GITHUB_WORKSPACE/dist/tools"
           cp build/glslc/glslc "$GITHUB_WORKSPACE/dist/tools/glslc"
