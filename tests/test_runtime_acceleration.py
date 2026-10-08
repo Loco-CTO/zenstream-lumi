@@ -108,7 +108,9 @@ class RuntimeAccelerationTests(unittest.TestCase):
     def test_insufficient_vram_selects_cpu(self) -> None:
         choice = choose_acceleration(
             "automatic",
-            (GpuDevice("vulkan", "AMD Radeon", 900_000_000, 4_000_000_000),),
+            (
+                GpuDevice("vulkan", "AMD Radeon", 900_000_000, 4_000_000_000, "Vulkan0"),
+            ),
             model_size_bytes=1_400_000_000,
             total_layers=28,
         )
@@ -116,6 +118,18 @@ class RuntimeAccelerationTests(unittest.TestCase):
         self.assertEqual(choice.backend, "cpu")
         self.assertEqual(choice.offloaded_layers, 0)
         self.assertIsNotNone(choice.fallback_reason)
+
+    def test_gpu_without_native_identifier_is_not_selected(self) -> None:
+        choice = choose_acceleration(
+            "gpu_preferred",
+            (GpuDevice("cuda", "NVIDIA GeForce", 12_000_000_000, 16_000_000_000),),
+            model_size_bytes=1_400_000_000,
+            total_layers=28,
+        )
+
+        self.assertEqual(choice.backend, "cpu")
+        self.assertEqual(choice.offloaded_layers, 0)
+        self.assertIn("native identifier", choice.fallback_reason or "")
 
 
 if __name__ == "__main__":

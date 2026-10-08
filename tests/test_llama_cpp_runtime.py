@@ -499,7 +499,11 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_automatic_acceleration_uses_vram_for_partial_layer_offload(self) -> None:
         choice = choose_acceleration(
             "automatic",
-            (GpuDevice("cuda", "NVIDIA test device", 1_500_000_000, 4_000_000_000),),
+            (
+                GpuDevice(
+                    "cuda", "NVIDIA test device", 1_500_000_000, 4_000_000_000, "CUDA0"
+                ),
+            ),
             model_size_bytes=1_400_000_000,
             total_layers=28,
         )

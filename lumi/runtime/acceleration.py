@@ -29,7 +29,7 @@ class GpuDevice:
             raise ValueError("GPU device name is invalid")
         if self.native_device_name is not None and (
             not isinstance(self.native_device_name, str)
-            or not self.native_device_name
+            or not self.native_device_name.strip()
             or len(self.native_device_name) > 160
         ):
             raise ValueError("Native GPU device name is invalid")
@@ -97,7 +97,10 @@ def choose_acceleration(
 
     candidates = _preferred_devices(devices)
     if not candidates:
-        return _cpu_choice(total_layers, "No supported GPU backend or device is available.")
+        return _cpu_choice(
+            total_layers,
+            "No supported GPU backend or device with a native identifier is available.",
+        )
     if total_layers < 1 or model_size_bytes < 1:
         return _cpu_choice(total_layers, "The model layer layout could not be measured safely.")
 
@@ -263,7 +266,12 @@ def _preferred_devices(devices: tuple[GpuDevice, ...] | list[GpuDevice]) -> list
             tier = 4 if device.backend == "vulkan" else 5
         return tier, -device.free_vram_bytes
 
-    return sorted(devices, key=preference)
+    # The display name is descriptive only (for example, "NVIDIA GeForce").
+    # llama.cpp requires its exact backend identifier (such as "CUDA0") to pin
+    # model placement, so devices without that identifier cannot be selected.
+    return sorted(
+        (device for device in devices if device.native_device_name), key=preference
+    )
 
 
 def _cpu_choice(
