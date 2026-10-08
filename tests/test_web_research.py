@@ -23,6 +23,7 @@ from lumi.web_research import (
     WebResearchSessions,
     _normalise_public_web_url,
     _page_document,
+    _PageDocument,
     _read_chunked,
     _read_http_response,
     _resolve_public_addresses,
@@ -259,9 +260,117 @@ class WebResearchTests(unittest.IsolatedAsyncioTestCase):
             "search @alice_example's posts",
             "find username: alice_example",
             "search my favorite series and all my watch history",
+            "私の視聴履歴にある作品を探して",
+            "私のライブラリのお気に入り作品",
+            "tìm phim từ lịch sử xem của tôi",
+            "tìm danh sách yêu thích của tôi",
         ):
             with self.subTest(query=query), self.assertRaises(ValueError):
                 tool.validate_arguments({"query": query})
+
+    async def test_search_filters_private_urls(self) -> None:
+        tool = SearXNGSearchTool(
+            WebResearchConfig(),
+            WebResearchSessions(),
+        )
+        tool._search = AsyncMock(
+            return_value=(
+                {
+                    "href": "https://example.org/article?query=my+watch+history",
+                    "title": "Private query",
+                    "body": "Should not be shown.",
+                },
+                {
+                    "href": "https://example.org/2026/10/media-review",
+                    "title": "Public article",
+                    "body": "Useful public details.",
+                },
+            )
+        )
+
+        result = await tool.execute(
+            chat_context(),
+            tool.validate_arguments({"query": "public media review"}),
+        )
+
+        self.assertEqual(
+            [source.url for source in result.sources],
+            ["https://example.org/2026/10/media-review"],
+        )
+        self.assertNotIn("Private query", result.content)
+
+    async def test_web_read_rejects_sensitive_encoded_url_details(self) -> None:
+        tool = WebReadTool(WebResearchConfig())
+        for url in (
+            "https://example.org/search?email=user%40example.com",
+            (
+                "https://example.org/search?account_id="
+                "123e4567-e89b-42d3-a456-426614174000"
+            ),
+            (
+                "https://example.org/search?q=%E7%A7%81%E3%81%AE%E8%A6%96"
+                "%E8%81%B4%E5%B1%A5%E6%AD%B4"
+            ),
+            (
+                "https://example.org/search?q=%25E7%25A7%2581%25E3%2581%25AE"
+                "%25E8%25A6%2596%25E8%2581%25B4%25E5%25B1%25A5%25E6%25AD%25B4"
+            ),
+            (
+                "https://example.org/search?q=l%E1%BB%8Bch+s%E1%BB%AD+xem+"
+                "c%E1%BB%A7a+t%C3%B4i"
+            ),
+            (
+                "https://example.org/%E7%A7%81%E3%81%AE"
+                "%E3%83%A9%E3%82%A4%E3%83%96%E3%83%A9%E3%83%AA"
+            ),
+        ):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                tool.validate_arguments({"url": url})
+
+        allowed = tool.validate_arguments(
+            {"url": "https://example.org/2026/10/media-review?season=2"}
+        )
+        self.assertEqual(
+            allowed["url"], "https://example.org/2026/10/media-review?season=2"
+        )
+
+    async def test_web_read_refuses_invented_urls_but_allows_user_or_search_urls(
+        self,
+    ) -> None:
+        url = "https://example.org/media-review"
+        sessions = WebResearchSessions()
+        tool = WebReadTool(WebResearchConfig(), sessions)
+        arguments = tool.validate_arguments({"url": url})
+        fetch = AsyncMock(return_value=_PageDocument("Review", "Article text", url))
+
+        with patch("lumi.web_research._fetch_page", new=fetch):
+            invented = await tool.execute(chat_context(), arguments)
+        self.assertEqual(invented.trust, EvidenceTrust.LOCAL)
+        self.assertIn("supplied by the user", invented.content)
+        fetch.assert_not_awaited()
+
+        user_context = chat_context(user_message=f"Please read {url}")
+        with patch("lumi.web_research._fetch_page", new=fetch):
+            direct = await tool.execute(user_context, arguments)
+        self.assertEqual(direct.trust, EvidenceTrust.EXTERNAL)
+        fetch.assert_awaited_once()
+
+        search_context = chat_context(turn_id="turn-2")
+        await sessions.add(
+            search_context,
+            _WebResult(
+                url,
+                Source(url, "example.org", "Review"),
+                "Review",
+                "Search snippet",
+                time.monotonic(),
+            ),
+        )
+        fetch.reset_mock()
+        with patch("lumi.web_research._fetch_page", new=fetch):
+            searched = await tool.execute(search_context, arguments)
+        self.assertEqual(searched.trust, EvidenceTrust.EXTERNAL)
+        fetch.assert_awaited_once()
 
     async def test_search_argument_validation_allows_non_sensitive_dates_and_topics(
         self,
@@ -433,6 +542,36 @@ class WebResearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(redirected.trust, EvidenceTrust.LOCAL)
         self.assertIn("redirect destination is not allowed", redirected.content)
 
+    async def test_web_read_rejects_private_context_in_redirect_url(self) -> None:
+        url = "https://example.org/start"
+        redirect_reader = asyncio.StreamReader()
+        redirect_reader.feed_data(
+            b"HTTP/1.1 302 Found\r\n"
+            b"Location: https://news.example.org/articles?q=my+watch+history\r\n\r\n"
+        )
+        redirect_reader.feed_eof()
+        tool = WebReadTool(WebResearchConfig())
+        context = chat_context(user_message=f"Read {url}")
+        with (
+            patch(
+                "lumi.web_research._resolve_public_addresses",
+                new=AsyncMock(
+                    return_value=(
+                        _ResolvedAddress(2, 1, 6, ("1.1.1.1", 443), "1.1.1.1"),
+                    )
+                ),
+            ),
+            patch(
+                "lumi.web_research._open_pinned_stream",
+                new=AsyncMock(return_value=(redirect_reader, FakeWriter())),
+            ) as open_pinned,
+        ):
+            result = await tool.execute(context, tool.validate_arguments({"url": url}))
+
+        self.assertEqual(result.trust, EvidenceTrust.LOCAL)
+        self.assertIn("redirect destination is not allowed", result.content)
+        open_pinned.assert_awaited_once()
+
     async def test_web_read_follows_revalidated_public_redirects_and_removes_boilerplate(
         self,
     ) -> None:
@@ -462,6 +601,7 @@ class WebResearchTests(unittest.IsolatedAsyncioTestCase):
         )
         tool = WebReadTool(WebResearchConfig())
         arguments = tool.validate_arguments({"url": "http://example.org/start"})
+        context = chat_context(user_message="Read http://example.org/start")
         with (
             patch(
                 "lumi.web_research._resolve_public_addresses",
@@ -477,7 +617,7 @@ class WebResearchTests(unittest.IsolatedAsyncioTestCase):
                 ),
             ) as open_pinned,
         ):
-            result = await tool.execute(chat_context(), arguments)
+            result = await tool.execute(context, arguments)
 
         self.assertEqual(result.trust, EvidenceTrust.EXTERNAL)
         self.assertEqual(result.sources[0].url, "https://news.example.org/final")
@@ -509,7 +649,8 @@ class WebResearchTests(unittest.IsolatedAsyncioTestCase):
             ),
         ):
             result = await tool.execute(
-                chat_context(), {"url": "https://example.org/start"}
+                chat_context(user_message="Read https://example.org/start"),
+                {"url": "https://example.org/start"},
             )
         self.assertEqual(result.trust, EvidenceTrust.LOCAL)
         self.assertIn("insecure page", result.content)
