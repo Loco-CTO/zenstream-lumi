@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import unittest
 from collections.abc import Mapping
+from dataclasses import replace
 
-from lumi.agent import AgentLimits, ChatAgent
+from lumi.agent import AgentLimits, ChatAgent, _recommendation_locale
 from lumi.contracts import (
     ChatContext,
     ChatMessage,
@@ -221,6 +222,10 @@ def chat_context() -> ChatContext:
 
 
 class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
+    def test_recommendation_locale_distinguishes_chinese_and_japanese(self) -> None:
+        self.assertEqual(_recommendation_locale("请用中文回答这个问题。"), "zh")
+        self.assertEqual(_recommendation_locale("この映画について日本語で答えてください。"), "ja")
+
     async def test_generic_japanese_movie_recommendation_uses_only_a_local_movie(self) -> None:
         series = EntityReference("series", "series-1", "ローカルシリーズ")
         movie = EntityReference("movie", "movie-1", "ローカル映画")
@@ -252,6 +257,41 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer.references, (movie,))
         self.assertIn('type="movie" id="movie-1"', answer.markdown)
         self.assertIn("おすすめ", answer.markdown)
+        self.assertEqual(tool.calls, [chat_context()])
+        self.assertEqual(runtime.requests, [])
+        self.assertEqual(answer.tool_calls, 1)
+
+    async def test_generic_chinese_movie_recommendation_uses_only_a_local_movie(self) -> None:
+        series = EntityReference("series", "series-1", "本地剧集")
+        movie = EntityReference("movie", "movie-1", "本地电影")
+        tool = HomeRecommendationsTool(
+            ToolResult(
+                json.dumps(
+                    {
+                        "items": [
+                            {"type": "series", "id": series.id, "title": series.title},
+                            {"type": "movie", "id": movie.id, "title": movie.title},
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                EvidenceTrust.LOCAL,
+                entities=(series, movie),
+            )
+        )
+        runtime = FakeRuntime([])
+        agent = ChatAgent(runtime, ToolRegistry([tool]))
+
+        answer = await agent.answer(
+            chat_context(),
+            [],
+            "请推荐一部我在 ZenStream 本地电影库里现在能观看的电影。"
+            "请先使用本地搜索工具确认影片确实存在，只推荐一部，并用中文简要说明理由。",
+        )
+
+        self.assertEqual(answer.references, (movie,))
+        self.assertIn("本地推荐", answer.markdown)
+        self.assertIn('type="movie" id="movie-1"', answer.markdown)
         self.assertEqual(tool.calls, [chat_context()])
         self.assertEqual(runtime.requests, [])
         self.assertEqual(answer.tool_calls, 1)
@@ -296,6 +336,8 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                 ChatMessage("assistant", "I will rank several local candidates."),
                 ChatMessage("assistant", "候補の本数を確認して検索します。"),
                 ChatMessage("assistant", "高評価の条件を確認します。"),
+                ChatMessage("assistant", "我会查找符合条件的本地电影。"),
+                ChatMessage("assistant", "我会确认库外电影的资料。"),
             ]
         )
         agent = ChatAgent(runtime, ToolRegistry([tool]))
@@ -320,9 +362,11 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         await agent.answer(chat_context(), [], "Recommend the top 3 movies.")
         await agent.answer(chat_context(), [], "映画を3本おすすめしてください。")
         await agent.answer(chat_context(), [], "高評価の映画をおすすめしてください。")
+        await agent.answer(chat_context(), [], "推荐一部类似《Code Geass》的电影。")
+        await agent.answer(chat_context(), [], "请推荐一部库外的电影。")
 
         self.assertEqual(tool.calls, [])
-        self.assertEqual(len(runtime.requests), 14)
+        self.assertEqual(len(runtime.requests), 16)
 
     async def test_anime_movie_shortcut_selects_only_movies(self) -> None:
         series = EntityReference("series", "series-1", "A Local Series")
@@ -459,6 +503,44 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    async def test_chinese_relationship_follow_up_searches_in_chinese_and_english(self) -> None:
+        movie = EntityReference("movie", "movie-1", "コードギアス 反逆のルルーシュⅠ 興道")
+        source = Source(
+            url="https://geass.jp/L-geass/",
+            website_name="Code Geass Official",
+            title="Code Geass Lelouch of the Re;surrection Official Website",
+        )
+        detail = RelationshipDetailTool(movie)
+        search = RelationshipSearchTool(source)
+        runtime = FakeRuntime(
+            [ChatMessage("assistant", f"《{movie.title}》是系列第一部。")]
+        )
+        agent = ChatAgent(runtime, ToolRegistry([detail, search]))
+        base = chat_context()
+        context = ChatContext(
+            account_id=base.account_id,
+            conversation_id=base.conversation_id,
+            model=base.model,
+            thinking=base.thinking,
+            turn_id=base.turn_id,
+            delegation_token=base.delegation_token,
+            previous_entities=(movie,),
+        )
+
+        answer = await agent.answer(
+            context,
+            [ChatMessage("assistant", f"刚才推荐了：{movie.title}")],
+            "这部电影在系列中的观看顺序是什么？请核实前传和续集。",
+        )
+
+        self.assertEqual(detail.calls, [movie.id])
+        self.assertEqual({call["language"] for call in search.calls}, {"zh", "en"})
+        self.assertTrue(all(movie.title in str(call["query"]) for call in search.calls))
+        self.assertTrue(all(movie.id not in str(call["query"]) for call in search.calls))
+        self.assertEqual(answer.sources, (source,))
+        self.assertEqual(answer.references, (movie,))
+        self.assertIn(f'type="movie" id="{movie.id}"', answer.markdown)
+
     async def test_follow_up_receives_recent_trusted_reference_titles(self) -> None:
         movie = EntityReference("movie", "movie-1", "The Local Film")
         runtime = FakeRuntime([ChatMessage("assistant", "It is available locally.")])
@@ -547,6 +629,18 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("作品同士の関係を確認できませんでした", answer.markdown)
         self.assertEqual(answer.references, (movie,))
         self.assertNotIn("temporarily unavailable", answer.markdown)
+
+    async def test_chinese_research_limit_returns_a_chinese_safe_answer(self) -> None:
+        class TimeoutRuntime:
+            async def complete(self, request: ModelRequest) -> ModelResponse:
+                raise TimeoutError
+
+        context = replace(chat_context(), user_message="请用中文回答并核实官方资料。")
+        agent = ChatAgent(TimeoutRuntime(), ToolRegistry([]))
+
+        answer = await agent._answer_after_limit(context, [], {}, {}, 1, 1)
+
+        self.assertEqual(answer.markdown, "研究已达到限制，我还无法给出可靠完整的答案。")
 
     async def test_drops_malformed_reference_syntax_and_links_one_exact_trusted_title(self) -> None:
         movie = EntityReference("movie", "movie-1", "A Trusted Film")
