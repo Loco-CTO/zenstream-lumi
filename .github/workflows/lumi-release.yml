@@ -86,6 +86,7 @@ jobs:
       CMAKE_ARGS: -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_CUDA=OFF -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++
       CC: /usr/bin/gcc
       CXX: /usr/bin/g++
+      CXXFLAGS: -static-libstdc++
     strategy:
       fail-fast: false
       matrix:
