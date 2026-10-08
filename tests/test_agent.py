@@ -8,6 +8,7 @@ from dataclasses import replace
 from lumi.agent import (
     AgentLimits,
     ChatAgent,
+    InferenceError,
     _enforce_local_recommendations,
     _is_recommendation_request,
     _recommendation_locale,
@@ -233,6 +234,71 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_recommendation_locale("请用中文回答这个问题。"), "zh")
         self.assertEqual(_recommendation_locale("この映画について日本語で答えてください。"), "ja")
 
+    def test_explicit_response_language_wins_over_search_and_title_languages(self) -> None:
+        self.assertEqual(
+            _recommendation_locale(
+                "Tell me when 葬送のフリーレン season two starts. Answer in English."
+            ),
+            "en",
+        )
+        self.assertEqual(
+            _recommendation_locale("When does 葬送のフリーレン season two start?"),
+            "en",
+        )
+        self.assertEqual(
+            _recommendation_locale(
+                "请用中文回答：请先搜索日文官方来源，再用英文来源核对。"
+            ),
+            "zh",
+        )
+
+    def test_latest_turn_language_overrides_previous_conversation_language(self) -> None:
+        agent = ChatAgent(FakeRuntime([]), ToolRegistry([]))
+        history = [
+            ChatMessage("user", "请用中文回答我关于这部电影的问题。"),
+            ChatMessage("assistant", "当然可以。"),
+        ]
+        turns = (
+            ("Please answer in English: what is the runtime?", "English"),
+            ("この作品の上映時間を日本語で答えてください。", "Japanese"),
+            ("请用中文回答：片长是多少？", "Chinese"),
+        )
+        for prompt, language in turns:
+            with self.subTest(language=language):
+                messages = agent._bounded_messages(history, prompt)
+                self.assertIn(f"For this turn, answer in {language}.", messages[0].content)
+                self.assertEqual(messages[-1].content, prompt)
+
+    def test_natural_english_follow_up_switches_from_chinese(self) -> None:
+        agent = ChatAgent(FakeRuntime([]), ToolRegistry([]))
+        history = [
+            ChatMessage("user", "请用中文回答我关于这部电影的问题。"),
+            ChatMessage("assistant", "当然可以。"),
+        ]
+
+        messages = agent._bounded_messages(history, "That sounds good")
+
+        self.assertIn("For this turn, answer in English.", messages[0].content)
+        self.assertEqual(messages[-1].content, "That sounds good")
+
+    async def test_inference_diagnostics_do_not_log_prompt_or_exception_text(self) -> None:
+        class FailingRuntime:
+            async def complete(self, request: ModelRequest) -> ModelResponse:
+                raise RuntimeError("sensitive model prompt MUST_NOT_APPEAR_IN_LOGS")
+
+        agent = ChatAgent(FailingRuntime(), ToolRegistry([]))
+        with self.assertLogs("lumi.agent", level="WARNING") as captured:
+            with self.assertRaises(InferenceError):
+                await agent._complete(
+                    chat_context(),
+                    [ChatMessage("user", "MUST_NOT_APPEAR_IN_LOGS")],
+                    (),
+                )
+
+        message = "\n".join(captured.output)
+        self.assertIn("category=RuntimeError", message)
+        self.assertNotIn("MUST_NOT_APPEAR_IN_LOGS", message)
+
     async def test_generic_japanese_movie_recommendation_uses_only_a_local_movie(self) -> None:
         series = EntityReference("series", "series-1", "ローカルシリーズ")
         movie = EntityReference("movie", "movie-1", "ローカル映画")
@@ -438,7 +504,7 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(answer.markdown.startswith(expected_prefix))
                 self.assertNotIn("Outside Film", answer.markdown)
 
-    async def test_sanitizer_keeps_only_positive_local_recommendations_and_rationale(self) -> None:
+    async def test_sanitizer_keeps_local_titles_but_drops_unverified_rationale(self) -> None:
         rejected = EntityReference("movie", "movie-1", "Rejected Film")
         selected = EntityReference("movie", "movie-2", "Verified Film")
         tool = HomeRecommendationsTool(
@@ -458,7 +524,8 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                 ChatMessage(
                     "assistant",
                     'Rejected Film is not a match :::zenstream{type="movie" id="movie-1"}. '
-                    'I recommend Verified Film because its political intrigue matches your request '
+                    'I recommend Verified Film because its political intrigue matches your request, '
+                    'released in 2027 and rated 9.8 '
                     ':::zenstream{type="movie" id="movie-2"}.',
                 ),
             ]
@@ -470,7 +537,9 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIn("Verified Film", answer.markdown)
-        self.assertIn("political intrigue matches your request", answer.markdown)
+        self.assertNotIn("political intrigue", answer.markdown)
+        self.assertNotIn("2027", answer.markdown)
+        self.assertNotIn("9.8", answer.markdown)
         self.assertNotIn("Rejected Film", answer.markdown)
         self.assertEqual(answer.references, (selected,))
 

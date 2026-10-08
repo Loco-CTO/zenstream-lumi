@@ -59,6 +59,7 @@ class FakeFormatter:
             prompt="rendered native Qwen prompt",
             stop=["<|im_end|>"],
             stopping_criteria=self.api.formatter_stopping_criteria,
+            added_special=self.api.added_special,
         )
 
 
@@ -115,6 +116,7 @@ class FakeLlamaAPI:
         self.block_generation = False
         self.generation_calls = 0
         self.formatter_stopping_criteria: list[Any] = []
+        self.added_special = True
         self.generation_started = threading.Event()
         self.allow_generation = threading.Event()
         self.allow_generation.set()
@@ -235,7 +237,8 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(api.formatted[0]["enable_thinking"], True)
         self.assertEqual(api.formatter_options[0]["add_generation_prompt"], True)
         self.assertNotIn("add_generation_prompt", api.formatted[0])
-        self.assertEqual(api.tokenized_prompts[0][1:], (True, True))
+        self.assertEqual(api.tokenized_prompts[0][1:], (False, True))
+        self.assertEqual(api.completion_options[0]["prompt"], list(range(api.prompt_token_count)))
         self.assertEqual(api.completion_options[0]["temperature"], 0.0)
         self.assertEqual(api.completion_options[0]["max_tokens"], 24)
         self.assertEqual(api.model_options[0]["n_gpu_layers"], 0)
@@ -287,6 +290,93 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.message.tool_calls[0].arguments, {"query": "Fate/Zero"})
         sent_tools = api.formatted[0]["tools"]
         self.assertEqual(sent_tools[0]["function"]["name"], "catalog_search")
+        await runtime.close()
+
+    async def test_nullable_web_search_string_arguments_are_parsed_as_raw_strings(self) -> None:
+        search_tool = ToolDefinition(
+            "web_search",
+            "Search public sources.",
+            {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer"},
+                    "recency": {"type": ["string", "null"]},
+                    "language": {"type": ["string", "null"]},
+                },
+                "required": ["query"],
+            },
+            data_scope="external_search",
+            read_only=True,
+        )
+        api = FakeLlamaAPI(
+            "<tool_call><function=web_search>"
+            "<parameter=query>official season two announcement</parameter>"
+            "<parameter=max_results>5</parameter>"
+            "<parameter=recency>week</parameter>"
+            "<parameter=language>ja</parameter>"
+            "</function></tool_call>"
+        )
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        response = await runtime.complete(self.make_request(tools=(search_tool,)))
+
+        self.assertEqual(
+            response.message.tool_calls[0].arguments,
+            {
+                "query": "official season two announcement",
+                "max_results": 5,
+                "recency": "week",
+                "language": "ja",
+            },
+        )
+        await runtime.close()
+
+    async def test_nullable_web_search_string_arguments_accept_null(self) -> None:
+        search_tool = ToolDefinition(
+            "web_search",
+            "Search public sources.",
+            {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "recency": {"type": ["string", "null"]},
+                    "language": {"type": ["string", "null"]},
+                },
+                "required": ["query"],
+            },
+            data_scope="external_search",
+            read_only=True,
+        )
+        api = FakeLlamaAPI(
+            "<tool_call><function=web_search>"
+            "<parameter=query>Frieren season two</parameter>"
+            "<parameter=recency>null</parameter>"
+            "<parameter=language>null</parameter>"
+            "</function></tool_call>"
+        )
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        response = await runtime.complete(self.make_request(tools=(search_tool,)))
+
+        self.assertEqual(
+            response.message.tool_calls[0].arguments,
+            {"query": "Frieren season two", "recency": None, "language": None},
+        )
+        await runtime.close()
+
+    async def test_formatter_without_special_tokens_adds_bos_once(self) -> None:
+        api = FakeLlamaAPI("Answer")
+        api.added_special = False
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        await runtime.complete(self.make_request())
+
+        self.assertEqual(api.tokenized_prompts[0][1:], (True, True))
+        self.assertEqual(api.completion_options[0]["prompt"], list(range(api.prompt_token_count)))
         await runtime.close()
 
     async def test_multiple_native_tool_calls_are_supported(self) -> None:

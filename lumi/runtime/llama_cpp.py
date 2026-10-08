@@ -416,6 +416,7 @@ class LlamaCppChatRuntime(ChatRuntime):
                 enable_thinking=request.thinking,
             )
             prompt = getattr(formatted, "prompt", None)
+            added_special = bool(getattr(formatted, "added_special", False))
             stop = getattr(formatted, "stop", None)
             formatter_stopping_criteria = getattr(formatted, "stopping_criteria", None) or []
             if not isinstance(formatter_stopping_criteria, (list, tuple)) or any(
@@ -426,7 +427,11 @@ class LlamaCppChatRuntime(ChatRuntime):
                 )
             if not isinstance(prompt, str) or not prompt:
                 raise LlamaCppProtocolError("The Qwen3.5 chat template returned invalid text")
-            encoded = loaded.model.tokenize(prompt.encode("utf-8"), add_bos=True, special=True)
+            encoded = loaded.model.tokenize(
+                prompt.encode("utf-8"),
+                add_bos=not added_special,
+                special=True,
+            )
             prompt_tokens = _token_count(encoded)
             context_limit = min(
                 request.context_size,
@@ -450,7 +455,7 @@ class LlamaCppChatRuntime(ChatRuntime):
                 [*formatter_stopping_criteria, should_stop]
             )
             result = loaded.model.create_completion(
-                prompt=prompt,
+                prompt=encoded,
                 max_tokens=output_limit,
                 temperature=0.0,
                 stop=stop,
@@ -764,7 +769,14 @@ def _parse_argument(value: str, tool: ToolDefinition, name: str) -> Any:
     properties = tool.parameters.get("properties", {})
     schema = properties.get(name, {}) if isinstance(properties, Mapping) else {}
     expected_type = schema.get("type") if isinstance(schema, Mapping) else None
-    if expected_type == "string":
+    allowed_types = (
+        {item for item in expected_type if isinstance(item, str)}
+        if isinstance(expected_type, list)
+        else {expected_type} if isinstance(expected_type, str) else set()
+    )
+    if "string" in allowed_types:
+        if "null" in allowed_types and value.strip().casefold() == "null":
+            return None
         return value
     try:
         return json.loads(value)

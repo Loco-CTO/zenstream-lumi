@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import re
 from collections.abc import Mapping
@@ -31,6 +32,7 @@ from lumi.tools import ToolRegistry
 _REFERENCE_PATTERN = re.compile(
     r':::zenstream\{type="(?P<type>[^"]+)"\s+id="(?P<id>[^"]+)"\}'
 )
+_LOGGER = logging.getLogger(__name__)
 _REFERENCE_LIKE_PATTERN = re.compile(
     r':::zenstream(?!\{type="[^"\n]+"\s+id="[^"\n]+"\})[^\n]*'
 )
@@ -656,20 +658,125 @@ def _simple_local_recommendation_kind(
     return False, None
 
 
-def _recommendation_locale(user_text: str) -> str:
-    """Choose a short deterministic fallback in the language of common Lumi prompts."""
+_EXPLICIT_RESPONSE_LANGUAGE_MARKERS = {
+    "zh": (
+        "answer in chinese",
+        "reply in chinese",
+        "respond in chinese",
+        "use chinese",
+        "请用中文",
+        "用中文回答",
+        "用中文回复",
+        "请用中文答复",
+        "中文回答",
+    ),
+    "ja": (
+        "answer in japanese",
+        "reply in japanese",
+        "respond in japanese",
+        "use japanese",
+        "日本語で答えて",
+        "日本語で回答",
+        "日本語で返信",
+        "日本語で説明",
+    ),
+    "en": (
+        "answer in english",
+        "reply in english",
+        "respond in english",
+        "use english",
+        "英語で答えて",
+        "英語で回答",
+        "英語で返信",
+        "用英文回答",
+        "请用英语回答",
+    ),
+    "vi": (
+        "answer in vietnamese",
+        "reply in vietnamese",
+        "respond in vietnamese",
+        "use vietnamese",
+        "hãy trả lời bằng tiếng việt",
+        "trả lời bằng tiếng việt",
+    ),
+}
 
-    folded = user_text.casefold()
-    if any("\u3040" <= char <= "\u30ff" for char in user_text):
-        return "ja"
-    if any("\u3400" <= char <= "\u9fff" or "\uf900" <= char <= "\ufaff" for char in user_text):
-        return "zh"
+
+def _explicit_response_locale(user_text: str) -> str | None:
+    folded = " ".join(user_text.casefold().split())
+    for locale, markers in _EXPLICIT_RESPONSE_LANGUAGE_MARKERS.items():
+        if any(marker in folded for marker in markers):
+            return locale
+    return None
+
+
+def _recommendation_locale(user_text: str) -> str:
+    """Choose the response language from explicit instructions or the latest user turn."""
+
+    explicit_locale = _explicit_response_locale(user_text)
+    if explicit_locale is not None:
+        return explicit_locale
+
+    folded = " ".join(user_text.casefold().split())
+
     if any(
         marker in folded
         for marker in ("gợi ý", "đề xuất", "thư viện", "phim", "xem", "bạn", "mình")
     ):
         return "vi"
+    latin_words = len(re.findall(r"[a-z]{2,}", folded))
+    hiragana_katakana = sum("\u3040" <= char <= "\u30ff" for char in user_text)
+    han = sum(
+        "\u3400" <= char <= "\u9fff" or "\uf900" <= char <= "\ufaff"
+        for char in user_text
+    )
+    english_cue = re.search(
+        r"\b(?:what|why|how|tell|which|when|where|does|do|is|are|please|recommend|"
+        r"find|search|should|could|would|can|about)\b",
+        folded,
+    )
+    if latin_words >= 2 and (
+        english_cue or hiragana_katakana + han < latin_words * 2
+    ):
+        return "en"
+    if hiragana_katakana >= 2:
+        return "ja"
+    if han:
+        return "zh"
     return "en"
+
+
+def _response_language_instruction(user_text: str, history: list[ChatMessage]) -> str:
+    locale = _recommendation_locale(user_text)
+    explicitly_requested = _explicit_response_locale(user_text) is not None
+    previous_user_message = next(
+        (message for message in reversed(history) if message.role == "user"),
+        None,
+    )
+    if not explicitly_requested:
+        if previous_user_message is None:
+            return ""
+        if _recommendation_locale(previous_user_message.content) == locale:
+            return ""
+        text_has_script = any(
+            "\u3040" <= char <= "\u30ff"
+            or "\u3400" <= char <= "\u9fff"
+            or "\uf900" <= char <= "\ufaff"
+            for char in user_text
+        )
+        latin_words = len(re.findall(r"[a-z]{2,}", user_text.casefold()))
+        if locale == "en":
+            if latin_words < 2:
+                return ""
+        elif not text_has_script:
+            return ""
+    language = {"en": "English", "ja": "Japanese", "zh": "Chinese", "vi": "Vietnamese"}[
+        locale
+    ]
+    return (
+        f"For this turn, answer in {language}. Follow this latest user turn over earlier language "
+        "or source-language instructions."
+    )
 
 
 def _is_recommendation_request(user_text: str, history: list[ChatMessage]) -> bool:
@@ -762,8 +869,10 @@ def _enforce_local_recommendations(
 ) -> ChatAnswer:
     """Render default recommendations only from local entities returned this turn."""
 
-    selected: dict[tuple[str, str], tuple[EntityReference, str]] = {}
-    segments = re.split(r"\r?\n+|(?<=[.!?。！？])\s*", answer.markdown)
+    selected: dict[tuple[str, str], EntityReference] = {}
+    segments = re.split(
+        r"\r?\n+|(?<=[.!?])\s+|(?<=[。！？])\s*", answer.markdown
+    )
     for segment in (value.strip() for value in segments if value.strip()):
         references = list(_REFERENCE_PATTERN.finditer(segment))
         if len(references) != 1:
@@ -773,9 +882,9 @@ def _enforce_local_recommendations(
         entity = current_entities.get(key)
         if entity is None:
             continue
-        positive, rationale = _recommendation_rationale(segment, entity.title)
+        positive, _rationale = _recommendation_rationale(segment, entity.title)
         if positive:
-            selected.setdefault(key, (entity, rationale))
+            selected.setdefault(key, entity)
     locale = _recommendation_locale(user_text)
     if not selected:
         fallback = {
@@ -805,13 +914,10 @@ def _enforce_local_recommendations(
         "vi": "Các lựa chọn đã được xác nhận trong thư viện ZenStream của bạn:",
     }[locale]
     recommendations = list(selected.values())[:5]
-    references = tuple(entity for entity, _rationale in recommendations)
+    references = tuple(recommendations)
     lines = [lead]
-    for entity, rationale in recommendations:
-        line = f'- {entity.title} :::zenstream{{type="{entity.type}" id="{entity.id}"}}'
-        if rationale:
-            line += f" — {rationale}"
-        lines.append(line)
+    for entity in recommendations:
+        lines.append(f'- {entity.title} :::zenstream{{type="{entity.type}" id="{entity.id}"}}')
     return replace(answer, markdown="\n\n".join(lines), references=references)
 
 
@@ -1310,10 +1416,17 @@ class ChatAgent:
                 timeout=self._limits.inference_timeout_seconds,
             )
         except TimeoutError as error:
+            _LOGGER.warning(
+                "Lumi inference failed phase=complete category=%s", type(error).__name__
+            )
             raise InferenceError("Model request exceeded the configured time limit") from error
         except InferenceError:
+            _LOGGER.warning("Lumi inference failed phase=complete category=InferenceError")
             raise
         except Exception as error:
+            _LOGGER.warning(
+                "Lumi inference failed phase=complete category=%s", type(error).__name__
+            )
             raise InferenceError("Model request failed") from error
 
     async def _dispatch(
@@ -1553,7 +1666,10 @@ class ChatAgent:
         user_text: str,
         previous_entities: tuple[EntityReference, ...] = (),
     ) -> list[ChatMessage]:
+        language_instruction = _response_language_instruction(user_text, history)
         system_content = SYSTEM_PROMPT
+        if language_instruction:
+            system_content += f"\n\n{language_instruction}"
         referenced_entities = [
             {
                 "type": entity.type,
