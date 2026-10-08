@@ -264,6 +264,37 @@ class ModelInstallationTests(unittest.TestCase):
             self.assertFalse(Path(artifact.directory).exists())
             self.assertFalse(installer.remove_model(_MODEL_ID))
 
+    def test_remove_recovers_corrupt_model_files(self) -> None:
+        spec = _test_spec()
+        with patch("lumi.model_installation._MODEL_SPECS", {_MODEL_ID: spec}):
+            installer = self.installer(spec)
+            artifact = installer.install_model(_MODEL_ID)
+            model_directory = Path(artifact.directory)
+            (model_directory / _GGUF_FILENAME).write_bytes(b"incomplete file")
+
+            self.assertFalse(installer.list_models()[0].installed)
+            self.assertTrue(installer.remove_model(_MODEL_ID))
+            self.assertFalse(model_directory.exists())
+
+    def test_remove_rejects_links_inside_corrupt_model_directory(self) -> None:
+        spec = _test_spec()
+        outside = Path(self.temp_dir.name) / "outside.gguf"
+        outside.write_bytes(b"keep")
+        with patch("lumi.model_installation._MODEL_SPECS", {_MODEL_ID: spec}):
+            installer = self.installer(spec)
+            artifact = installer.install_model(_MODEL_ID)
+            model_directory = Path(artifact.directory)
+            link = model_directory / "external.gguf"
+            try:
+                link.symlink_to(outside)
+            except OSError:
+                self.skipTest("This Windows environment does not permit symlinks")
+
+            with self.assertRaises(ModelInstallationError):
+                installer.remove_model(_MODEL_ID)
+            self.assertTrue(model_directory.exists())
+            self.assertEqual(outside.read_bytes(), b"keep")
+
     def test_listing_rehashes_installed_gguf(self) -> None:
         spec = _test_spec()
         with patch("lumi.model_installation._MODEL_SPECS", {_MODEL_ID: spec}):

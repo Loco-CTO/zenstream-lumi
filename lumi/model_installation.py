@@ -347,16 +347,22 @@ class Qwen35ModelInstaller:
                     pass
 
     def remove_model(self, model_id: str) -> bool:
-        """Remove only an exact, manifest-verified model directory owned by this installer."""
+        """Remove the exact managed model directory, including corrupt installations."""
 
         spec = _require_spec(model_id)
         with self._lock:
-            artifact = self._read_installed_artifact(spec, verify_files=False)
-            if artifact is None:
-                return False
             target = self._model_path(spec)
-            if target.resolve() != Path(artifact.directory) or os.path.ismount(target):
+            if not target.exists():
+                return False
+
+            if (
+                target.is_symlink()
+                or _is_junction(target)
+                or not target.is_dir()
+                or os.path.ismount(target)
+            ):
                 raise ModelInstallationError("The Lumi model directory failed its path check")
+            _walk_regular_files(target)
             _remove_tree_no_follow(target)
             return True
 
@@ -799,7 +805,12 @@ def _sha256_file(path: Path) -> str:
 
 
 def _walk_regular_files(root: Path) -> list[tuple[str, Path]]:
-    if root.is_symlink() or _is_junction(root) or not root.is_dir():
+    if (
+        root.is_symlink()
+        or _is_junction(root)
+        or not root.is_dir()
+        or os.path.ismount(root)
+    ):
         raise ModelInstallationError("A model directory is not a private directory")
     root = root.resolve()
     result: list[tuple[str, Path]] = []
@@ -808,7 +819,7 @@ def _walk_regular_files(root: Path) -> list[tuple[str, Path]]:
         safe_subdirectories: list[str] = []
         for name in subdirectories:
             path = current / name
-            if path.is_symlink() or _is_junction(path):
+            if path.is_symlink() or _is_junction(path) or os.path.ismount(path):
                 raise ModelInstallationError("A model directory contains a link")
             if not path.is_dir():
                 raise ModelInstallationError("A model directory contains an unsafe entry")
