@@ -58,7 +58,7 @@ def build_zenstream_tool_registry(
     web_research_config: WebResearchConfig | None = None,
     web_transport: httpx.AsyncBaseTransport | None = None,
 ) -> ToolRegistry:
-    """Build six fixed local catalog tools and two bounded web-research tools.
+    """Build seven fixed local catalog tools and two bounded web-research tools.
 
     The resulting registry can be passed directly to ``LumiConversationService``. The
     optional transports are intended for in-process tests. Production uses HTTPX's default
@@ -67,6 +67,7 @@ def build_zenstream_tool_registry(
     """
 
     from lumi.orchestrator_tools import (
+        CatalogEntityResolveTool,
         CatalogItemDetailTool,
         CatalogSearchTool,
         ContinueWatchingTool,
@@ -90,6 +91,7 @@ def build_zenstream_tool_registry(
     )
     local_tools = (
         CatalogSearchTool(client),
+        CatalogEntityResolveTool(client),
         CatalogItemDetailTool(client),
         HomeRecommendationsTool(client),
         ContinueWatchingTool(client),

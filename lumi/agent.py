@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import re
 from collections.abc import Mapping
@@ -31,22 +32,131 @@ from lumi.tools import ToolRegistry
 _REFERENCE_PATTERN = re.compile(
     r':::zenstream\{type="(?P<type>[^"]+)"\s+id="(?P<id>[^"]+)"\}'
 )
+_LOGGER = logging.getLogger(__name__)
 _REFERENCE_LIKE_PATTERN = re.compile(
     r':::zenstream(?!\{type="[^"\n]+"\s+id="[^"\n]+"\})[^\n]*'
 )
 _THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.IGNORECASE | re.DOTALL)
+_RECOMMENDATION_PARAPHRASE_PATTERNS = (
+    re.compile(
+        r"\b(?:any|some)\s+(?:good|great|fun|interesting|worthwhile)\s+"
+        r"(?:movies?|films?|series|shows?|anime)\b"
+    ),
+    re.compile(
+        r"\b(?:any|some)\s+(?:movies?|films?|series|shows?|anime)\s+"
+        r"(?:for\s+(?:tonight|today|this evening)|to watch|worth watching)\b"
+    ),
+    re.compile(
+        r"\b(?:good|great|fun|interesting)\s+(?:movies?|films?|series|shows?|anime)\s+"
+        r"(?:for\s+(?:tonight|today|this evening)|to watch|worth watching)\b"
+    ),
+    re.compile(
+        r"(?:今夜|今晩|今日).{0,8}(?:見る|観る).{0,8}"
+        r"(?:いい|面白い|おすすめ).{0,8}(?:映画|作品|アニメ|ドラマ)"
+    ),
+    re.compile(r"(?:何か|なにか).{0,4}(?:いい|面白い|おすすめ).{0,4}(?:映画|作品|アニメ|ドラマ)"),
+    re.compile(
+        r"有什么(?:值得看的|好看的|适合看的)(?:电影|影片|电视剧|剧集|动漫|动画|作品)"
+    ),
+    re.compile(
+        r"有没有(?:值得看的|好看的|适合看的)(?:电影|影片|电视剧|剧集|动漫|动画|作品)"
+    ),
+)
+_POSITIVE_RECOMMENDATION_MARKERS = (
+    "recommend",
+    "suggest",
+    "you might like",
+    "you may like",
+    "you could enjoy",
+    "you would enjoy",
+    "you could try",
+    "good fit",
+    "great fit",
+    "worth watching",
+    "fits your request",
+    "matches your request",
+    "suits your taste",
+    "strong pick",
+    "good choice",
+    "good option",
+    "おすすめ",
+    "推薦",
+    "勧め",
+    "観てみて",
+    "見てみて",
+    "見る価値",
+    "観る価値",
+    "ぴったり",
+    "合いそう",
+    "合っています",
+    "推荐",
+    "可以看看",
+    "值得一看",
+    "值得看",
+    "适合",
+    "符合你的",
+    "不妨看看",
+)
+_NEGATIVE_RECOMMENDATION_MARKERS = (
+    "not a match",
+    "not a fit",
+    "not suitable",
+    "doesn't fit",
+    "does not fit",
+    "isn't a fit",
+    "is not a fit",
+    "not recommended",
+    "don't recommend",
+    "do not recommend",
+    "wouldn't recommend",
+    "would not recommend",
+    "avoid",
+    "skip",
+    "おすすめしない",
+    "おすすめしません",
+    "おすすめできない",
+    "勧めない",
+    "合わない",
+    "適さない",
+    "不推荐",
+    "不建议",
+    "不适合",
+    "不匹配",
+    "不符合",
+    "不值得",
+)
+_RECOMMENDATION_CLAUSE_BREAK_PATTERN = re.compile(
+    r"[,，;；]|\b(?:and|but|or|however|although|whereas)\b|"
+    r"但是|不过|然而|可是|而且|但是|然而|そして|しかし|でも|ただし",
+    re.IGNORECASE,
+)
+_RECOMMENDATION_LIST_ITEM_PATTERN = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
 _RECOMMENDATION_MARKERS = (
     "recommend",
     "suggest",
     "what should i watch",
     "what to watch",
     "pick something to watch",
+    "find an anime like",
+    "find a movie like",
+    "find a film like",
+    "find a series like",
+    "movies similar to",
+    "films similar to",
+    "anime similar to",
+    "shows similar to",
     "おすすめ",
+    "似た作品を教えて",
+    "似た映画を教えて",
+    "似たアニメを教えて",
     "推薦",
     "推奨",
     "何を観",
     "何を見",
     "推荐",
+    "类似的电影",
+    "类似的作品",
+    "同类作品",
     "建议看",
     "看什么",
     "gợi ý",
@@ -68,19 +178,36 @@ _OUTSIDE_LIBRARY_MARKERS = (
     "what to add",
     "ライブラリ外",
     "ライブラリにない",
+    "ライブラリにない作品",
+    "ライブラリにない映画",
+    "ライブラリ外の作品",
     "ライブラリに入っていない",
     "コレクション外",
     "コレクションにない",
     "持っていない作品",
+    "持っていない作品も",
     "持っていないタイトル",
     "追加すべき",
     "追加した方が",
     "追加する作品",
     "库外",
     "不在我的库",
+    "不在我的媒体库",
+    "本地库里没有",
+    "我还没有",
     "我的库里没有",
+    "我的媒体库里没有",
     "库中没有",
+    "片库外",
+    "库外推荐",
+    "片库中没有",
+    "本地片库中没有",
+    "媒体库里没有",
     "我没有这部",
+    "建议我添加",
+    "我应该添加什么",
+    "我该加什么",
+    "添加什么作品",
     "ngoài thư viện",
     "không có trong thư viện",
     "ngoài danh sách",
@@ -531,20 +658,267 @@ def _simple_local_recommendation_kind(
     return False, None
 
 
-def _recommendation_locale(user_text: str) -> str:
-    """Choose a short deterministic fallback in the language of common Lumi prompts."""
+_EXPLICIT_RESPONSE_LANGUAGE_MARKERS = {
+    "zh": (
+        "answer in chinese",
+        "reply in chinese",
+        "respond in chinese",
+        "use chinese",
+        "请用中文",
+        "用中文回答",
+        "用中文回复",
+        "请用中文答复",
+        "中文回答",
+    ),
+    "ja": (
+        "answer in japanese",
+        "reply in japanese",
+        "respond in japanese",
+        "use japanese",
+        "日本語で答えて",
+        "日本語で回答",
+        "日本語で返信",
+        "日本語で説明",
+    ),
+    "en": (
+        "answer in english",
+        "reply in english",
+        "respond in english",
+        "use english",
+        "英語で答えて",
+        "英語で回答",
+        "英語で返信",
+        "用英文回答",
+        "请用英语回答",
+    ),
+    "vi": (
+        "answer in vietnamese",
+        "reply in vietnamese",
+        "respond in vietnamese",
+        "use vietnamese",
+        "hãy trả lời bằng tiếng việt",
+        "trả lời bằng tiếng việt",
+    ),
+}
 
-    folded = user_text.casefold()
-    if any("\u3040" <= char <= "\u30ff" for char in user_text):
-        return "ja"
-    if any("\u3400" <= char <= "\u9fff" or "\uf900" <= char <= "\ufaff" for char in user_text):
-        return "zh"
+
+def _explicit_response_locale(user_text: str) -> str | None:
+    folded = " ".join(user_text.casefold().split())
+    for locale, markers in _EXPLICIT_RESPONSE_LANGUAGE_MARKERS.items():
+        if any(marker in folded for marker in markers):
+            return locale
+    return None
+
+
+def _recommendation_locale(user_text: str) -> str:
+    """Choose the response language from explicit instructions or the latest user turn."""
+
+    explicit_locale = _explicit_response_locale(user_text)
+    if explicit_locale is not None:
+        return explicit_locale
+
+    folded = " ".join(user_text.casefold().split())
+
     if any(
         marker in folded
         for marker in ("gợi ý", "đề xuất", "thư viện", "phim", "xem", "bạn", "mình")
     ):
         return "vi"
+    latin_words = len(re.findall(r"[a-z]{2,}", folded))
+    hiragana_katakana = sum("\u3040" <= char <= "\u30ff" for char in user_text)
+    han = sum(
+        "\u3400" <= char <= "\u9fff" or "\uf900" <= char <= "\ufaff"
+        for char in user_text
+    )
+    english_cue = re.search(
+        r"\b(?:what|why|how|tell|which|when|where|does|do|is|are|please|recommend|"
+        r"find|search|should|could|would|can|about)\b",
+        folded,
+    )
+    if latin_words >= 2 and (
+        english_cue or hiragana_katakana + han < latin_words * 2
+    ):
+        return "en"
+    if hiragana_katakana >= 2:
+        return "ja"
+    if han:
+        return "zh"
     return "en"
+
+
+def _response_language_instruction(user_text: str, history: list[ChatMessage]) -> str:
+    locale = _recommendation_locale(user_text)
+    explicitly_requested = _explicit_response_locale(user_text) is not None
+    previous_user_message = next(
+        (message for message in reversed(history) if message.role == "user"),
+        None,
+    )
+    if not explicitly_requested:
+        if previous_user_message is None:
+            return ""
+        if _recommendation_locale(previous_user_message.content) == locale:
+            return ""
+        text_has_script = any(
+            "\u3040" <= char <= "\u30ff"
+            or "\u3400" <= char <= "\u9fff"
+            or "\uf900" <= char <= "\ufaff"
+            for char in user_text
+        )
+        latin_words = len(re.findall(r"[a-z]{2,}", user_text.casefold()))
+        if locale == "en":
+            if latin_words < 2:
+                return ""
+        elif not text_has_script:
+            return ""
+    language = {"en": "English", "ja": "Japanese", "zh": "Chinese", "vi": "Vietnamese"}[
+        locale
+    ]
+    return (
+        f"For this turn, answer in {language}. Follow this latest user turn over earlier language "
+        "or source-language instructions."
+    )
+
+
+def _is_recommendation_request(user_text: str, history: list[ChatMessage]) -> bool:
+    folded = " ".join(user_text.casefold().split())
+    if any(marker in folded for marker in _RECOMMENDATION_MARKERS) or any(
+        pattern.search(folded) for pattern in _RECOMMENDATION_PARAPHRASE_PATTERNS
+    ):
+        return True
+    if not any(marker in folded for marker in _FOLLOW_UP_RECOMMENDATION_MARKERS):
+        return False
+    for message in reversed(history):
+        if message.role != "user":
+            continue
+        previous = " ".join(message.content.casefold().split())
+        return any(marker in previous for marker in _RECOMMENDATION_MARKERS)
+    return False
+
+
+def _explicitly_requests_outside_library(
+    user_text: str, history: list[ChatMessage]
+) -> bool:
+    folded = " ".join(user_text.casefold().split())
+    if _is_affirmative_outside_request(folded):
+        return True
+    if not any(marker in folded for marker in _FOLLOW_UP_RECOMMENDATION_MARKERS):
+        return False
+    for message in reversed(history):
+        if message.role != "user":
+            continue
+        previous = " ".join(message.content.casefold().split())
+        return _is_affirmative_outside_request(previous)
+    return False
+
+
+def _is_affirmative_outside_request(folded_text: str) -> bool:
+    if not any(marker in folded_text for marker in _OUTSIDE_LIBRARY_MARKERS):
+        return False
+    text = folded_text.replace("’", "'")
+    english_negation = re.search(
+        r"\b(?:don't|do not|never|not)\b.{0,48}\b"
+        r"(?:recommend(?:ations?)?|suggest(?:ions?)?)\b",
+        text,
+    )
+    japanese_negation = re.search(
+        r"(?:おすすめ|推薦|勧め|すすめ)(?:しないで|しません|しない|できない|ないで)"
+        r"|(?:しないで|しません|勧めない|おすすめしない).{0,20}(?:ライブラリ外|コレクション外|库外)",
+        text,
+    )
+    chinese_negation = re.search(
+        r"(?:不要|别|不必|无需|不用|不想|不希望).{0,16}(?:推荐|建议)"
+        r"|(?:推荐|建议).{0,12}(?:不要|不|别|不必)",
+        text,
+    )
+    return not (english_negation or japanese_negation or chinese_negation)
+
+
+def _recommendation_clause(text: str, position: int) -> str:
+    start = 0
+    end = len(text)
+    for match in _RECOMMENDATION_CLAUSE_BREAK_PATTERN.finditer(text):
+        if match.end() <= position:
+            start = match.end()
+        elif match.start() >= position:
+            end = match.start()
+            break
+    return text[start:end].strip()
+
+
+def _recommendation_rationale(text: str, title: str) -> tuple[bool, str]:
+    is_list_item = bool(_RECOMMENDATION_LIST_ITEM_PATTERN.match(text))
+    cleaned = _REFERENCE_PATTERN.sub("", text)
+    cleaned = _REFERENCE_LIKE_PATTERN.sub("", cleaned).strip()
+    cleaned = _RECOMMENDATION_LIST_ITEM_PATTERN.sub("", cleaned, count=1).strip()
+    title_match = re.search(re.escape(title), cleaned, re.IGNORECASE)
+    if title_match is None:
+        return False, ""
+    clause = _recommendation_clause(cleaned, title_match.start()).casefold()
+    if any(marker in clause for marker in _NEGATIVE_RECOMMENDATION_MARKERS):
+        return False, ""
+    rationale = cleaned[title_match.end() :].strip().lstrip(" —–-:：,，;；")
+    rationale = rationale[:240].strip()
+    positive = any(marker in clause for marker in _POSITIVE_RECOMMENDATION_MARKERS)
+    return positive or (is_list_item and bool(rationale)), rationale
+
+
+def _enforce_local_recommendations(
+    answer: ChatAnswer,
+    user_text: str,
+    current_entities: Mapping[tuple[str, str], EntityReference],
+) -> ChatAnswer:
+    """Render default recommendations only from local entities returned this turn."""
+
+    selected: dict[tuple[str, str], EntityReference] = {}
+    segments = re.split(
+        r"\r?\n+|(?<=[.!?])\s+|(?<=[。！？])\s*", answer.markdown
+    )
+    for segment in (value.strip() for value in segments if value.strip()):
+        references = list(_REFERENCE_PATTERN.finditer(segment))
+        if len(references) != 1:
+            continue
+        match = references[0]
+        key = (match.group("type"), match.group("id"))
+        entity = current_entities.get(key)
+        if entity is None:
+            continue
+        positive, _rationale = _recommendation_rationale(segment, entity.title)
+        if positive:
+            selected.setdefault(key, entity)
+    locale = _recommendation_locale(user_text)
+    if not selected:
+        fallback = {
+            "en": (
+                "I couldn't verify a matching title in your ZenStream library. I won't "
+                "recommend outside-library titles unless you ask."
+            ),
+            "ja": (
+                "ZenStreamライブラリ内に一致する作品があるか確認できませんでした。"
+                "ご希望がない限り、ライブラリ外の作品はおすすめしません。"
+            ),
+            "zh": (
+                "我无法确认您的 ZenStream 媒体库中有匹配作品。"
+                "除非您明确提出，否则我不会推荐库外作品。"
+            ),
+            "vi": (
+                "Mình chưa thể xác nhận có phim phù hợp trong thư viện ZenStream của bạn. "
+                "Mình sẽ không đề xuất phim ngoài thư viện trừ khi bạn yêu cầu."
+            ),
+        }[locale]
+        return replace(answer, markdown=fallback, references=())
+
+    lead = {
+        "en": "Verified options from your ZenStream library:",
+        "ja": "ZenStreamライブラリ内で確認できた候補です:",
+        "zh": "以下是已确认在您 ZenStream 媒体库中的选项：",
+        "vi": "Các lựa chọn đã được xác nhận trong thư viện ZenStream của bạn:",
+    }[locale]
+    recommendations = list(selected.values())[:5]
+    references = tuple(recommendations)
+    lines = [lead]
+    for entity in recommendations:
+        lines.append(f'- {entity.title} :::zenstream{{type="{entity.type}" id="{entity.id}"}}')
+    return replace(answer, markdown="\n\n".join(lines), references=references)
 
 
 def _relationship_follow_up_entity(
@@ -667,10 +1041,48 @@ class ChatAgent:
                 requested_type,
             )
 
+        enforce_local_recommendations = _is_recommendation_request(user_text, history) and not (
+            _explicitly_requests_outside_library(user_text, history)
+        )
+        return await self._answer_with_tools(
+            context,
+            history,
+            user_text,
+            enforce_local_recommendations=enforce_local_recommendations,
+        )
+
+    async def _answer_with_tools(
+        self,
+        context: ChatContext,
+        history: list[ChatMessage],
+        user_text: str,
+        *,
+        enforce_local_recommendations: bool,
+    ) -> ChatAnswer:
+
         trusted_entities = {
             (entity.type, entity.id): entity
             for entity in context.previous_entities[: self._limits.max_trusted_entities]
         }
+        current_entities: dict[tuple[str, str], EntityReference] = {}
+
+        def remember_local_entities(result: ToolResult) -> None:
+            if result.trust is not EvidenceTrust.LOCAL:
+                return
+            for entity in result.entities:
+                key = (entity.type, entity.id)
+                if (
+                    len(current_entities) >= self._limits.max_trusted_entities
+                    and key not in current_entities
+                ):
+                    break
+                current_entities[key] = entity
+
+        def finish(answer: ChatAnswer) -> ChatAnswer:
+            if not enforce_local_recommendations:
+                return answer
+            return _enforce_local_recommendations(answer, user_text, current_entities)
+
         sources: dict[str, Source] = {}
         messages = self._bounded_messages(
             history,
@@ -736,6 +1148,7 @@ class ChatAgent:
                 )
                 total_calls += 1
                 tool_rounds = 1
+                remember_local_entities(result)
                 if result.trust is EvidenceTrust.LOCAL:
                     for entity in result.entities:
                         key = (entity.type, entity.id)
@@ -758,28 +1171,34 @@ class ChatAgent:
             try:
                 response = await self._complete(context, messages, definitions)
             except InferenceError:
-                return self._answer_after_inference_failure(
-                    user_text,
-                    trusted_entities,
-                    sources,
-                    tool_rounds,
-                    total_calls,
+                return finish(
+                    self._answer_after_inference_failure(
+                        user_text,
+                        trusted_entities,
+                        sources,
+                        tool_rounds,
+                        total_calls,
+                    )
                 )
             assistant = response.message
             if assistant.role != "assistant":
                 raise InferenceError("Runtime returned a non-assistant message")
             if not assistant.tool_calls:
-                return self._make_answer(
-                    assistant.content,
-                    trusted_entities,
-                    sources,
-                    tool_rounds,
-                    total_calls,
+                return finish(
+                    self._make_answer(
+                        assistant.content,
+                        trusted_entities,
+                        sources,
+                        tool_rounds,
+                        total_calls,
+                    )
                 )
 
             if tool_rounds >= self._limits.max_tool_rounds:
-                return await self._answer_after_limit(
-                    context, messages, trusted_entities, sources, tool_rounds, total_calls
+                return finish(
+                    await self._answer_after_limit(
+                        context, messages, trusted_entities, sources, tool_rounds, total_calls
+                    )
                 )
 
             tool_rounds += 1
@@ -805,13 +1224,15 @@ class ChatAgent:
                             messages,
                         )
                     )
-                    return await self._answer_after_limit(
-                        context,
-                        messages,
-                        trusted_entities,
-                        sources,
-                        tool_rounds,
-                        total_calls,
+                    return finish(
+                        await self._answer_after_limit(
+                            context,
+                            messages,
+                            trusted_entities,
+                            sources,
+                            tool_rounds,
+                            total_calls,
+                        )
                     )
 
                 if self._remaining_context_chars(messages) < 256:
@@ -825,13 +1246,15 @@ class ChatAgent:
                             messages,
                         )
                     )
-                    return await self._answer_after_limit(
-                        context,
-                        messages,
-                        trusted_entities,
-                        sources,
-                        tool_rounds,
-                        total_calls,
+                    return finish(
+                        await self._answer_after_limit(
+                            context,
+                            messages,
+                            trusted_entities,
+                            sources,
+                            tool_rounds,
+                            total_calls,
+                        )
                     )
 
                 total_calls += 1
@@ -859,6 +1282,7 @@ class ChatAgent:
                         "Tool arguments were rejected because they were not a bounded JSON object.",
                         EvidenceTrust.LOCAL,
                     )
+                remember_local_entities(result)
                 if result.trust is EvidenceTrust.LOCAL:
                     for entity in result.entities:
                         key = (entity.type, entity.id)
@@ -878,8 +1302,10 @@ class ChatAgent:
                 messages.append(self._tool_message(safe_call, result, messages))
 
             if per_round_limit_hit:
-                return await self._answer_after_limit(
-                    context, messages, trusted_entities, sources, tool_rounds, total_calls
+                return finish(
+                    await self._answer_after_limit(
+                        context, messages, trusted_entities, sources, tool_rounds, total_calls
+                    )
                 )
 
     async def _answer_from_local_recommendations(
@@ -990,10 +1416,17 @@ class ChatAgent:
                 timeout=self._limits.inference_timeout_seconds,
             )
         except TimeoutError as error:
+            _LOGGER.warning(
+                "Lumi inference failed phase=complete category=%s", type(error).__name__
+            )
             raise InferenceError("Model request exceeded the configured time limit") from error
         except InferenceError:
+            _LOGGER.warning("Lumi inference failed phase=complete category=InferenceError")
             raise
         except Exception as error:
+            _LOGGER.warning(
+                "Lumi inference failed phase=complete category=%s", type(error).__name__
+            )
             raise InferenceError("Model request failed") from error
 
     async def _dispatch(
@@ -1233,7 +1666,10 @@ class ChatAgent:
         user_text: str,
         previous_entities: tuple[EntityReference, ...] = (),
     ) -> list[ChatMessage]:
+        language_instruction = _response_language_instruction(user_text, history)
         system_content = SYSTEM_PROMPT
+        if language_instruction:
+            system_content += f"\n\n{language_instruction}"
         referenced_entities = [
             {
                 "type": entity.type,
