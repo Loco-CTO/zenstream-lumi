@@ -52,7 +52,7 @@ jobs:
     runs-on: windows-latest
     env:
       CMAKE_ARGS: -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_CUDA=OFF
-      CMAKE_GENERATOR: Visual Studio 17 2022
+      CMAKE_GENERATOR: Visual Studio 18 2026
       CMAKE_GENERATOR_PLATFORM: x64
     steps:
       - name: Check out Lumi
