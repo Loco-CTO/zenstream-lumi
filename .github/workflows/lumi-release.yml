@@ -105,8 +105,8 @@ jobs:
           "$CXX" --version
           PYTHON=/opt/python/cp312-cp312/bin/python
           "$PYTHON" -m pip wheel --no-deps --no-binary=llama-cpp-python --wheel-dir dist/wheels/runtime "llama-cpp-python==0.3.35"
-          LD_LIBRARY_PATH=/usr/lib64:/usr/lib auditwheel show dist/wheels/runtime/*.whl
-          LD_LIBRARY_PATH=/usr/lib64:/usr/lib auditwheel repair --plat "${{ matrix.platform }}" --wheel-dir dist/wheels/repaired dist/wheels/runtime/*.whl
+          LD_LIBRARY_PATH="$PWD/llama_cpp/lib:/usr/lib64:/usr/lib" auditwheel show dist/wheels/runtime/*.whl
+          LD_LIBRARY_PATH="$PWD/llama_cpp/lib:/usr/lib64:/usr/lib" auditwheel repair --plat "${{ matrix.platform }}" --wheel-dir dist/wheels/repaired dist/wheels/runtime/*.whl
           rm dist/wheels/runtime/*.whl
           mv dist/wheels/repaired/*.whl dist/wheels/runtime/
       - name: Save the platform runtime wheel
