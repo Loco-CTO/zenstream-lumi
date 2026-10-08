@@ -84,14 +84,14 @@ jobs:
       image: ${{ matrix.container }}
     env:
       CMAKE_ARGS: -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_CUDA=OFF
-      CC: /usr/bin/gcc
-      CXX: /usr/bin/g++
+      CC: /opt/rh/devtoolset-10/root/usr/bin/gcc
+      CXX: /opt/rh/devtoolset-10/root/usr/bin/g++
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { target: linux-x64, runner: ubuntu-24.04, container: quay.io/pypa/manylinux_2_28_x86_64:2026.05.02-2@sha256:09c9455c6285345727a9caf9b8166cbcb7afab8594cb94412d5e67c539940851, platform: manylinux_2_28_x86_64 }
-          - { target: linux-arm64, runner: ubuntu-24.04-arm, container: quay.io/pypa/manylinux_2_28_aarch64:2026.05.02-2@sha256:c269bed3fc0ba21aac08ff67bf1d657d4967a9c0582fc8880a0e302f8ca78bdd, platform: manylinux_2_28_aarch64 }
+          - { target: linux-x64, runner: ubuntu-24.04, container: quay.io/pypa/manylinux2014_x86_64:2026.10.03-1@sha256:ffd6d1f11237599748657996b750db6b3a5b724fea5a81cd9ea65add4f45b6c9, platform: manylinux_2_28_x86_64 }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm, container: quay.io/pypa/manylinux2014_aarch64:2026.10.03-1@sha256:9026a55e05e76ad74d9a4e6be814a5abda26cde08b1baa659ea4f7ee16b246e3, platform: manylinux_2_28_aarch64 }
     steps:
       - name: Check out Lumi
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
