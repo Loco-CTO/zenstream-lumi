@@ -264,6 +264,7 @@ class LumiConversationService:
                 conversation_id=conversation_id,
                 model=option.id,
                 thinking=conversation.thinking,
+                user_message=user_text,
                 delegation_token=delegation_token,
                 previous_entities=_previous_entities(
                     snapshot.messages,

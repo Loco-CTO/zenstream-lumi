@@ -193,6 +193,7 @@ class ChatContext:
     model: str
     thinking: bool
     turn_id: str
+    user_message: str = field(default="", repr=False, compare=False)
     delegation_token: str | None = field(default=None, repr=False)
     previous_entities: tuple[EntityReference, ...] = ()
 
