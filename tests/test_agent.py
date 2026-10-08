@@ -317,6 +317,116 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(tool.calls), 1)
         self.assertEqual(runtime.requests, [])
 
+    async def test_default_constrained_recommendation_only_returns_verified_local_titles(
+        self,
+    ) -> None:
+        local_movie = EntityReference("movie", "movie-1", "Local Film")
+        tool = HomeRecommendationsTool(
+            ToolResult(
+                '{"items":[{"type":"movie","id":"movie-1","title":"Local Film"}]}',
+                EvidenceTrust.LOCAL,
+                entities=(local_movie,),
+            )
+        )
+        runtime = FakeRuntime(
+            [
+                ChatMessage(
+                    "assistant",
+                    "",
+                    tool_calls=(
+                        ToolCall("call-1", "zenstream_home_recommendations", {}),
+                    ),
+                ),
+                ChatMessage(
+                    "assistant",
+                    "I recommend Unavailable Show, and Local Film is another possibility.",
+                ),
+            ]
+        )
+        agent = ChatAgent(runtime, ToolRegistry([tool]))
+
+        answer = await agent.answer(
+            chat_context(), [], "Recommend a movie like Code Geass with political intrigue."
+        )
+
+        self.assertIn("Local Film", answer.markdown)
+        self.assertNotIn("Unavailable Show", answer.markdown)
+        self.assertEqual(answer.references, (local_movie,))
+
+    async def test_default_chinese_and_japanese_recommendations_fail_closed_without_local_matches(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "请推荐一部类似《Code Geass》的电影。",
+                "我无法确认您的 ZenStream 媒体库中有匹配作品。",
+            ),
+            (
+                "コードギアスに似た映画をおすすめしてください。",
+                "ZenStreamライブラリ内に一致する作品があるか確認できませんでした。",
+            ),
+        )
+        for user_text, localized_prefix in cases:
+            with self.subTest(user_text=user_text):
+                runtime = FakeRuntime([ChatMessage("assistant", "Try an outside title.")])
+                agent = ChatAgent(
+                    runtime,
+                    ToolRegistry(
+                        [HomeRecommendationsTool(ToolResult("{\"items\":[]}", EvidenceTrust.LOCAL))]
+                    ),
+                )
+
+                answer = await agent.answer(chat_context(), [], user_text)
+
+                self.assertTrue(answer.markdown.startswith(localized_prefix))
+                self.assertNotIn("outside title", answer.markdown)
+                self.assertEqual(answer.references, ())
+
+    async def test_explicit_outside_library_opt_in_is_preserved_in_english_japanese_and_chinese(
+        self,
+    ) -> None:
+        prompts = (
+            "Recommend a film outside my library.",
+            "ライブラリ外の映画をおすすめしてください。",
+            "请推荐一部本地片库中没有的电影。",
+        )
+        for user_text in prompts:
+            with self.subTest(user_text=user_text):
+                response = "An outside-library title is Example Film."
+                runtime = FakeRuntime([ChatMessage("assistant", response)])
+                agent = ChatAgent(
+                    runtime,
+                    ToolRegistry(
+                        [HomeRecommendationsTool(ToolResult("{\"items\":[]}", EvidenceTrust.LOCAL))]
+                    ),
+                )
+
+                answer = await agent.answer(chat_context(), [], user_text)
+
+                self.assertEqual(answer.markdown, response)
+                self.assertEqual(runtime.requests[0].messages[-1].content, user_text)
+
+    async def test_outside_library_opt_in_does_not_leak_to_a_new_recommendation(self) -> None:
+        runtime = FakeRuntime([ChatMessage("assistant", "Try an outside title.")])
+        agent = ChatAgent(
+            runtime,
+            ToolRegistry(
+                [HomeRecommendationsTool(ToolResult("{\"items\":[]}", EvidenceTrust.LOCAL))]
+            ),
+        )
+
+        answer = await agent.answer(
+            chat_context(),
+            [
+                ChatMessage("user", "Recommend a film outside my library."),
+                ChatMessage("assistant", "Sure, here are some options."),
+            ],
+            "Recommend an anime like Code Geass.",
+        )
+
+        self.assertIn("I couldn't verify a matching title", answer.markdown)
+        self.assertNotIn("outside title", answer.markdown)
+
     async def test_constrained_and_outside_library_recommendations_remain_agentic(self) -> None:
         tool = HomeRecommendationsTool(ToolResult('{"items":[]}', EvidenceTrust.LOCAL))
         runtime = FakeRuntime(

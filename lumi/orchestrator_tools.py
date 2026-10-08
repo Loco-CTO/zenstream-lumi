@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import unicodedata
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -250,6 +251,125 @@ def _bounded_text(value: object, limit: int) -> str | None:
     return normalized[:limit] if normalized else None
 
 
+def _provider_ids(value: object) -> dict[str, str]:
+    identities: dict[str, str] = {}
+    if isinstance(value, Mapping):
+        pairs = value.items()
+    elif isinstance(value, list):
+        pairs = (
+            (identity.get("provider"), identity.get("id") or identity.get("providerId"))
+            for identity in value
+            if isinstance(identity, Mapping)
+        )
+    else:
+        return identities
+    for raw_provider, raw_id in pairs:
+        provider = _bounded_text(raw_provider, 32)
+        provider_id = _bounded_text(raw_id, 96)
+        if (
+            provider
+            and provider_id
+            and re.fullmatch(r"[A-Za-z0-9_-]+", provider)
+            and not any(ord(character) < 32 or ord(character) == 127 for character in provider_id)
+        ):
+            identities[provider.casefold()] = provider_id
+        if len(identities) >= 8:
+            break
+    return identities
+
+
+def _title_variants(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    values: list[str] = []
+    seen: set[str] = set()
+    for entry in value[:12]:
+        title = _bounded_text(entry, 160)
+        if title is None:
+            continue
+        key = _normalize_identity_text(title)
+        if key and key not in seen:
+            seen.add(key)
+            values.append(title)
+    return values
+
+
+def _normalize_identity_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return "".join(character for character in normalized if character.isalnum())
+
+
+def _identity_year(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    match = re.search(r"(?:18|19|20|21)\d{2}", str(value))
+    return int(match.group(0)) if match else None
+
+
+def _match_catalog_candidate(
+    candidate: Mapping[str, Any], item: Mapping[str, Any]
+) -> tuple[int, tuple[str, ...]] | None:
+    if item.get("type") != candidate.get("type"):
+        return None
+    candidate_ids = candidate.get("providerIds", {})
+    local_ids = item.get("providerIds", {})
+    candidate_ids = candidate_ids if isinstance(candidate_ids, Mapping) else {}
+    local_ids = local_ids if isinstance(local_ids, Mapping) else {}
+    shared_providers = set(candidate_ids) & set(local_ids)
+    if any(
+        str(candidate_ids[provider]).casefold() != str(local_ids[provider]).casefold()
+        for provider in shared_providers
+    ):
+        return None
+    provider_match = any(
+        str(candidate_ids[provider]).casefold() == str(local_ids[provider]).casefold()
+        for provider in shared_providers
+    )
+
+    candidate_titles = {
+        _normalize_identity_text(entry["title"])
+        for entry in candidate.get("titles", [])
+        if isinstance(entry, Mapping) and isinstance(entry.get("title"), str)
+    }
+    local_aliases = item.get("aliases", [])
+    local_titles = {
+        _normalize_identity_text(title)
+        for title in (
+            item.get("title"),
+            item.get("originalTitle"),
+            *(local_aliases if isinstance(local_aliases, list) else []),
+        )
+        if isinstance(title, str)
+    }
+    title_match = bool(candidate_titles & local_titles)
+    if not provider_match and not title_match:
+        return None
+
+    candidate_year = candidate.get("year")
+    local_year = _identity_year(
+        item.get("year") or item.get("releaseDate") or item.get("date")
+    )
+    if (
+        type(candidate_year) is int
+        and local_year is not None
+        and abs(candidate_year - local_year) > 1
+    ):
+        return None
+
+    evidence: list[str] = ["media_type"]
+    score = 20
+    if provider_match:
+        score += 1_000
+        evidence.append("provider_id")
+    if title_match:
+        score += 100
+        evidence.append("localized_or_alias_title")
+    if candidate_year is not None and local_year is not None:
+        score += 20 if candidate_year == local_year else 10
+        evidence.append("release_year")
+    return score, tuple(evidence)
+
+
 def _valid_entity_id(value: object) -> str | None:
     if (
         not isinstance(value, str)
@@ -285,10 +405,17 @@ def _compact_item(value: object) -> dict[str, Any] | None:
         ("releaseDate", 32),
         ("album", 200),
         ("albumArtist", 200),
+        ("originalTitle", 160),
     ):
         text = _bounded_text(value.get(key), limit)
         if text:
             compact[key] = text
+    aliases = _title_variants(value.get("aliases"))
+    if aliases:
+        compact["aliases"] = aliases
+    provider_ids = _provider_ids(value.get("providerIds"))
+    if provider_ids:
+        compact["providerIds"] = provider_ids
     for key, upper_bound in (("communityRating", 10), ("runtimeMinutes", 100_000)):
         number = value.get(key)
         if type(number) is int and 0 <= number <= upper_bound:
@@ -352,7 +479,7 @@ def _count(value: object) -> int:
 
 def _bounded_json(value: dict[str, Any]) -> str:
     encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-    for key in ("items", "seasons"):
+    for key in ("items", "seasons", "matches"):
         values = value.get(key)
         while len(encoded) > MAX_TOOL_RESULT_CHARS and isinstance(values, list) and values:
             values.pop()
@@ -482,6 +609,202 @@ class CatalogSearchTool(_ReadTool):
         except _OrchestratorReadError as error:
             return self._failed(error)
         return _items_result(payload, include_total=True)
+
+
+class CatalogEntityResolveTool(_ReadTool):
+    definition = ToolDefinition(
+        name="zenstream_catalog_resolve",
+        description=(
+            "Resolve externally researched movie or series candidates against the authenticated "
+            "local catalog. Supply English, Japanese, Chinese, or other known title variants, "
+            "release year, type, and provider IDs when available. Only returned local matches "
+            "are available to recommend by default."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "candidates": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 3,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "titles": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 3,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "title": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 120,
+                                        },
+                                        "language": {"type": "string", "maxLength": 16},
+                                    },
+                                    "required": ["title"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                            "type": {"type": "string", "enum": ["movie", "series"]},
+                            "year": {"type": "integer", "minimum": 1888, "maximum": 2200},
+                            "providerIds": {
+                                "type": "object",
+                                "maxProperties": 8,
+                                "additionalProperties": {"type": "string", "maxLength": 96},
+                            },
+                        },
+                        "required": ["titles", "type"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["candidates"],
+            "additionalProperties": False,
+        },
+        data_scope="local",
+        read_only=True,
+    )
+
+    def validate_arguments(self, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        _keys(arguments, {"candidates"}, {"candidates"})
+        raw_candidates = arguments["candidates"]
+        if not isinstance(raw_candidates, list) or not 1 <= len(raw_candidates) <= 3:
+            raise ValueError("Supply one to three media candidates")
+        candidates: list[dict[str, Any]] = []
+        for raw in raw_candidates:
+            if not isinstance(raw, Mapping):
+                raise ValueError("Each candidate must be an object")
+            _keys(raw, {"titles", "type", "year", "providerIds"}, {"titles", "type"})
+            item_type = raw["type"]
+            if item_type not in {"movie", "series"}:
+                raise ValueError("Candidate type must be movie or series")
+            raw_titles = raw["titles"]
+            if not isinstance(raw_titles, list) or not 1 <= len(raw_titles) <= 3:
+                raise ValueError("Each candidate must include one to three title variants")
+            titles: list[dict[str, str]] = []
+            seen_titles: set[tuple[str, str]] = set()
+            for raw_title in raw_titles:
+                if not isinstance(raw_title, Mapping):
+                    raise ValueError("Each title variant must be an object")
+                _keys(raw_title, {"title", "language"}, {"title"})
+                title = _bounded_text(raw_title["title"], 120)
+                if title is None:
+                    raise ValueError("Candidate titles must contain 1 to 120 characters")
+                language = raw_title.get("language")
+                if language is not None and (
+                    not isinstance(language, str)
+                    or not _LANGUAGE_PATTERN.fullmatch(language)
+                ):
+                    raise ValueError("Title language code is invalid")
+                key = (_normalize_identity_text(title), (language or "").casefold())
+                if key not in seen_titles:
+                    seen_titles.add(key)
+                    titles.append({"title": title, **({"language": language} if language else {})})
+            if not titles:
+                raise ValueError("Each candidate must include a usable title")
+            year = raw.get("year")
+            if year is not None and (type(year) is not int or not 1888 <= year <= 2200):
+                raise ValueError("Candidate year is invalid")
+            raw_provider_ids = raw.get("providerIds")
+            if raw_provider_ids is not None and not isinstance(raw_provider_ids, Mapping):
+                raise ValueError("Candidate provider IDs are invalid")
+            provider_ids = _provider_ids(raw_provider_ids)
+            if isinstance(raw_provider_ids, Mapping) and raw_provider_ids and not provider_ids:
+                raise ValueError("Candidate provider IDs are invalid")
+            candidate: dict[str, Any] = {
+                "titles": titles,
+                "type": item_type,
+                "providerIds": provider_ids,
+            }
+            if year is not None:
+                candidate["year"] = year
+            candidates.append(candidate)
+        return {"candidates": candidates}
+
+    async def execute(self, context: ChatContext, arguments: Mapping[str, Any]) -> ToolResult:
+        import asyncio
+
+        arguments = self.validate_arguments(arguments)
+        candidates = arguments["candidates"]
+        semaphore = asyncio.Semaphore(3)
+
+        async def search_variant(
+            candidate: Mapping[str, Any], title: Mapping[str, str]
+        ) -> list[dict[str, Any]]:
+            async with semaphore:
+                payload = await self._client.search(
+                    context,
+                    query=title["title"],
+                    item_type=candidate["type"],
+                    limit=10,
+                    language=title.get("language"),
+                )
+            values = payload.get("items")
+            return (
+                [
+                    item
+                    for value in values[:10]
+                    if (item := _compact_item(value)) is not None
+                ]
+                if isinstance(values, list)
+                else []
+            )
+
+        try:
+            results = await asyncio.gather(
+                *(
+                    search_variant(candidate, title)
+                    for candidate in candidates
+                    for title in candidate["titles"]
+                )
+            )
+        except _OrchestratorReadError as error:
+            return self._failed(error)
+
+        matches: list[dict[str, Any]] = []
+        local_entities: dict[tuple[str, str], EntityReference] = {}
+        result_index = 0
+        for candidate in candidates:
+            local_items: dict[tuple[str, str], dict[str, Any]] = {}
+            for _title in candidate["titles"]:
+                for item in results[result_index]:
+                    local_items[(item["type"], item["id"])] = item
+                result_index += 1
+            ranked = [
+                (score, item, evidence)
+                for item in local_items.values()
+                if (ranked_match := _match_catalog_candidate(candidate, item)) is not None
+                for score, evidence in (ranked_match,)
+            ]
+            ranked.sort(key=lambda row: row[0], reverse=True)
+            if not ranked:
+                matches.append({"status": "no_match"})
+                continue
+            highest = ranked[0][0]
+            best = [row for row in ranked if row[0] == highest]
+            if len(best) != 1:
+                matches.append(
+                    {
+                        "status": "ambiguous",
+                        "items": [item for _score, item, _evidence in best[:3]],
+                    }
+                )
+                continue
+            _score, item, evidence = best[0]
+            matches.append({"status": "matched", "item": item, "matchedBy": list(evidence)})
+            reference = EntityReference(type=item["type"], id=item["id"], title=item["title"])
+            local_entities[(reference.type, reference.id)] = reference
+
+        payload = {"matches": matches}
+        content = _bounded_json(payload)
+        return ToolResult(
+            content=content,
+            trust=EvidenceTrust.LOCAL,
+            entities=tuple(local_entities.values()),
+        )
 
 
 class CatalogItemDetailTool(_ReadTool):

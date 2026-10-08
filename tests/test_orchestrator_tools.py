@@ -124,6 +124,7 @@ class OrchestratorToolTests(unittest.IsolatedAsyncioTestCase):
             tuple(item.name for item in runtime.requests[0].tools),
             (
                 "zenstream_catalog_search",
+                "zenstream_catalog_resolve",
                 "zenstream_catalog_item_detail",
                 "zenstream_home_recommendations",
                 "zenstream_continue_watching",
@@ -231,6 +232,11 @@ class OrchestratorToolTests(unittest.IsolatedAsyncioTestCase):
         }
         arguments = {
             "zenstream_catalog_search": {"query": "Frieren"},
+            "zenstream_catalog_resolve": {
+                "candidates": [
+                    {"titles": [{"title": "Frieren", "language": "en"}], "type": "series"}
+                ]
+            },
             "zenstream_catalog_item_detail": {"entity_id": "series-7"},
             "zenstream_home_recommendations": {},
             "zenstream_continue_watching": {},
@@ -249,7 +255,7 @@ class OrchestratorToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(tool.definition.data_scope, "local")
 
         self.assertEqual(set(observed), expected)
-        self.assertEqual(len(observed), len(expected))
+        self.assertEqual(len(observed), len(expected) + 1)
         search = registry.get("web_search")
         page_reader = registry.get("web_read")
         self.assertIsNotNone(search)
@@ -260,6 +266,153 @@ class OrchestratorToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page_reader.definition.data_scope, "external_fetch")
         self.assertTrue(page_reader.definition.read_only)
         self.assertIsNone(registry.get("open_web_result"))
+
+    async def test_resolver_matches_english_japanese_and_chinese_titles_with_provider_ids(
+        self,
+    ) -> None:
+        app = FastAPI()
+        searches: list[dict[str, Any]] = []
+
+        @app.post("/api/internal/lumi/tools/catalog-search")
+        async def catalog_search(request: Request) -> JSONResponse:
+            body = await request.json()
+            searches.append(body)
+            item = {
+                **media_item("series-12", title="Frieren: Beyond Journey's End"),
+                "year": "2023",
+                "originalTitle": "葬送のフリーレン",
+                "aliases": ["葬送のフリーレン", "葬送的芙莉莲", "Frieren"],
+                "providerIds": [{"provider": "tmdb", "id": "12345"}],
+            }
+            return JSONResponse({"items": [item], "total": 1})
+
+        registry = build_zenstream_tool_registry(
+            "http://orchestrator.test:9090",
+            SERVICE_TOKEN,
+            transport=httpx.ASGITransport(app=app),
+        )
+        tool = registry.get("zenstream_catalog_resolve")
+        self.assertIsNotNone(tool)
+        assert tool is not None
+        args = tool.validate_arguments(
+            {
+                "candidates": [
+                    {
+                        "titles": [
+                            {"title": "Frieren", "language": "en"},
+                            {"title": "葬送のフリーレン", "language": "ja"},
+                            {"title": "葬送的芙莉莲", "language": "zh"},
+                        ],
+                        "type": "series",
+                        "year": 2023,
+                        "providerIds": {"tmdb": "12345"},
+                    }
+                ]
+            }
+        )
+        result = await tool.execute(make_context(), args)
+
+        payload = json.loads(result.content)
+        self.assertEqual([item["language"] for item in searches], ["en", "ja", "zh"])
+        self.assertEqual(payload["matches"][0]["status"], "matched")
+        self.assertEqual(payload["matches"][0]["item"]["id"], "series-12")
+        self.assertEqual(
+            payload["matches"][0]["matchedBy"],
+            ["media_type", "provider_id", "localized_or_alias_title", "release_year"],
+        )
+        self.assertEqual(
+            result.entities,
+            (EntityReference("series", "series-12", "Frieren: Beyond Journey's End"),),
+        )
+
+        runtime = FakeRuntime(
+            [
+                ChatMessage(
+                    "assistant",
+                    "",
+                    tool_calls=(ToolCall("resolve-1", "zenstream_catalog_resolve", args),),
+                ),
+                ChatMessage(
+                    "assistant",
+                    'A local match is :::zenstream{type="series" id="series-12"}.',
+                ),
+            ]
+        )
+        answer = await ChatAgent(runtime, registry).answer(
+            make_context(), [], "Recommend an anime like Code Geass with political intrigue."
+        )
+        self.assertEqual(
+            answer.references,
+            (EntityReference("series", "series-12", "Frieren: Beyond Journey's End"),),
+        )
+        self.assertIn("Frieren: Beyond Journey's End", answer.markdown)
+        self.assertNotIn("A local match", answer.markdown)
+
+    async def test_resolver_uses_alias_and_year_and_rejects_conflicting_provider_id(self) -> None:
+        app = FastAPI()
+
+        @app.post("/api/internal/lumi/tools/catalog-search")
+        async def catalog_search(_: Request) -> JSONResponse:
+            return JSONResponse(
+                {
+                    "items": [
+                        {
+                            **media_item("series-12", title="Frieren: Beyond Journey's End"),
+                            "year": "2023",
+                            "aliases": ["葬送のフリーレン"],
+                            "providerIds": {"tmdb": "different-id"},
+                        }
+                    ],
+                    "total": 1,
+                }
+            )
+
+        registry = build_zenstream_tool_registry(
+            "http://orchestrator.test:9090",
+            SERVICE_TOKEN,
+            transport=httpx.ASGITransport(app=app),
+        )
+        tool = registry.get("zenstream_catalog_resolve")
+        self.assertIsNotNone(tool)
+        assert tool is not None
+        args = tool.validate_arguments(
+            {
+                "candidates": [
+                    {
+                        "titles": [
+                            {"title": "葬送のフリーレン", "language": "ja"},
+                            {"title": "葬送的芙莉莲", "language": "zh"},
+                        ],
+                        "type": "series",
+                        "year": 2023,
+                    }
+                ]
+            }
+        )
+        alias_result = await tool.execute(make_context(), args)
+        alias_match = json.loads(alias_result.content)["matches"][0]
+        self.assertEqual(alias_match["status"], "matched")
+        self.assertEqual(alias_match["item"]["id"], "series-12")
+        self.assertEqual(
+            alias_match["matchedBy"], ["media_type", "localized_or_alias_title", "release_year"]
+        )
+
+        conflicting_args = tool.validate_arguments(
+            {
+                "candidates": [
+                    {
+                        "titles": [{"title": "葬送のフリーレン", "language": "ja"}],
+                        "type": "series",
+                        "year": 2023,
+                        "providerIds": {"tmdb": "expected-id"},
+                    }
+                ]
+            }
+        )
+        conflict_result = await tool.execute(make_context(), conflicting_args)
+
+        self.assertEqual(json.loads(conflict_result.content)["matches"], [{"status": "no_match"}])
+        self.assertEqual(conflict_result.entities, ())
 
     async def test_factory_uses_a_separate_configured_web_transport(self) -> None:
         orchestrator_requests: list[str] = []
