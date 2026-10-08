@@ -1,4 +1,4 @@
-"""In-process ONNX Runtime GenAI adapter for installed Qwen3.5 models.
+"""In-process llama.cpp adapter for installed Qwen3.5 GGUF models.
 
 The native runtime is imported lazily, so Lumi's core package stays lightweight.
 Orchestrator installs this Lumi release only when an administrator enables the
@@ -16,9 +16,9 @@ import re
 import stat
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 from uuid import uuid4
@@ -31,32 +31,41 @@ from lumi.contracts import (
     ToolCall,
     ToolDefinition,
 )
-from lumi.model_installation import supported_models
+from lumi.model_installation import (
+    GGUF_FORMAT,
+    MODEL_MANIFEST_SCHEMA_VERSION,
+    _require_spec,
+    supported_models,
+)
 
 LUMI_RUNTIME_API_VERSION = 1
 SUPPORTED_QWEN35_MODELS = frozenset(option.model_id for option in supported_models())
 
 _TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-_THINKING_CONDITION_RE = re.compile(
-    r"if\s+enable_thinking\s+is\s+defined\s+and\s+enable_thinking\s+is\s+true"
-)
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _TOOL_CALL_RE = re.compile(
     r"<tool_call>\s*<function=([A-Za-z0-9_-]{1,64})>(.*?)</function>\s*</tool_call>",
     re.DOTALL,
 )
-_PARAMETER_RE = re.compile(
-    r"<parameter=([A-Za-z0-9_-]{1,64})>(.*?)</parameter>", re.DOTALL
-)
+_PARAMETER_RE = re.compile(r"<parameter=([A-Za-z0-9_-]{1,64})>(.*?)</parameter>", re.DOTALL)
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+_CHANNEL_RE = re.compile(r"<\|channel\|>(analysis|final|commentary|summary|justify|confidence)\b")
+_SPECIAL_TOKEN_RE = re.compile(r"<\|[^>]+\|>")
 
 
-class OrtGenAIRuntimeError(RuntimeError):
+class LlamaCppRuntimeError(RuntimeError):
     """The embedded inference runtime or selected model is unavailable."""
 
 
-class OrtGenAIProtocolError(OrtGenAIRuntimeError):
+class LlamaCppProtocolError(LlamaCppRuntimeError):
     """The model runtime returned output outside the supported Qwen3.5 format."""
+
+
+class _CombinedStoppingCriteria(list[Callable[[Any, Any], bool]]):
+    """Combine the chat-template and cancellation checks in llama.cpp's callable API."""
+
+    def __call__(self, tokens: Any, logits: Any) -> bool:
+        return any(criterion(tokens, logits) for criterion in self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,12 +90,12 @@ class VerifiedModelArtifact:
             self.manifest_sha256
         ):
             raise ValueError("A model artifact manifest digest must be a lowercase SHA-256")
-        object.__setattr__(self, "directory", Path(self.directory).expanduser().resolve())
+        object.__setattr__(self, "directory", Path(self.directory).expanduser().absolute())
 
 
 @dataclass(frozen=True, slots=True)
-class OrtGenAIConfig:
-    """Supported verified model artifacts and bounded inference/lifecycle settings."""
+class LlamaCppConfig:
+    """Supported verified model artifacts and bounded CPU inference settings."""
 
     model_artifacts: Mapping[str, VerifiedModelArtifact]
     idle_unload_seconds: int = 300
@@ -97,6 +106,14 @@ class OrtGenAIConfig:
     max_message_chars: int = 32_000
     max_request_bytes: int = 2_000_000
     max_response_chars: int = 200_000
+    n_ctx: int = 8192
+    n_batch: int = 512
+    n_ubatch: int = 512
+    n_threads: int = 0
+    n_threads_batch: int = 0
+    n_gpu_layers: int = 0
+    use_mmap: bool = True
+    use_mlock: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_artifacts, Mapping):
@@ -119,6 +136,12 @@ class OrtGenAIConfig:
             ("max_message_chars", self.max_message_chars, 256, 1_000_000),
             ("max_request_bytes", self.max_request_bytes, 1_024, 16_000_000),
             ("max_response_chars", self.max_response_chars, 1, 1_000_000),
+            ("n_ctx", self.n_ctx, 256, 32_768),
+            ("n_batch", self.n_batch, 1, 4096),
+            ("n_ubatch", self.n_ubatch, 1, 4096),
+            ("n_threads", self.n_threads, 0, 256),
+            ("n_threads_batch", self.n_threads_batch, 0, 256),
+            ("n_gpu_layers", self.n_gpu_layers, 0, 256),
         )
         for name, value, minimum, maximum in bounded_values:
             if (
@@ -127,17 +150,22 @@ class OrtGenAIConfig:
                 or not minimum <= value <= maximum
             ):
                 raise ValueError(f"{name} must be between {minimum} and {maximum}")
+        if not isinstance(self.use_mmap, bool) or not isinstance(self.use_mlock, bool):
+            raise ValueError("use_mmap and use_mlock must be booleans")
+        if self.n_ubatch > self.n_batch:
+            raise ValueError("n_ubatch cannot exceed n_batch")
 
 
 @dataclass(slots=True)
 class _LoadedModel:
     model_id: str
     model: Any
-    tokenizer: Any
     chat_template: str
+    eos_token: str
+    bos_token: str
 
 
-class OrtGenAIChatRuntime(ChatRuntime):
+class LlamaCppChatRuntime(ChatRuntime):
     """Run one lazily loaded Qwen3.5 model in the current Orchestrator process.
 
     Generation runs on a worker thread so synchronous native inference does not block
@@ -146,7 +174,7 @@ class OrtGenAIChatRuntime(ChatRuntime):
     and imported only when an installed model is first selected.
     """
 
-    def __init__(self, config: OrtGenAIConfig, *, api: Any | None = None) -> None:
+    def __init__(self, config: LlamaCppConfig, *, api: Any | None = None) -> None:
         self.config = config
         self._api = api
         self._loaded: _LoadedModel | None = None
@@ -162,7 +190,7 @@ class OrtGenAIChatRuntime(ChatRuntime):
         self._idle_task: asyncio.Task[None] | None = None
 
     async def open(self) -> None:
-        """Make the runtime available without importing ORT or loading a model."""
+        """Make the runtime available without importing llama.cpp or loading a model."""
 
         if self._closed:
             raise RuntimeError("A closed Lumi runtime cannot be reopened")
@@ -224,9 +252,7 @@ class OrtGenAIChatRuntime(ChatRuntime):
             raise RuntimeError("The Lumi runtime is not available")
 
         cancellation = threading.Event()
-        worker = asyncio.create_task(
-            asyncio.to_thread(self._complete_sync, request, cancellation)
-        )
+        worker = asyncio.create_task(asyncio.to_thread(self._complete_sync, request, cancellation))
         release_in_callback = False
         try:
             response = await asyncio.shield(worker)
@@ -361,9 +387,7 @@ class OrtGenAIChatRuntime(ChatRuntime):
             raise ValueError(f"{label} must be a JSON object")
         return normalized
 
-    def _complete_sync(
-        self, request: ModelRequest, cancellation: threading.Event
-    ) -> ModelResponse:
+    def _complete_sync(self, request: ModelRequest, cancellation: threading.Event) -> ModelResponse:
         if cancellation.is_set():
             raise asyncio.CancelledError
         loaded = self._loaded
@@ -379,224 +403,279 @@ class OrtGenAIChatRuntime(ChatRuntime):
         tools_by_name = {tool.name: tool for tool in request.tools}
         messages = [self._serialize_message(message) for message in request.messages]
         tools = [self._serialize_tool(tool) for tool in request.tools]
-        template = _template_with_thinking(loaded.chat_template, request.thinking)
         try:
-            prompt = loaded.tokenizer.apply_chat_template(
-                template,
-                messages=json.dumps(messages, ensure_ascii=False, separators=(",", ":")),
-                tools=(
-                    json.dumps(tools, ensure_ascii=False, separators=(",", ":"))
-                    if tools
-                    else None
-                ),
+            formatter = self._api_module().Jinja2ChatFormatter(
+                template=loaded.chat_template,
+                eos_token=loaded.eos_token,
+                bos_token=loaded.bos_token,
                 add_generation_prompt=True,
             )
-            if not isinstance(prompt, str):
-                raise OrtGenAIProtocolError("The Qwen3.5 chat template returned invalid text")
-            encoded = loaded.tokenizer.encode(prompt)
+            formatted = formatter(
+                messages=messages,
+                tools=tools or None,
+                enable_thinking=request.thinking,
+            )
+            prompt = getattr(formatted, "prompt", None)
+            stop = getattr(formatted, "stop", None)
+            formatter_stopping_criteria = getattr(formatted, "stopping_criteria", None) or []
+            if not isinstance(formatter_stopping_criteria, (list, tuple)) or any(
+                not callable(criterion) for criterion in formatter_stopping_criteria
+            ):
+                raise LlamaCppProtocolError(
+                    "The Qwen3.5 chat template returned invalid stopping criteria"
+                )
+            if not isinstance(prompt, str) or not prompt:
+                raise LlamaCppProtocolError("The Qwen3.5 chat template returned invalid text")
+            encoded = loaded.model.tokenize(prompt.encode("utf-8"), add_bos=True, special=True)
             prompt_tokens = _token_count(encoded)
-            context_limit = min(request.context_size, self.config.max_context_tokens)
-            output_limit = min(request.output_tokens, self.config.max_output_tokens)
+            context_limit = min(
+                request.context_size,
+                self.config.max_context_tokens,
+                self.config.n_ctx,
+            )
             if prompt_tokens <= 0 or prompt_tokens >= context_limit:
                 raise ValueError("The prompt leaves no room for a Qwen3.5 response")
-            maximum_length = min(context_limit, prompt_tokens + output_limit)
+            output_limit = min(
+                request.output_tokens,
+                self.config.max_output_tokens,
+                context_limit - prompt_tokens,
+            )
+            if output_limit <= 0:
+                raise ValueError("The prompt leaves no room for a Qwen3.5 response")
 
-            params = self._api_module().GeneratorParams(loaded.model)
-            params.set_search_options(max_length=maximum_length, do_sample=False)
-            generator = self._api_module().Generator(loaded.model, params)
-            generator.append_tokens(encoded)
-            while not generator.is_done():
-                if cancellation.is_set():
-                    raise asyncio.CancelledError
-                generator.generate_next_token()
-            sequence = generator.get_sequence(0)
-            text = loaded.tokenizer.decode(sequence[prompt_tokens:])
-        except (ValueError, OrtGenAIRuntimeError):
+            def should_stop(_tokens: Any, _logits: Any) -> bool:
+                return cancellation.is_set()
+
+            stopping_criteria = _CombinedStoppingCriteria(
+                [*formatter_stopping_criteria, should_stop]
+            )
+            result = loaded.model.create_completion(
+                prompt=prompt,
+                max_tokens=output_limit,
+                temperature=0.0,
+                stop=stop,
+                stopping_criteria=stopping_criteria,
+                stream=False,
+            )
+            if cancellation.is_set():
+                raise asyncio.CancelledError
+            choices = result.get("choices") if isinstance(result, Mapping) else None
+            text = choices[0].get("text") if isinstance(choices, list) and choices else None
+        except (ValueError, LlamaCppRuntimeError):
             raise
         except Exception as error:
-            raise OrtGenAIRuntimeError("Embedded Qwen3.5 inference failed") from error
+            raise LlamaCppRuntimeError("Embedded Qwen3.5 inference failed") from error
 
         if not isinstance(text, str) or len(text) > self.config.max_response_chars:
-            raise OrtGenAIProtocolError("The Qwen3.5 response is malformed or too large")
+            raise LlamaCppProtocolError("The Qwen3.5 response is malformed or too large")
         content, calls = _parse_model_response(text, tools_by_name, self.config.max_tools)
         return ModelResponse(ChatMessage("assistant", content, tool_calls=calls))
 
     def _load_model(self, model_id: str) -> _LoadedModel:
         artifact = self.config.model_artifacts[model_id]
         model_dir = _verify_model_artifact(artifact, self._verified_models)
-        config_file = model_dir / "genai_config.json"
+        spec = _require_spec(model_id)
+        model_path = model_dir / spec.gguf_filename
         api = self._api_module()
         try:
-            model = api.Model(str(config_file))
-            tokenizer = api.Tokenizer(model)
-            template = _read_chat_template(model_dir)
-        except OrtGenAIRuntimeError:
+            model = api.Llama(
+                model_path=str(model_path),
+                n_ctx=self.config.n_ctx,
+                n_batch=self.config.n_batch,
+                n_ubatch=self.config.n_ubatch,
+                n_threads=self.config.n_threads,
+                n_threads_batch=self.config.n_threads_batch,
+                n_gpu_layers=self.config.n_gpu_layers,
+                use_mmap=self.config.use_mmap,
+                use_mlock=self.config.use_mlock,
+                verbose=False,
+            )
+            template = _read_chat_template(getattr(model, "metadata", None))
+            eos_token = _model_token_text(model, "token_eos")
+            bos_token = _model_token_text(model, "token_bos")
+        except LlamaCppRuntimeError:
             raise
         except Exception as error:
-            raise OrtGenAIRuntimeError("The selected Qwen3.5 model could not be loaded") from error
-        return _LoadedModel(model_id, model, tokenizer, template)
+            raise LlamaCppRuntimeError("The selected Qwen3.5 model could not be loaded") from error
+        return _LoadedModel(model_id, model, template, eos_token, bos_token)
 
     def _api_module(self) -> Any:
         if self._api is not None:
             return self._api
         try:
-            import onnxruntime_genai
+            from types import SimpleNamespace
+
+            from llama_cpp import Llama
+            from llama_cpp.llama_chat_format import Jinja2ChatFormatter
         except (ImportError, OSError) as error:  # pragma: no cover - optional native dependency
-            raise OrtGenAIRuntimeError(
+            raise LlamaCppRuntimeError(
                 "Lumi's embedded runtime dependency is unavailable in this installation"
             ) from error
-        self._api = onnxruntime_genai
-        return onnxruntime_genai
+        self._api = SimpleNamespace(Llama=Llama, Jinja2ChatFormatter=Jinja2ChatFormatter)
+        return self._api
 
     def _unload_sync(self) -> None:
         self._loaded = None
         gc.collect()
 
 
-def _read_chat_template(model_dir: Path) -> str:
-    template_file = model_dir / "chat_template.jinja"
-    if template_file.is_file():
-        template = template_file.read_text(encoding="utf-8")
-    else:
-        tokenizer_config = model_dir / "tokenizer_config.json"
-        if not tokenizer_config.is_file():
-            raise OrtGenAIRuntimeError("The selected Qwen3.5 model has no chat template")
-        try:
-            config = json.loads(tokenizer_config.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise OrtGenAIRuntimeError("The selected Qwen3.5 chat template is invalid") from error
-        template = config.get("chat_template") if isinstance(config, Mapping) else None
+def _read_chat_template(metadata: Any) -> str:
+    if not isinstance(metadata, Mapping):
+        raise LlamaCppRuntimeError("The selected Qwen3.5 model has no GGUF metadata")
+    template = metadata.get("tokenizer.chat_template")
     if not isinstance(template, str) or not template.strip():
-        raise OrtGenAIRuntimeError("The selected Qwen3.5 model has no supported chat template")
+        raise LlamaCppRuntimeError("The selected Qwen3.5 GGUF has no chat template")
     return template
+
+
+def _model_token_text(model: Any, token_method: str) -> str:
+    get_id = getattr(model, token_method, None)
+    detokenize = getattr(model, "detokenize", None)
+    if not callable(get_id) or not callable(detokenize):
+        raise LlamaCppRuntimeError("The selected Qwen3.5 GGUF has no special-token metadata")
+    try:
+        token = detokenize([get_id()], special=True)
+        if isinstance(token, bytes):
+            token = token.decode("utf-8")
+    except Exception as error:
+        raise LlamaCppRuntimeError(
+            "The selected Qwen3.5 special-token metadata is invalid"
+        ) from error
+    if not isinstance(token, str) or not token:
+        raise LlamaCppRuntimeError("The selected Qwen3.5 special-token metadata is invalid")
+    return token
 
 
 def _verify_model_artifact(
     artifact: VerifiedModelArtifact,
-    verified_cache: dict[
-        tuple[str, str], tuple[tuple[str, tuple[int, int, int, int, int]], ...]
-    ] | None = None,
+    verified_cache: dict[tuple[str, str], tuple[tuple[str, tuple[int, int, int, int, int]], ...]]
+    | None = None,
 ) -> Path:
-    """Check the manifest, file hashes and exact local file layout.
+    """Validate the pinned GGUF manifest and hash weights when file identity changes."""
 
-    Model weights are hashed on first load, then that verification is reused while
-    every file's identity and change timestamps remain the same. This avoids
-    rescanning multi-gigabyte models after an ordinary idle unload/reload cycle.
-    """
+    spec = _require_spec(artifact.model_id)
+    supplied_dir = Path(artifact.directory)
+    cursor = supplied_dir
+    while cursor != cursor.parent:
+        if cursor.exists() and (cursor.is_symlink() or _is_junction(cursor)):
+            raise LlamaCppRuntimeError("The selected Qwen3.5 model path contains a link")
+        cursor = cursor.parent
+    try:
+        model_dir = supplied_dir.resolve(strict=True)
+    except OSError as error:
+        raise LlamaCppRuntimeError("The selected Qwen3.5 model files are not installed") from error
+    if not model_dir.is_dir() or model_dir.name != spec.directory_name:
+        raise LlamaCppRuntimeError("The selected Qwen3.5 model directory is invalid")
 
-    model_dir = Path(artifact.directory).resolve()
-    if not model_dir.is_dir():
-        raise OrtGenAIRuntimeError("The selected Qwen3.5 model files are not installed")
     manifest_path = model_dir / "lumi-model-manifest.json"
     try:
+        manifest_stat = manifest_path.stat(follow_symlinks=False)
+        if (
+            manifest_path.is_symlink()
+            or _is_junction(manifest_path)
+            or not stat.S_ISREG(manifest_stat.st_mode)
+            or manifest_stat.st_nlink != 1
+        ):
+            raise LlamaCppRuntimeError("The selected Qwen3.5 model manifest is unsafe")
         manifest_bytes = manifest_path.read_bytes()
     except OSError as error:
-        raise OrtGenAIRuntimeError("The selected Qwen3.5 model manifest is unavailable") from error
+        raise LlamaCppRuntimeError("The selected Qwen3.5 model manifest is unavailable") from error
     if hashlib.sha256(manifest_bytes).hexdigest() != artifact.manifest_sha256:
-        raise OrtGenAIRuntimeError("The selected Qwen3.5 model manifest changed after verification")
+        raise LlamaCppRuntimeError("The selected Qwen3.5 model manifest changed after verification")
     try:
         manifest = json.loads(manifest_bytes)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise OrtGenAIRuntimeError("The selected Qwen3.5 model manifest is invalid") from error
+        raise LlamaCppRuntimeError("The selected Qwen3.5 model manifest is invalid") from error
+
+    expected_source = {
+        **spec.source_manifest(),
+        "manifestSha256": spec.pinned_source_manifest_sha256,
+    }
     if (
         not isinstance(manifest, Mapping)
+        or set(manifest)
+        != {
+            "schemaVersion",
+            "format",
+            "modelId",
+            "quantization",
+            "source",
+            "files",
+        }
         or isinstance(manifest.get("schemaVersion"), bool)
-        or manifest.get("schemaVersion") != 1
-        or manifest.get("format") != "onnxruntime-genai"
+        or manifest.get("schemaVersion") != MODEL_MANIFEST_SCHEMA_VERSION
+        or manifest.get("format") != GGUF_FORMAT
         or manifest.get("modelId") != artifact.model_id
+        or manifest.get("quantization") != spec.quantization
+        or manifest.get("source") != expected_source
     ):
-        raise OrtGenAIRuntimeError("The selected Qwen3.5 model identity is invalid")
-    files = manifest.get("files")
-    if not isinstance(files, list) or not files:
-        raise OrtGenAIRuntimeError("The selected Qwen3.5 model file manifest is invalid")
+        raise LlamaCppRuntimeError("The selected Qwen3.5 GGUF manifest identity is invalid")
 
-    listed_files: dict[str, tuple[Path, str, int]] = {}
-    for item in files:
-        if not isinstance(item, Mapping):
-            raise OrtGenAIRuntimeError("The selected Qwen3.5 model file manifest is invalid")
-        relative_name = item.get("path")
-        size = item.get("size")
-        digest = item.get("sha256")
-        if (
-            not isinstance(relative_name, str)
-            or not relative_name
-            or "\\" in relative_name
-            or isinstance(size, bool)
-            or not isinstance(size, int)
-            or size < 0
-            or not isinstance(digest, str)
-            or not _SHA256_RE.fullmatch(digest)
-        ):
-            raise OrtGenAIRuntimeError("The selected Qwen3.5 model file manifest is invalid")
-        relative_path = PurePosixPath(relative_name)
-        if (
-            relative_path.is_absolute()
-            or "/".join(relative_path.parts) != relative_name
-            or any(part in {"", ".", ".."} for part in relative_path.parts)
-        ):
-            raise OrtGenAIRuntimeError("The selected Qwen3.5 model file path is invalid")
-        if relative_name in listed_files:
-            raise OrtGenAIRuntimeError("The selected Qwen3.5 model file manifest has duplicates")
-        file_path = (model_dir / Path(*relative_path.parts)).resolve()
-        try:
-            file_path.relative_to(model_dir)
-            file_stat = file_path.stat(follow_symlinks=False)
-            if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_size != size:
-                raise OrtGenAIRuntimeError("A verified Qwen3.5 model file is missing or changed")
-        except (OSError, ValueError) as error:
-            raise OrtGenAIRuntimeError("The selected Qwen3.5 model file path is invalid") from error
-        listed_files[relative_name] = (file_path, digest, size)
+    entries = manifest.get("files")
+    if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], Mapping):
+        raise LlamaCppRuntimeError("The selected Qwen3.5 GGUF file manifest is invalid")
+    entry = entries[0]
+    expected_file = {
+        "path": spec.gguf_filename,
+        "size": spec.download_size_bytes,
+        "sha256": spec.gguf_sha256,
+    }
+    if dict(entry) != expected_file:
+        raise LlamaCppRuntimeError("The selected Qwen3.5 GGUF file manifest does not match its pin")
 
-    if "genai_config.json" not in listed_files or not (
-        "chat_template.jinja" in listed_files or "tokenizer_config.json" in listed_files
-    ):
-        raise OrtGenAIRuntimeError("The selected Qwen3.5 model is missing required runtime assets")
+    model_path = model_dir / spec.gguf_filename
+    try:
+        model_stat = model_path.stat(follow_symlinks=False)
+        if (
+            model_path.is_symlink()
+            or _is_junction(model_path)
+            or not stat.S_ISREG(model_stat.st_mode)
+            or model_stat.st_nlink != 1
+            or model_stat.st_size != spec.download_size_bytes
+        ):
+            raise LlamaCppRuntimeError("The selected Qwen3.5 GGUF is missing or changed")
+        model_path.resolve(strict=True).relative_to(model_dir)
+    except (OSError, ValueError) as error:
+        raise LlamaCppRuntimeError("The selected Qwen3.5 GGUF path is invalid") from error
 
     actual_files: set[str] = set()
     for directory, subdirectories, filenames in os.walk(model_dir, followlinks=False):
         current_dir = Path(directory)
-        for subdirectory in subdirectories:
-            if (current_dir / subdirectory).is_symlink():
-                raise OrtGenAIRuntimeError("The selected Qwen3.5 model contains a symbolic link")
-        for filename in filenames:
-            path = current_dir / filename
-            if path.is_symlink():
-                raise OrtGenAIRuntimeError("The selected Qwen3.5 model contains a symbolic link")
-            if path == manifest_path:
-                continue
-            try:
-                relative_name = path.relative_to(model_dir).as_posix()
-            except ValueError as error:
-                raise OrtGenAIRuntimeError(
-                    "The selected Qwen3.5 model file path is invalid"
-                ) from error
-            actual_files.add(relative_name)
-    if actual_files != set(listed_files):
-        raise OrtGenAIRuntimeError("The selected Qwen3.5 model files do not match their manifest")
+        for name in subdirectories:
+            child = current_dir / name
+            if child.is_symlink() or _is_junction(child):
+                raise LlamaCppRuntimeError("The selected Qwen3.5 model contains a symbolic link")
+        for name in filenames:
+            child = current_dir / name
+            if child.is_symlink() or _is_junction(child):
+                raise LlamaCppRuntimeError("The selected Qwen3.5 model contains a symbolic link")
+            if child != manifest_path:
+                actual_files.add(child.relative_to(model_dir).as_posix())
+    if actual_files != {spec.gguf_filename}:
+        raise LlamaCppRuntimeError("The selected Qwen3.5 GGUF files do not match their manifest")
 
-    fingerprints = tuple(
-        (name, _model_file_fingerprint(path))
-        for name, (path, _digest, _size) in sorted(listed_files.items())
-    )
+    fingerprints = ((spec.gguf_filename, _model_file_fingerprint(model_path)),)
     cache_key = (str(model_dir), artifact.manifest_sha256)
     if verified_cache is None or verified_cache.get(cache_key) != fingerprints:
-        for name, (path, digest, _size) in listed_files.items():
-            if _sha256_file(path) != digest:
-                raise OrtGenAIRuntimeError(
-                    f"The selected Qwen3.5 model file failed its integrity check: {name}"
-                )
+        if _sha256_file(model_path) != spec.gguf_sha256:
+            raise LlamaCppRuntimeError("The selected Qwen3.5 GGUF failed its integrity check")
         if verified_cache is not None:
             verified_cache[cache_key] = fingerprints
     return model_dir
+
+
+def _is_junction(path: Path) -> bool:
+    is_junction = getattr(path, "is_junction", None)
+    return bool(is_junction and is_junction())
 
 
 def _model_file_fingerprint(path: Path) -> tuple[int, int, int, int, int]:
     try:
         file_stat = path.stat(follow_symlinks=False)
     except OSError as error:
-        raise OrtGenAIRuntimeError("A verified Qwen3.5 model file is unavailable") from error
-    if not stat.S_ISREG(file_stat.st_mode):
-        raise OrtGenAIRuntimeError("A verified Qwen3.5 model file is not a regular file")
+        raise LlamaCppRuntimeError("A verified Qwen3.5 GGUF is unavailable") from error
+    if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_nlink != 1:
+        raise LlamaCppRuntimeError("A verified Qwen3.5 GGUF is not a private regular file")
     return (
         file_stat.st_dev,
         file_stat.st_ino,
@@ -613,17 +692,8 @@ def _sha256_file(path: Path) -> str:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(chunk)
     except OSError as error:
-        raise OrtGenAIRuntimeError("A verified Qwen3.5 model file is unavailable") from error
+        raise LlamaCppRuntimeError("A verified Qwen3.5 GGUF is unavailable") from error
     return digest.hexdigest()
-
-
-def _template_with_thinking(template: str, thinking: bool) -> str:
-    template, replacements = _THINKING_CONDITION_RE.subn(
-        "if true" if thinking else "if false", template
-    )
-    if replacements != 1:
-        raise OrtGenAIProtocolError("The Qwen3.5 chat template has an unsupported thinking control")
-    return template
 
 
 def _parse_model_response(
@@ -631,62 +701,75 @@ def _parse_model_response(
     tools: Mapping[str, ToolDefinition],
     max_tools: int,
 ) -> tuple[str, tuple[ToolCall, ...]]:
-    # Never surface private reasoning, including an unfinished block at the token limit.
-    text = _THINK_RE.sub("", text)
-    if "<think>" in text:
-        text = text.split("<think>", 1)[0]
-
     matches = list(_TOOL_CALL_RE.finditer(text))
-    if (
-        text.count("<tool_call>") != len(matches)
-        or text.count("</tool_call>") != len(matches)
-    ):
-        raise OrtGenAIProtocolError("The Qwen3.5 tool-call output is malformed")
+    if text.count("<tool_call>") != len(matches) or text.count("</tool_call>") != len(matches):
+        raise LlamaCppProtocolError("The Qwen3.5 tool-call output is malformed")
     if len(matches) > max_tools:
-        raise OrtGenAIProtocolError("Qwen3.5 returned too many tool calls")
+        raise LlamaCppProtocolError("Qwen3.5 returned too many tool calls")
+
     calls: list[ToolCall] = []
     pieces: list[str] = []
     previous_end = 0
     for match in matches:
         pieces.append(text[previous_end : match.start()])
         name = match.group(1)
+        tool = tools.get(name)
+        if tool is None:
+            raise LlamaCppProtocolError("Qwen3.5 returned an unregistered tool call")
+        if not _TOOL_NAME_RE.fullmatch(name) or not tool.read_only:
+            raise LlamaCppProtocolError("Qwen3.5 returned an unsupported tool call")
+
         body = match.group(2)
         arguments: dict[str, Any] = {}
         cursor = 0
         for parameter in _PARAMETER_RE.finditer(body):
             if body[cursor : parameter.start()].strip():
-                raise OrtGenAIProtocolError("The Qwen3.5 tool-call arguments are malformed")
+                raise LlamaCppProtocolError("The Qwen3.5 tool-call arguments are malformed")
             key = parameter.group(1)
             if key in arguments:
-                raise OrtGenAIProtocolError("Qwen3.5 returned a duplicate tool argument")
+                raise LlamaCppProtocolError("Qwen3.5 returned a duplicate tool argument")
             value = parameter.group(2).strip("\r\n")
-            arguments[key] = _parse_argument(value, tools.get(name), key)
+            arguments[key] = _parse_argument(value, tool, key)
             cursor = parameter.end()
         if body[cursor:].strip():
-            raise OrtGenAIProtocolError("The Qwen3.5 tool-call arguments are malformed")
-        tool = tools.get(name)
-        if tool is not None:
-            required = tool.parameters.get("required", [])
-            if isinstance(required, list) and any(key not in arguments for key in required):
-                raise OrtGenAIProtocolError("The Qwen3.5 tool call is missing a required argument")
+            raise LlamaCppProtocolError("The Qwen3.5 tool-call arguments are malformed")
+        required = tool.parameters.get("required", [])
+        if isinstance(required, list) and any(key not in arguments for key in required):
+            raise LlamaCppProtocolError("The Qwen3.5 tool call is missing a required argument")
+        if not isinstance(arguments, dict):
+            raise LlamaCppProtocolError("Qwen3.5 tool arguments must be a JSON object")
         calls.append(ToolCall(uuid4().hex, name, arguments))
         previous_end = match.end()
     pieces.append(text[previous_end:])
-    content = "".join(pieces).strip()
+
+    content = "".join(pieces)
+    # Qwen3.5 may mark analysis and final channels with special tokens in a GGUF
+    # completion. Only keep the final channel when one is present.
+    channel_markers = list(_CHANNEL_RE.finditer(content))
+    final_markers = [marker for marker in channel_markers if marker.group(1) == "final"]
+    if final_markers:
+        content = content[final_markers[-1].end() :]
+    elif any(marker.group(1) == "analysis" for marker in channel_markers):
+        first_analysis = next(marker for marker in channel_markers if marker.group(1) == "analysis")
+        content = content[: first_analysis.start()]
+
+    content = _THINK_RE.sub("", content)
+    if "<think>" in content:
+        content = content.split("<think>", 1)[0]
+    content = _SPECIAL_TOKEN_RE.sub("", content).strip()
     return content, tuple(calls)
 
 
-def _parse_argument(value: str, tool: ToolDefinition | None, name: str) -> Any:
-    if tool is not None:
-        properties = tool.parameters.get("properties", {})
-        schema = properties.get(name, {}) if isinstance(properties, Mapping) else {}
-        expected_type = schema.get("type") if isinstance(schema, Mapping) else None
-        if expected_type == "string":
-            return value
+def _parse_argument(value: str, tool: ToolDefinition, name: str) -> Any:
+    properties = tool.parameters.get("properties", {})
+    schema = properties.get(name, {}) if isinstance(properties, Mapping) else {}
+    expected_type = schema.get("type") if isinstance(schema, Mapping) else None
+    if expected_type == "string":
+        return value
     try:
         return json.loads(value)
-    except json.JSONDecodeError:
-        return value
+    except json.JSONDecodeError as error:
+        raise LlamaCppProtocolError("Qwen3.5 returned a malformed tool argument") from error
 
 
 def _token_count(tokens: Any) -> int:
