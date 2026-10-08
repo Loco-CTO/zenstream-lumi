@@ -228,6 +228,20 @@ def _tokens_per_second(tokens: int | None, duration_ns: int | None) -> float | N
     return round(tokens * 1_000_000_000 / duration_ns, 3)
 
 
+def _visible_output_token_count(runtime: Any, text: str) -> int | None:
+    """Count visible answer tokens without counting hidden reasoning or tool data."""
+
+    loaded = getattr(runtime, "_loaded", None)
+    model = getattr(loaded, "model", None)
+    tokenize = getattr(model, "tokenize", None)
+    if not callable(tokenize):
+        return None
+    try:
+        return len(tokenize(text.encode("utf-8"), add_bos=False, special=False))
+    except (TypeError, ValueError, RuntimeError):
+        return None
+
+
 def _model_provenance(models_directory: Path, model_id: str) -> dict[str, Any]:
     model_directory = models_directory.expanduser().resolve() / model_id.replace(":", "-")
     manifest_path = model_directory / "lumi-model-manifest.json"
@@ -283,6 +297,7 @@ async def _measure_run(runtime: Any, request: Any, index: int) -> dict[str, Any]
     load_duration_ns = _optional_int(getattr(response, "load_duration_ns", None))
     total_duration_ns = _optional_int(getattr(response, "total_duration_ns", None))
     assembled_text = "".join(visible_parts)
+    visible_output_tokens = _visible_output_token_count(runtime, assembled_text)
     stream_matches_completion = assembled_text == getattr(message, "content", None)
     if not stream_matches_completion:
         raise RuntimeError(f"Visible stream differs from completed response in run {index}")
@@ -307,6 +322,10 @@ async def _measure_run(runtime: Any, request: Any, index: int) -> dict[str, Any]
         "generationTokensPerSecond": _tokens_per_second(
             completion_tokens, generation_duration_ns
         ),
+        "visibleOutputTokens": visible_output_tokens,
+        "visibleOutputTokensPerSecond": _tokens_per_second(
+            visible_output_tokens, generation_duration_ns
+        ),
         "modelLoadMs": _milliseconds(load_duration_ns),
         "runtimeReportedTotalMs": _milliseconds(total_duration_ns),
         "visibleCharacterCount": len(assembled_text),
@@ -325,6 +344,7 @@ def _warm_summary(runs: list[dict[str, Any]]) -> dict[str, float | None]:
         "promptProcessingMs",
         "generationMs",
         "generationTokensPerSecond",
+        "visibleOutputTokensPerSecond",
     )
     summary: dict[str, float | None] = {}
     for field in fields:
@@ -426,8 +446,9 @@ async def _run(arguments: argparse.Namespace) -> dict[str, Any]:
             "NVIDIA VRAM is sampled system-wide with nvidia-smi and may include other processes.",
             "AMD/ROCm VRAM is unavailable; this harness does not currently have a rocm-smi probe.",
             (
-                "llama-cpp-python 0.3.35 does not expose streamed chat completion usage counts; "
-                "completion token count and tokens per second are unmeasured."
+                "llama-cpp-python 0.3.35 does not expose full streamed completion token counts. "
+                "visibleOutputTokensPerSecond re-tokenizes only the visible final answer, so it "
+                "excludes hidden reasoning and tool-call tokens."
             ),
             (
                 "Null resource or runtime timing values mean that platform or binding support "

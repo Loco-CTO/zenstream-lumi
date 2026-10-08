@@ -18,11 +18,18 @@ from llama_cpp_live import smoke_request  # noqa: E402
 class _FakeRuntime:
     def __init__(self, events: list[SimpleNamespace]) -> None:
         self._events = events
+        self._loaded = SimpleNamespace(model=_FakeModel())
 
     async def stream(self, request: object):
         del request
         for event in self._events:
             yield event
+
+
+class _FakeModel:
+    def tokenize(self, text: bytes, *, add_bos: bool, special: bool) -> list[str]:
+        del add_bos, special
+        return text.decode("utf-8").split()
 
 
 def _delta(text: str) -> SimpleNamespace:
@@ -39,7 +46,7 @@ def _complete(content: str) -> SimpleNamespace:
         prompt_tokens=3,
         completion_tokens=2,
         prompt_duration_ns=None,
-        generation_duration_ns=None,
+        generation_duration_ns=2_000_000,
         load_duration_ns=None,
         total_duration_ns=None,
     )
@@ -118,6 +125,8 @@ class BenchmarkStreamMeasurementTests(unittest.TestCase):
         self.assertEqual(result["timeToFirstVisibleTokenMs"], 5.0)
         self.assertEqual(result["partialStreamResets"], 2)
         self.assertEqual(result["visibleCharacterCount"], len(" answer"))
+        self.assertEqual(result["visibleOutputTokens"], 1)
+        self.assertEqual(result["visibleOutputTokensPerSecond"], 500.0)
         self.assertTrue(result["streamTextMatchesCompletion"])
 
     def test_stream_completion_text_mismatch_fails_acceptance(self) -> None:

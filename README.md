@@ -60,7 +60,7 @@ python scripts/smoke_llama_cpp.py --models-dir C:\path\to\lumi-models --model qw
 python scripts/benchmark_llama_cpp.py --models-dir C:\path\to\lumi-models --model qwen3.5:2b --runs 4 --json-out lumi-benchmark.json
 ```
 
-The benchmark defaults to comparing `cpu_only` with `automatic`. It reports time to first visible text, prompt and generation timing when exposed by the binding, runtime end-to-end latency, process RAM, best-effort NVIDIA system VRAM, and the selected backend. `--mode` can be repeated to select a different comparison. Runtime end-to-end timing excludes Lumi tools, web research, service/network overhead, and browser rendering; verify those separately in the running Orchestrator UI.
+The benchmark defaults to comparing `cpu_only` with `automatic`. It reports time to first visible text, prompt and generation timing, tokenizer-counted visible answer tokens per second, runtime end-to-end latency, process RAM, best-effort NVIDIA system VRAM, and the selected backend. Visible answer throughput excludes hidden reasoning and tool-call tokens, so it measures user-visible generation speed rather than the binding's unavailable full completion token rate. `--mode` can be repeated to select a different comparison. Runtime end-to-end timing excludes Lumi tools, web research, service/network overhead, and browser rendering; verify those separately in the running Orchestrator UI.
 
 ## Conversation and privacy
 

@@ -44,7 +44,8 @@ python scripts/benchmark_llama_cpp.py `
 The default prompt is Chinese. Add `--thinking` to exercise Qwen3.5's hidden reasoning path and `--with-tools` to offer the read-only `catalog_search` schema while measuring incremental text and tool-call resets. The runtime benchmark does not execute tool implementations; use the Orchestrator/UI benchmark for that. The default comparison runs `cpu_only` and `automatic` with the same model and prompt. Add repeated `--mode automatic --mode cpu_only --mode gpu_preferred` arguments to choose a different order or include GPU-preferred mode. The first run includes lazy model loading and cold filesystem effects; compare the reported warm averages for inference performance. The report includes:
 
 - time to first non-whitespace visible text and time to the first text delta;
-- prompt processing and generation duration/token rates when the binding supplies those metrics;
+- prompt processing and generation duration, plus tokenizer-counted visible answer tokens per second;
+- full completion token rates when the binding supplies those metrics; visible answer throughput excludes hidden reasoning and tool-call tokens;
 - end-to-end embedded-runtime latency and exact model/revision/quantization provenance;
 - peak process resident memory where the OS exposes it;
 - best-effort NVIDIA system-wide VRAM use when `nvidia-smi` is available; this may include other processes and is not per-process attribution;
