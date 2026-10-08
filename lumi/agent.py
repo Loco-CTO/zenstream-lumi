@@ -46,6 +46,9 @@ _RECOMMENDATION_MARKERS = (
     "推奨",
     "何を観",
     "何を見",
+    "推荐",
+    "建议看",
+    "看什么",
     "gợi ý",
     "đề xuất",
     "nên xem",
@@ -73,6 +76,11 @@ _OUTSIDE_LIBRARY_MARKERS = (
     "追加すべき",
     "追加した方が",
     "追加する作品",
+    "库外",
+    "不在我的库",
+    "我的库里没有",
+    "库中没有",
+    "我没有这部",
     "ngoài thư viện",
     "không có trong thư viện",
     "ngoài danh sách",
@@ -128,6 +136,29 @@ _CONSTRAINED_RECOMMENDATION_MARKERS = (
     "雰囲気",
     "政治",
     "戦争",
+    "类似",
+    "像",
+    "同类型",
+    "风格",
+    "题材",
+    "评分",
+    "高分",
+    "热门",
+    "最佳",
+    "最好",
+    "战争",
+    "黑暗奇幻",
+    "恐怖",
+    "喜剧",
+    "爱情",
+    "动作",
+    "科幻",
+    "悬疑",
+    "上映于",
+    "导演",
+    "主演",
+    "没看过",
+    "未看过",
     "高評価",
     "評価",
     "人気",
@@ -186,6 +217,18 @@ _FOLLOW_UP_RECOMMENDATION_MARKERS = (
     "二番目",
     "2番目",
     "前の作品",
+    "另一个",
+    "另一部",
+    "换一个",
+    "换一部",
+    "别的",
+    "其他的",
+    "第二个",
+    "第二部",
+    "你提到的",
+    "刚才推荐的",
+    "这部",
+    "那部",
     "別の作品",
     "別の",
     "違う作品",
@@ -202,6 +245,8 @@ _MOVIE_MARKERS = (
     "film",
     "films",
     "映画",
+    "电影",
+    "影片",
     "phim lẻ",
     "phim điện ảnh",
 )
@@ -211,10 +256,13 @@ _SERIES_MARKERS = (
     "show",
     "シリーズ",
     "ドラマ",
+    "剧集",
+    "电视剧",
+    "连续剧",
     "phim bộ",
     "phim truyền hình",
 )
-_ANIME_MARKERS = ("anime", "アニメ")
+_ANIME_MARKERS = ("anime", "アニメ", "动漫", "动画")
 _GENERIC_WATCH_MARKERS = (
     "what should i watch",
     "what to watch",
@@ -224,6 +272,8 @@ _GENERIC_WATCH_MARKERS = (
     "何を見",
     "観たい",
     "見たい",
+    "今晚看什么",
+    "有什么可看的",
     "xem gì",
     "bộ phim",
     "phim trong thư viện",
@@ -246,6 +296,13 @@ _UNSUPPORTED_MEDIA_MARKERS = (
     "本を",
     "小説",
     "プレイリスト",
+    "专辑",
+    "歌曲",
+    "音乐",
+    "歌手",
+    "播客",
+    "书籍",
+    "播放列表",
     "bài hát",
     "ca khúc",
     "nhạc",
@@ -288,6 +345,12 @@ _RELATIONSHIP_MARKERS = (
     "何番目",
     "順番",
     "時系列",
+    "续集",
+    "前传",
+    "观看顺序",
+    "系列顺序",
+    "剧情顺序",
+    "属于哪一部",
     "phần trước",
     "phần tiếp theo",
     "tiền truyện",
@@ -317,6 +380,13 @@ _RECENT_MEDIA_REFERENCE_MARKERS = (
     "その作品",
     "このシリーズ",
     "そのシリーズ",
+    "这部电影",
+    "那部电影",
+    "这部作品",
+    "那部作品",
+    "这个系列",
+    "那个系列",
+    "刚才那部",
     "さっきの",
     "前に出た",
     "phim này",
@@ -423,8 +493,8 @@ def _simple_local_recommendation_kind(
     ):
         return False, None
     if re.search(
-        r"(?:[2-9]\d*|[二三四五六七八九十百千][二三四五六七八九十百千]*)"
-        r"\s*(?:本|作品|タイトル|番組|映画|ドラマ|アニメ)",
+        r"(?:[2-9]\d*|[二三四五六七八九十百千两兩][二三四五六七八九十百千两兩]*|几)"
+        r"\s*(?:部|个|本|作品|标题|番組|映画|ドラマ|アニメ)",
         text,
     ):
         return False, None
@@ -435,10 +505,14 @@ def _simple_local_recommendation_kind(
     explicit_anime_movie = bool(
         re.search(r"\banime\s+(?:movies?|films?)\b", text)
         or "アニメ映画" in text
+        or "动画电影" in text
+        or "动漫电影" in text
     )
     explicit_anime_series = bool(
         re.search(r"\banime\s+(?:series|shows?|tv)\b", text)
         or "アニメシリーズ" in text
+        or "动画剧集" in text
+        or "动漫剧集" in text
     )
     if wants_movie and wants_series:
         return False, None
@@ -463,6 +537,8 @@ def _recommendation_locale(user_text: str) -> str:
     folded = user_text.casefold()
     if any("\u3040" <= char <= "\u30ff" for char in user_text):
         return "ja"
+    if any("\u3400" <= char <= "\u9fff" or "\uf900" <= char <= "\ufaff" for char in user_text):
+        return "zh"
     if any(
         marker in folded
         for marker in ("gợi ý", "đề xuất", "thư viện", "phim", "xem", "bạn", "mình")
@@ -507,6 +583,7 @@ def _relationship_search_queries(
     locale = _recommendation_locale(user_text)
     localized = {
         "ja": (f'"{title}" シリーズ 順番 前後 公式', "ja"),
+        "zh": (f'"{title}" 系列 顺序 前传 续集 官方', "zh"),
         "vi": (f'"{title}" thứ tự phần trước phần tiếp theo chính thức', "vi"),
         "en": (f'"{title}" sequel prequel watch order official', "en"),
     }[locale]
@@ -839,6 +916,7 @@ class ChatAgent:
             lead = {
                 "en": "I couldn't check your library just now. Please try again.",
                 "ja": "今はライブラリを確認できませんでした。もう一度お試しください。",
+                "zh": "暂时无法查询您的本地媒体库，请稍后再试。",
                 "vi": "Hiện mình chưa thể kiểm tra thư viện. Vui lòng thử lại.",
             }[locale]
             markdown = lead
@@ -853,6 +931,7 @@ class ChatAgent:
                     "今は確認済みのローカルおすすめを取得できませんでした。"
                     "もう一度お試しいただくか、作品名やジャンルで検索してください。"
                 ),
+                "zh": "目前无法获取经过验证的本地推荐。您可以重试，或按片名或类型搜索。",
                 "vi": (
                     "Hiện mình chưa lấy được đề xuất trong thư viện đã xác minh. "
                     "Hãy thử lại hoặc tìm theo tên phim hay thể loại."
@@ -871,6 +950,7 @@ class ChatAgent:
                     "アクセス可能なローカルのおすすめ一覧に掲載されているため、"
                     "この作品をおすすめします:"
                 ),
+                "zh": "这部作品出现在您有权访问的 ZenStream 本地推荐中：",
                 "vi": (
                     "Mình gợi ý phim này vì nó xuất hiện trong mục đề xuất ZenStream mà bạn "
                     "có quyền truy cập:"
@@ -1047,6 +1127,7 @@ class ChatAgent:
         fallback = {
             "en": "I reached the research limit before I could finish a reliable answer.",
             "ja": "調査の上限に達したため、信頼できる回答を最後まで確認できませんでした。",
+            "zh": "研究已达到限制，我还无法给出可靠完整的答案。",
             "vi": "Tôi đã đạt giới hạn tra cứu trước khi hoàn tất câu trả lời đáng tin cậy.",
         }[_recommendation_locale(context.user_message)]
         return self._make_answer(fallback, trusted_entities, sources, tool_rounds, total_calls)
@@ -1073,6 +1154,7 @@ class ChatAgent:
                     "ローカルモデルで作品同士の関係を確認できませんでした。"
                     "会話で確認済みのZenStream作品はこちらです:"
                 ),
+                "zh": "本地模型无法核实作品之间的关系。以下是对话中已确认的 ZenStream 作品：",
                 "vi": (
                     "Mô hình cục bộ không xác minh được mối liên hệ giữa các tác phẩm. "
                     "Đây là tựa phim ZenStream đã được xác nhận trong cuộc trò chuyện:"
@@ -1091,6 +1173,7 @@ class ChatAgent:
                     "ローカルモデルで信頼できる回答を作れませんでした。"
                     "質問を短くするか、インストール済みの小さいモデルを選んでください。"
                 ),
+                "zh": "本地模型未能生成可靠的回答。请尝试缩短问题，或选择已安装的较小模型。",
                 "vi": (
                     "Mô hình cục bộ không tạo được câu trả lời đáng tin cậy. "
                     "Hãy thử hỏi ngắn hơn hoặc chọn mô hình nhỏ hơn đã cài đặt."
