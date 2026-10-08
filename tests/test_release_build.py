@@ -55,18 +55,26 @@ class LumiReleaseBuildTests(unittest.TestCase):
             ("cp314", "cp314", "manylinux_2_28_aarch64"),
         )
         native_targets = (
-            "win_amd64",
-            "manylinux_2_28_x86_64",
-            "manylinux_2_28_aarch64",
+            ("win_amd64", "windows-x64", "win_amd64"),
+            (
+                "manylinux_2_28_x86_64",
+                "linux-x64",
+                "manylinux_2_27_x86_64.manylinux_2_28_x86_64",
+            ),
+            (
+                "manylinux_2_28_aarch64",
+                "linux-arm64",
+                "manylinux_2_27_aarch64.manylinux_2_28_aarch64",
+            ),
         )
-        for platform_tag in native_targets:
+        for _target_platform, artifact_name, wheel_platform_tag in native_targets:
             self._wheel(
-                wheelhouse / "runtime" / f"native-{platform_tag}",
+                wheelhouse / "runtime" / f"llama-cpp-{artifact_name}",
                 "llama_cpp_python",
                 "0.3.35",
                 "py3",
                 "none",
-                platform_tag,
+                wheel_platform_tag,
             )
         for python_tag, abi_tag, platform_tag in targets:
             runtime_subdir = wheelhouse / "runtime" / f"{python_tag}-{platform_tag}"
@@ -82,7 +90,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
                 abi_tag,
                 numpy_platform_tag,
             )
-        for platform_tag in native_targets:
+        for platform_tag, _artifact_name, _wheel_platform_tag in native_targets:
             hf_xet_platform_tag = {
                 "manylinux_2_28_x86_64": "manylinux_2_17_x86_64",
                 "manylinux_2_28_aarch64": "manylinux_2_17_aarch64",
@@ -100,9 +108,10 @@ class LumiReleaseBuildTests(unittest.TestCase):
         self._wheel(runtime_universal, "diskcache", "5.6.3", "py3", "none", "any")
         self._wheel(runtime_universal, "jinja2", "3.1.6", "py3", "none", "any")
         self._wheel(runtime_universal, "markupsafe", "3.0.2", "py3", "none", "any")
-        self._wheel(runtime_universal, "typing_extensions", "4.15.0", "py3", "none", "any")
+        self._wheel(runtime_universal, "typing_extensions", "4.16.0", "py3", "none", "any")
         self._wheel(installer_universal, "huggingface_hub", "1.10.0", "py3", "none", "any")
         self._wheel(installer_universal, "filelock", "3.18.0", "py3", "none", "any")
+        self._wheel(installer_universal, "typing_extensions", "4.16.0", "py3", "none", "any")
         return wheelhouse
 
     def test_builds_runtime_and_deferred_installer_manifest(self) -> None:
@@ -111,10 +120,10 @@ class LumiReleaseBuildTests(unittest.TestCase):
             root = Path(temporary)
             wheelhouse = self._wheelhouse(root)
             output = root / "release"
-            manifest = build_release(project_root, wheelhouse, output, "v0.2.0")
+            manifest = build_release(project_root, wheelhouse, output, "v0.2.1")
 
             self.assertEqual(manifest["schemaVersion"], 1)
-            self.assertEqual(manifest["tag"], "v0.2.0")
+            self.assertEqual(manifest["tag"], "v0.2.1")
             self.assertEqual(len(manifest["runtimeDependencies"]), 16)
             self.assertEqual(len(manifest["installerDependencies"]), 5)
             runtime_names = {
@@ -188,9 +197,9 @@ class LumiReleaseBuildTests(unittest.TestCase):
                 )
 
             self.assertGreater(len(list(wheelhouse.rglob("*.whl"))), 128)
-            manifest = build_release(project_root, wheelhouse, root / "out", "v0.2.0")
+            manifest = build_release(project_root, wheelhouse, root / "out", "v0.2.1")
 
-        self.assertEqual(manifest["tag"], "v0.2.0")
+        self.assertEqual(manifest["tag"], "v0.2.1")
         self.assertGreater(len(manifest["installerDependencies"]), 2)
 
     def test_rejects_a_tag_that_does_not_match_project_version(self) -> None:
@@ -205,15 +214,14 @@ class LumiReleaseBuildTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             wheelhouse = self._wheelhouse(root)
-            missing = (
-                wheelhouse
-                / "runtime"
-                / "native-manylinux_2_28_aarch64"
-                / "llama_cpp_python-0.3.35-py3-none-manylinux_2_28_aarch64.whl"
+            missing = next(
+                (wheelhouse / "runtime" / "llama-cpp-linux-arm64").glob(
+                    "llama_cpp_python-0.3.35-py3-none-*.whl"
+                )
             )
             missing.unlink()
             with self.assertRaisesRegex(ReleaseBuildError, "no llama-cpp-python wheel"):
-                build_release(project_root, wheelhouse, root / "out", "v0.2.0")
+                build_release(project_root, wheelhouse, root / "out", "v0.2.1")
 
     def test_ignores_nested_vendored_distribution_metadata(self) -> None:
         project_root = Path(__file__).resolve().parents[1]
@@ -234,7 +242,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
                     "Metadata-Version: 2.1\nName: jaraco-text\nVersion: 3.12.1\n\n",
                 )
 
-            manifest = build_release(project_root, wheelhouse, root / "out", "v0.2.0")
+            manifest = build_release(project_root, wheelhouse, root / "out", "v0.2.1")
 
         installer_names = {
             entry["distribution"].lower() for entry in manifest["installerDependencies"]
@@ -256,7 +264,7 @@ class LumiReleaseBuildTests(unittest.TestCase):
                 wheel.unlink()
                 replacement.replace(wheel)
             with self.assertRaisesRegex(ReleaseBuildError, "no compiled llama library"):
-                build_release(project_root, wheelhouse, root / "out", "v0.2.0")
+                build_release(project_root, wheelhouse, root / "out", "v0.2.1")
 
 
 if __name__ == "__main__":
