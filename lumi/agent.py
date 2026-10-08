@@ -26,7 +26,11 @@ from lumi.contracts import (
     ToolDefinition,
     ToolResult,
 )
-from lumi.prompts import EXTERNAL_SEARCH_PLANNER_PROMPT, SYSTEM_PROMPT
+from lumi.prompts import (
+    EXTERNAL_SEARCH_PLANNER_PROMPT,
+    SYSTEM_PROMPT,
+    WEB_CAPABILITY_INSTRUCTION,
+)
 from lumi.tools import ToolRegistry
 
 _REFERENCE_PATTERN = re.compile(
@@ -1083,20 +1087,11 @@ class ChatAgent:
                 return answer
             return _enforce_local_recommendations(answer, user_text, current_entities)
 
-        sources: dict[str, Source] = {}
-        messages = self._bounded_messages(
-            history,
-            user_text,
-            context.previous_entities,
-        )
-        seen_calls: set[tuple[str, str]] = set()
-        tool_call_counts: dict[str, int] = {}
-        total_calls = 0
-        tool_rounds = 0
         relationship_entity = _relationship_follow_up_entity(
             user_text, context.previous_entities
         )
         definitions = self._tools.definitions
+        wants_offline = False
         if relationship_entity is not None:
             folded = user_text.casefold()
             wants_offline = any(
@@ -1117,6 +1112,19 @@ class ChatAgent:
                 for definition in definitions
                 if definition.name in available_names
             )
+
+        sources: dict[str, Source] = {}
+        messages = self._bounded_messages(
+            history,
+            user_text,
+            context.previous_entities,
+            available_tools=definitions,
+        )
+        seen_calls: set[tuple[str, str]] = set()
+        tool_call_counts: dict[str, int] = {}
+        total_calls = 0
+        tool_rounds = 0
+        if relationship_entity is not None:
             prefetch_calls = [
                 ToolCall(
                     "lumi-local-relationship-detail",
@@ -1665,11 +1673,21 @@ class ChatAgent:
         history: list[ChatMessage],
         user_text: str,
         previous_entities: tuple[EntityReference, ...] = (),
+        *,
+        available_tools: tuple[ToolDefinition, ...] | None = None,
     ) -> list[ChatMessage]:
         language_instruction = _response_language_instruction(user_text, history)
         system_content = SYSTEM_PROMPT
         if language_instruction:
             system_content += f"\n\n{language_instruction}"
+        tool_definitions = (
+            self._tools.definitions if available_tools is None else available_tools
+        )
+        if any(
+            definition.name in {"web_search", "web_read"}
+            for definition in tool_definitions
+        ):
+            system_content += f"\n\n{WEB_CAPABILITY_INSTRUCTION}"
         referenced_entities = [
             {
                 "type": entity.type,

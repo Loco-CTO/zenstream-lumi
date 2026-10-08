@@ -26,6 +26,7 @@ from lumi.contracts import (
     ToolDefinition,
     ToolResult,
 )
+from lumi.prompts import WEB_CAPABILITY_INSTRUCTION
 from lumi.tools import ToolRegistry
 
 
@@ -230,6 +231,28 @@ def chat_context() -> ChatContext:
 
 
 class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_web_capability_prompt_is_tied_to_the_available_tools(self) -> None:
+        runtime = FakeRuntime(
+            [ChatMessage("assistant", "Yes, I can search public web pages with Lumi.")]
+        )
+        source = Source("https://example.org/source", "example.org", "Public source")
+        web_search = RelationshipSearchTool(source)
+        agent = ChatAgent(runtime, ToolRegistry([web_search]))
+
+        await agent.answer(chat_context(), [], "Do you have web access?")
+
+        request = runtime.requests[0]
+        self.assertIn(WEB_CAPABILITY_INSTRUCTION, request.messages[0].content)
+        self.assertIn("without searching", WEB_CAPABILITY_INSTRUCTION)
+        self.assertIn("web_search", {tool.name for tool in request.tools})
+
+        offline_agent = ChatAgent(
+            FakeRuntime([ChatMessage("assistant", "No web tools.")]),
+            ToolRegistry([]),
+        )
+        offline_messages = offline_agent._bounded_messages([], "Can you browse the web?")
+        self.assertNotIn(WEB_CAPABILITY_INSTRUCTION, offline_messages[0].content)
+
     def test_recommendation_locale_distinguishes_chinese_and_japanese(self) -> None:
         self.assertEqual(_recommendation_locale("请用中文回答这个问题。"), "zh")
         self.assertEqual(_recommendation_locale("この映画について日本語で答えてください。"), "ja")
