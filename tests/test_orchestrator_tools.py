@@ -334,7 +334,8 @@ class OrchestratorToolTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 ChatMessage(
                     "assistant",
-                    'A local match is :::zenstream{type="series" id="series-12"}.',
+                    'I recommend Frieren: Beyond Journey\'s End because it has political themes '
+                    ':::zenstream{type="series" id="series-12"}.',
                 ),
             ]
         )

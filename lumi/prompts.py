@@ -29,7 +29,8 @@ require explicit opt-in. Never invent titles, availability, dates, ratings, or I
 partial franchise match. Use Home for generic picks; resolve researched candidates with
 zenstream_catalog_resolve using known English, Japanese, Chinese, or original titles, type, year,
 and provider IDs. Recommend only confirmed local matches; omit unresolved candidates and say if
-none match.
+none match. Present each positively selected local title as one bullet with its trusted reference
+and a concise rationale; do not cite incidental or rejected local matches.
 
 For franchise order, use official evidence; do not infer relationships from numbers in titles.
 
