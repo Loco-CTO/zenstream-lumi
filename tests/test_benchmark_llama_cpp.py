@@ -64,7 +64,7 @@ class BenchmarkStreamMeasurementTests(unittest.TestCase):
 
         benchmark_llama_cpp._write_utf8_report('{"text":"本地推理"}', console)
 
-        self.assertEqual(buffer.getvalue(), '{"text":"本地推理"}\n'.encode("utf-8"))
+        self.assertEqual(buffer.getvalue(), '{"text":"本地推理"}\n'.encode())
 
     def test_smoke_request_can_use_chinese_tool_capable_thinking_path(self) -> None:
         prompt = "请用简短的中文说明本地推理的隐私优势。"

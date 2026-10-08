@@ -11,9 +11,9 @@ import subprocess
 import sys
 import tempfile
 import venv
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Sequence
 
 _LLAMA_CPP_VERSION = "0.3.35"
 _GPU_BACKENDS = ("cuda", "vulkan")
@@ -237,6 +237,7 @@ def _verify_installed(required_backends: Sequence[str]) -> None:
         sys.path.insert(0, str(repository_root))
 
     import llama_cpp
+
     from lumi.runtime.acceleration import choose_acceleration, detect_gpu_devices
 
     if getattr(llama_cpp, "__version__", None) != _LLAMA_CPP_VERSION:

@@ -23,9 +23,9 @@ from lumi.model_installation import (
     Qwen35ModelInstaller,
     Qwen35ModelSpec,
     UnsupportedModelError,
+    _hash_file_with_size,
     _SourceFetchResult,
     _SourceFileRecord,
-    _hash_file_with_size,
     supported_models,
 )
 

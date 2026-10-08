@@ -114,11 +114,13 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Build glslc from the pinned Shaderc release
         run: |
-          python3 -m pip install "cmake==3.31.6"
+          manylinux_python=/opt/python/cp312-cp312/bin/python
+          export PATH="$(dirname "$manylinux_python"):$PATH"
+          "$manylinux_python" -m pip install "cmake==3.31.6"
           git clone --depth 1 --branch v2025.4 https://github.com/google/shaderc.git /tmp/shaderc
           test "$(git -C /tmp/shaderc rev-parse HEAD)" = "73743588fe9c39f2f1c780a087d94afac691a189"
           cd /tmp/shaderc
-          python3 utils/git-sync-deps
+          "$manylinux_python" utils/git-sync-deps
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON
           cmake --build build --target glslc --parallel 2
           build/glslc/glslc --version

@@ -19,6 +19,7 @@ from lumi.model_installation import (
     MODEL_MANIFEST_SCHEMA_VERSION,
     Qwen35ModelSpec,
 )
+from lumi.runtime.acceleration import GpuDevice, choose_acceleration
 from lumi.runtime.llama_cpp import (
     LUMI_RUNTIME_API_VERSION,
     LlamaCppChatRuntime,
@@ -27,7 +28,6 @@ from lumi.runtime.llama_cpp import (
     LlamaCppRuntimeError,
     VerifiedModelArtifact,
 )
-from lumi.runtime.acceleration import GpuDevice, choose_acceleration
 
 _GGUF_FILENAME = "Qwen_Qwen3.5-test-Q4_K_M.gguf"
 
@@ -398,7 +398,9 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(criteria([], []))
         await runtime.close()
 
-    async def test_thinking_is_applied_by_template_without_unsupported_binding_argument(self) -> None:
+    async def test_thinking_is_applied_by_template_without_unsupported_binding_argument(
+        self,
+    ) -> None:
         api = FakeLlamaAPI("Answer")
         runtime = self.make_runtime(api)
         await runtime.open()
@@ -621,7 +623,10 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([event.kind for event in events], ["complete"])
         self.assertEqual(events[0].response.message.content, "")
-        self.assertEqual(events[0].response.message.tool_calls[0].arguments, {"query": "Fate/Zero secret"})
+        self.assertEqual(
+            events[0].response.message.tool_calls[0].arguments,
+            {"query": "Fate/Zero secret"},
+        )
         await runtime.close()
 
     async def test_stream_filters_reasoning_and_tool_call_transitions(self) -> None:
@@ -710,7 +715,10 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.message.tool_calls[0].call_id, "call-1")
         self.assertEqual(response.message.tool_calls[0].name, "catalog_search")
         self.assertEqual(response.message.tool_calls[0].arguments, {"query": "Fate/Zero"})
-        self.assertEqual(api.chat_completion_options[0]["tools"][0]["function"]["name"], "catalog_search")
+        self.assertEqual(
+            api.chat_completion_options[0]["tools"][0]["function"]["name"],
+            "catalog_search",
+        )
         await runtime.close()
 
     async def test_structured_tool_call_resets_visible_preamble_before_control_chunks(self) -> None:
@@ -751,10 +759,15 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
         visible_events = "".join(event.text or "" for event in events)
         self.assertNotIn("secret term", visible_events)
         self.assertEqual(events[2].response.message.content, "")
-        self.assertEqual(events[2].response.message.tool_calls[0].arguments, {"query": "secret term"})
+        self.assertEqual(
+            events[2].response.message.tool_calls[0].arguments,
+            {"query": "secret term"},
+        )
         await runtime.close()
 
-    async def test_stream_resets_unmarked_prefix_when_later_channel_changes_visibility(self) -> None:
+    async def test_stream_resets_unmarked_prefix_when_later_channel_changes_visibility(
+        self,
+    ) -> None:
         api = FakeLlamaAPI(
             "unused",
             stream_chunks=[
@@ -931,7 +944,10 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
         deltas = [event.text for event in events if event.kind == "delta"]
         completion = events[-1]
         self.assertEqual("".join(deltas), "Safe answer with `code` and **Markdown**.")
-        self.assertEqual(completion.response.message.content, "Safe answer with `code` and **Markdown**.")
+        self.assertEqual(
+            completion.response.message.content,
+            "Safe answer with `code` and **Markdown**.",
+        )
         await runtime.close()
 
     async def test_stream_cancellation_releases_native_generation_slot(self) -> None:

@@ -8,7 +8,6 @@ integration, then passes the managed model directories to this adapter.
 from __future__ import annotations
 
 import asyncio
-import ctypes
 import gc
 import hashlib
 import json
@@ -41,10 +40,10 @@ from lumi.model_installation import (
     supported_models,
 )
 from lumi.runtime.acceleration import (
+    SUPPORTED_ACCELERATION_MODES,
     AccelerationChoice,
     AccelerationMode,
     GpuDevice,
-    SUPPORTED_ACCELERATION_MODES,
     _cpu_choice,
     choose_acceleration,
     detect_gpu_devices,
