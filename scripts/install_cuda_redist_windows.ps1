@@ -71,6 +71,41 @@ foreach ($component in $components) {
     Remove-Item -LiteralPath $archivePath, $extractPath -Recurse -Force
 }
 
+# Extracting the NVIDIA Visual Studio integration archive does not register its
+# MSBuild customization files with Visual Studio. The Visual Studio CMake
+# generator needs those files in BuildCustomizations to enable the CUDA toolset.
+$cudaProps = Get-ChildItem -LiteralPath $cudaRoot -Filter "CUDA 12.8.props" -File -Recurse |
+    Select-Object -First 1
+if (-not $cudaProps) {
+    throw "Pinned CUDA Visual Studio integration did not provide CUDA 12.8.props"
+}
+
+$integrationPath = $cudaProps.DirectoryName
+foreach ($fileName in @("CUDA 12.8.props", "CUDA 12.8.targets")) {
+    if (-not (Test-Path -LiteralPath (Join-Path $integrationPath $fileName) -PathType Leaf)) {
+        throw "Pinned CUDA Visual Studio integration is missing $fileName"
+    }
+}
+
+$vswherePath = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+if (-not (Test-Path -LiteralPath $vswherePath -PathType Leaf)) {
+    throw "Could not locate Visual Studio Installer's vswhere.exe"
+}
+
+$vsInstallPath = (& $vswherePath -latest -products "*" `
+    -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+    -property installationPath | Select-Object -First 1)
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vsInstallPath)) {
+    throw "Could not locate the installed Visual Studio C++ toolchain"
+}
+
+$buildCustomizationsPath = Join-Path $vsInstallPath "MSBuild\Microsoft\VC\v170\BuildCustomizations"
+New-Item -ItemType Directory -Force -Path $buildCustomizationsPath | Out-Null
+Copy-Item -Path (Join-Path $integrationPath "*") -Destination $buildCustomizationsPath -Force
+
+$cudaGeneratorToolset = "cuda=$cudaRoot"
+Add-Content -LiteralPath $env:GITHUB_ENV -Value "CMAKE_GENERATOR_TOOLSET=$cudaGeneratorToolset"
+
 $requiredFiles = @(
     "bin\nvcc.exe",
     "include\cuda_runtime.h",

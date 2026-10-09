@@ -64,7 +64,7 @@ jobs:
         -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_BACKEND_DL=OFF
         -DGGML_CUDA=ON -DGGML_VULKAN=ON
         -DCMAKE_CUDA_ARCHITECTURES=50-virtual;89-real;120a-real
-      CMAKE_BUILD_PARALLEL_LEVEL: "2"
+      CMAKE_BUILD_PARALLEL_LEVEL: "4"
       CMAKE_GENERATOR: Visual Studio 17 2022
       CMAKE_GENERATOR_PLATFORM: x64
     steps:
@@ -122,6 +122,7 @@ jobs:
           nvcc --version
           if (-not $env:VULKAN_SDK) { throw "The pinned Vulkan SDK was not installed" }
           & "$env:VULKAN_SDK\Bin\glslc.exe" --version
+          Write-Host "CMAKE_GENERATOR_TOOLSET=$env:CMAKE_GENERATOR_TOOLSET"
       - name: Build the pinned CUDA and Vulkan llama.cpp runtime wheel
         run: >-
           python -m pip wheel
@@ -148,6 +149,7 @@ jobs:
   linux-vulkan-tools:
     name: Build pinned glslc for manylinux 2.28
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     container:
       image: quay.io/pypa/manylinux_2_28_x86_64:2026.10.03-1@sha256:39df0042d5cc900b085aa25a0659368b42a0006c54c474299b785b44c1b4ff82
     steps:
