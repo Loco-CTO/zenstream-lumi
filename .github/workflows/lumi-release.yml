@@ -65,15 +65,20 @@ jobs:
         -DGGML_CUDA=ON -DGGML_VULKAN=ON
         -DCMAKE_CUDA_ARCHITECTURES=50-virtual;89-real;120a-real
       CMAKE_BUILD_PARALLEL_LEVEL: "4"
-      CMAKE_GENERATOR: Visual Studio 17 2022
-      CMAKE_GENERATOR_PLATFORM: x64
+      CMAKE_GENERATOR: Ninja
     steps:
       - name: Check out Lumi
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up MSVC for the Ninja CUDA build
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: amd64
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      - name: Install the pinned Ninja build tool
+        run: python -m pip install "ninja==1.13.0"
       - name: Install pinned CUDA build components
         shell: pwsh
         run: ./scripts/install_cuda_redist_windows.ps1
@@ -120,17 +125,20 @@ jobs:
         shell: pwsh
         run: |
           nvcc --version
+          ninja --version
+          cl.exe /Bv
           if (-not $env:VULKAN_SDK) { throw "The pinned Vulkan SDK was not installed" }
           & "$env:VULKAN_SDK\Bin\glslc.exe" --version
-          Write-Host "CMAKE_GENERATOR_TOOLSET=cuda=$env:CUDA_PATH"
       - name: Build the pinned CUDA and Vulkan llama.cpp runtime wheel
         shell: pwsh
         run: |
-          $env:CMAKE_GENERATOR_TOOLSET = "cuda=$env:CUDA_PATH"
+          $env:CUDACXX = Join-Path $env:CUDA_PATH "bin\nvcc.exe"
+          $env:VERBOSE = "1"
           $wheelArgs = @(
             "-m",
             "pip",
             "wheel",
+            "--verbose",
             "--no-deps",
             "--no-binary=llama-cpp-python",
             "--wheel-dir",
