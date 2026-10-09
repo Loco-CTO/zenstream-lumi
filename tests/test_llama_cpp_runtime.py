@@ -4,6 +4,7 @@ import asyncio
 import ctypes
 import hashlib
 import json
+import os
 import struct
 import tempfile
 import threading
@@ -28,6 +29,7 @@ from lumi.runtime.llama_cpp import (
     LlamaCppProtocolError,
     LlamaCppRuntimeError,
     VerifiedModelArtifact,
+    _initialize_backend_registry,
 )
 
 _GGUF_FILENAME = "Qwen_Qwen3.5-test-Q4_K_M.gguf"
@@ -326,6 +328,35 @@ class FakeLlamaAPI:
 
     def list_gpu_devices(self) -> tuple[GpuDevice, ...]:
         return self.gpu_devices
+
+
+class LlamaCppBackendRegistryTests(unittest.TestCase):
+    def test_packaged_backends_load_before_registry_init_once(self) -> None:
+        events: list[tuple[str, object]] = []
+        llama_type = type("FakeLlama", (), {})
+        backend_loader = _FakeNativeFunction(lambda path: events.append(("load", path)))
+        backend_init = _FakeNativeFunction(
+            lambda: events.append(("initialize", None))
+        )
+
+        backend_directory = Path(__file__).resolve().parents[1] / "lumi"
+        encoded_backend_directory = os.fsencode(backend_directory.resolve())
+        api = SimpleNamespace(
+            Llama=llama_type,
+            ggml=SimpleNamespace(ggml_backend_load_all_from_path=backend_loader),
+            ggml_backend_directory=backend_directory,
+            llama_cpp=SimpleNamespace(llama_backend_init=backend_init),
+        )
+
+        _initialize_backend_registry(api)
+        _initialize_backend_registry(api)
+
+        self.assertEqual(
+            events,
+            [("load", encoded_backend_directory), ("initialize", None)],
+        )
+        self.assertEqual(backend_loader.argtypes, [ctypes.c_char_p])
+        self.assertIsNone(backend_loader.restype)
 
 
 class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):

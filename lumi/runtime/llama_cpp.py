@@ -12,6 +12,7 @@ import ctypes
 import gc
 import hashlib
 import json
+import logging
 import os
 import re
 import stat
@@ -63,6 +64,9 @@ _TOOL_CALL_RE = re.compile(
 _TOOL_CONTROL_TOKEN_RE = re.compile(r"<\|(?:tool_[^|>\r\n]*|function_call[^|>\r\n]*)\|>")
 _PARAMETER_RE = re.compile(r"<parameter=([A-Za-z0-9_-]{1,64})>(.*?)</parameter>", re.DOTALL)
 _CHANNEL_RE = re.compile(r"<\|channel\|>(analysis|final|commentary|summary|justify|confidence)\b")
+_BACKEND_REGISTRY_LOCK = threading.Lock()
+_LOADED_BACKEND_REGISTRIES: dict[int, Any] = {}
+logger = logging.getLogger(__name__)
 
 
 class LlamaCppRuntimeError(RuntimeError):
@@ -941,6 +945,7 @@ class LlamaCppChatRuntime(ChatRuntime):
             raise LlamaCppRuntimeError(
                 "Lumi's embedded runtime dependency is unavailable in this installation"
             ) from error
+        library_directory = Path(llama_cpp.__file__).resolve().parent / "lib"
         self._api = SimpleNamespace(
             Llama=llama_cpp.Llama,
             Jinja2ChatFormatter=Jinja2ChatFormatter,
@@ -948,9 +953,8 @@ class LlamaCppChatRuntime(ChatRuntime):
             llama_cpp=llama_cpp,
             llama_cpp_bindings=llama_cpp_bindings,
             ggml=llama_ggml.libggml,
-            ggml_base=load_shared_library(
-                "ggml-base", Path(llama_cpp.__file__).resolve().parent / "lib"
-            ),
+            ggml_base=load_shared_library("ggml-base", library_directory),
+            ggml_backend_directory=library_directory,
         )
         return self._api
 
@@ -1064,6 +1068,8 @@ def _initialize_backend_registry(api: Any) -> None:
     class flag to avoid repeating the same global initialization in its constructor.
     """
 
+    _load_packaged_backend_plugins(api)
+
     llama_type = getattr(api, "Llama", None)
     backend_initialized_attribute = "_Llama__backend_initialized"
     if (
@@ -1085,6 +1091,40 @@ def _initialize_backend_registry(api: Any) -> None:
         ) from error
     if isinstance(llama_type, type):
         setattr(llama_type, backend_initialized_attribute, True)
+
+
+def _load_packaged_backend_plugins(api: Any) -> None:
+    """Load dynamic backends from llama-cpp-python's installed package directory.
+
+    The wheel keeps CUDA/Vulkan plugins beside its ggml libraries. llama.cpp's
+    default backend search checks the executable and working directories, which
+    do not reliably include Python's site-packages directory.
+    """
+
+    library = getattr(api, "ggml", None)
+    backend_directory = getattr(api, "ggml_backend_directory", None)
+    if library is None or backend_directory is None:
+        return
+
+    library_id = id(library)
+    with _BACKEND_REGISTRY_LOCK:
+        if _LOADED_BACKEND_REGISTRIES.get(library_id) is library:
+            return
+        try:
+            directory = Path(backend_directory).resolve()
+            if not directory.is_dir():
+                raise OSError("llama.cpp package library directory is unavailable")
+            load_all = library.ggml_backend_load_all_from_path
+            load_all.argtypes = [ctypes.c_char_p]
+            load_all.restype = None
+            load_all(os.fsencode(directory))
+        except Exception:
+            logger.warning(
+                "Could not load package-local llama.cpp backends; CPU fallback remains available",
+                exc_info=True,
+            )
+            return
+        _LOADED_BACKEND_REGISTRIES[library_id] = library
 
 
 def _metadata_layer_count(metadata: Any) -> int | None:
