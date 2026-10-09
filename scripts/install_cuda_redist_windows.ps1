@@ -93,11 +93,17 @@ if (-not (Test-Path -LiteralPath $vswherePath -PathType Leaf)) {
 }
 
 $vsInstallPath = (& $vswherePath -latest -products "*" `
-    -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+    -version "[17.0,18.0)" `
     -property installationPath | Select-Object -First 1)
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vsInstallPath)) {
-    throw "Could not locate the installed Visual Studio C++ toolchain"
+    throw "Could not locate the installed Visual Studio 2022 instance"
 }
+
+$msvcToolchainPath = Join-Path $vsInstallPath "VC\Tools\MSVC"
+if (-not (Test-Path -LiteralPath $msvcToolchainPath -PathType Container)) {
+    throw "Visual Studio 2022 does not contain the MSVC toolchain: $msvcToolchainPath"
+}
+Write-Host "Using Visual Studio 2022 at $vsInstallPath"
 
 $buildCustomizationsPath = Join-Path $vsInstallPath "MSBuild\Microsoft\VC\v170\BuildCustomizations"
 New-Item -ItemType Directory -Force -Path $buildCustomizationsPath | Out-Null
