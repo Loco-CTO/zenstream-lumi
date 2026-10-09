@@ -57,13 +57,12 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 45
     env:
-      # Keep a broad PTX fallback plus a native Ada target. PTX is JIT-compiled
-      # for newer GPUs, avoiding a separate Blackwell image in the slow CI build;
-      # Vulkan remains the broad cross-vendor path.
+      # Keep a Turing+ PTX fallback and native Ampere image for common RTX 30/40
+      # GPUs. Newer GPU generations can JIT the PTX; Vulkan stays cross-vendor.
       CMAKE_ARGS: >-
         -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_BACKEND_DL=ON
         -DGGML_CUDA=ON -DGGML_VULKAN=ON
-        -DCMAKE_CUDA_ARCHITECTURES=50-virtual;89-real
+        -DCMAKE_CUDA_ARCHITECTURES=75-virtual;86-real
       CMAKE_BUILD_PARALLEL_LEVEL: "4"
       CMAKE_GENERATOR: Ninja
     steps:
@@ -284,7 +283,7 @@ jobs:
             export CUDACXX="$CUDA_HOME/bin/nvcc"
             export PATH="$CUDA_HOME/bin:$PATH"
             export LD_LIBRARY_PATH="$CUDA_HOME/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-            CMAKE_ARGS="$CMAKE_ARGS -DGGML_BACKEND_DL=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DCMAKE_CUDA_ARCHITECTURES=50-virtual;89-real -DVulkan_GLSLC_EXECUTABLE=$PWD/build-tools/glslc -DSPIRV-Headers_DIR=$SPIRV_HEADERS_PREFIX/share/cmake/SPIRV-Headers"
+            CMAKE_ARGS="$CMAKE_ARGS -DGGML_BACKEND_DL=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DCMAKE_CUDA_ARCHITECTURES=75-virtual;86-real -DVulkan_GLSLC_EXECUTABLE=$PWD/build-tools/glslc -DSPIRV-Headers_DIR=$SPIRV_HEADERS_PREFIX/share/cmake/SPIRV-Headers"
           else
             CMAKE_ARGS="$CMAKE_ARGS -DGGML_BACKEND_DL=OFF -DGGML_CUDA=OFF -DGGML_VULKAN=OFF"
           fi
