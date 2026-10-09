@@ -61,7 +61,7 @@ jobs:
       # modern GPUs. Extra CUDA images made wheel builds spend hours in nvcc;
       # Vulkan remains the broad cross-vendor path.
       CMAKE_ARGS: >-
-        -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_BACKEND_DL=OFF
+        -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_BACKEND_DL=ON
         -DGGML_CUDA=ON -DGGML_VULKAN=ON
         -DCMAKE_CUDA_ARCHITECTURES=50-virtual;89-real;120a-real
       CMAKE_BUILD_PARALLEL_LEVEL: "4"
@@ -224,7 +224,8 @@ jobs:
     timeout-minutes: 45
     env:
       CMAKE_ARGS: >-
-        -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_BACKEND_DL=OFF
+        -DGGML_NATIVE=OFF -DGGML_OPENMP=ON
+        -DCMAKE_CXX_STANDARD_LIBRARIES=-lstdc++fs
         -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++
       CMAKE_BUILD_PARALLEL_LEVEL: "4"
       CC: /usr/bin/gcc
@@ -283,9 +284,9 @@ jobs:
             export CUDACXX="$CUDA_HOME/bin/nvcc"
             export PATH="$CUDA_HOME/bin:$PATH"
             export LD_LIBRARY_PATH="$CUDA_HOME/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-            CMAKE_ARGS="$CMAKE_ARGS -DGGML_CUDA=ON -DGGML_VULKAN=ON -DCMAKE_CUDA_ARCHITECTURES=50-virtual;89-real;120a-real -DVulkan_GLSLC_EXECUTABLE=$PWD/build-tools/glslc -DSPIRV-Headers_DIR=$SPIRV_HEADERS_PREFIX/share/cmake/SPIRV-Headers"
+            CMAKE_ARGS="$CMAKE_ARGS -DGGML_BACKEND_DL=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DCMAKE_CUDA_ARCHITECTURES=50-virtual;89-real;120a-real -DVulkan_GLSLC_EXECUTABLE=$PWD/build-tools/glslc -DSPIRV-Headers_DIR=$SPIRV_HEADERS_PREFIX/share/cmake/SPIRV-Headers"
           else
-            CMAKE_ARGS="$CMAKE_ARGS -DGGML_CUDA=OFF -DGGML_VULKAN=OFF"
+            CMAKE_ARGS="$CMAKE_ARGS -DGGML_BACKEND_DL=OFF -DGGML_CUDA=OFF -DGGML_VULKAN=OFF"
           fi
           export CMAKE_ARGS
           "$CC" --version
