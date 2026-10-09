@@ -57,13 +57,13 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 45
     env:
-      # Keep one generic PTX fallback plus native targets for common modern GPUs.
-      # The llama.cpp default compiles many more CUDA images and made wheel builds
-      # spend hours in nvcc; Vulkan remains available as the broad cross-vendor path.
+      # Keep a generic PTX fallback plus native targets for common
+      # modern GPUs. Extra CUDA images made wheel builds spend hours in nvcc;
+      # Vulkan remains the broad cross-vendor path.
       CMAKE_ARGS: >-
         -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_BACKEND_DL=OFF
         -DGGML_CUDA=ON -DGGML_VULKAN=ON
-        -DCMAKE_CUDA_ARCHITECTURES=50-virtual;86-real;89-real;90-virtual;120a-real
+        -DCMAKE_CUDA_ARCHITECTURES=50-virtual;89-real;120a-real
       CMAKE_BUILD_PARALLEL_LEVEL: "2"
       CMAKE_GENERATOR: Visual Studio 17 2022
       CMAKE_GENERATOR_PLATFORM: x64
@@ -74,12 +74,9 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Install the pinned CUDA toolkit
-        uses: Jimver/cuda-toolkit@b6fc3a9f3f15256d9d94ffe1254f9c5a2565cde6 # v0.2.30
-        with:
-          cuda: "12.8.1"
-          method: network
-          sub-packages: '["nvcc", "cudart", "cudart_dev", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
+      - name: Install pinned CUDA build components
+        shell: pwsh
+        run: ./scripts/install_cuda_redist_windows.ps1
       - name: Install the pinned Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@3c53c378c9bfbb2ea122a1cc164a837d4004c871 # v1.5.2
         with:
@@ -246,7 +243,7 @@ jobs:
             export CUDACXX="$CUDA_HOME/bin/nvcc"
             export PATH="$CUDA_HOME/bin:$PATH"
             export LD_LIBRARY_PATH="$CUDA_HOME/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-            CMAKE_ARGS="$CMAKE_ARGS -DGGML_CUDA=ON -DGGML_VULKAN=ON -DCMAKE_CUDA_ARCHITECTURES=50-virtual;86-real;89-real;90-virtual;120a-real -DVulkan_GLSLC_EXECUTABLE=$PWD/build-tools/glslc -DSPIRV-Headers_DIR=$SPIRV_HEADERS_PREFIX/share/cmake/SPIRV-Headers"
+            CMAKE_ARGS="$CMAKE_ARGS -DGGML_CUDA=ON -DGGML_VULKAN=ON -DCMAKE_CUDA_ARCHITECTURES=50-virtual;89-real;120a-real -DVulkan_GLSLC_EXECUTABLE=$PWD/build-tools/glslc -DSPIRV-Headers_DIR=$SPIRV_HEADERS_PREFIX/share/cmake/SPIRV-Headers"
           else
             CMAKE_ARGS="$CMAKE_ARGS -DGGML_CUDA=OFF -DGGML_VULKAN=OFF"
           fi
