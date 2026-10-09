@@ -87,21 +87,45 @@ foreach ($fileName in @("CUDA 12.8.props", "CUDA 12.8.targets")) {
     }
 }
 
-$vswherePath = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-if (-not (Test-Path -LiteralPath $vswherePath -PathType Leaf)) {
-    throw "Could not locate Visual Studio Installer's vswhere.exe"
+$vsInstallPath = $null
+$vsRoots = @()
+if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+    $vsRoots += Join-Path $env:ProgramFiles "Microsoft Visual Studio\2022"
+}
+if (-not [string]::IsNullOrWhiteSpace(${env:ProgramFiles(x86)})) {
+    $vsRoots += Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\2022"
 }
 
-$vsInstallPath = (& $vswherePath -latest -products "*" `
-    -version "[17.0,18.0)" `
-    -property installationPath | Select-Object -First 1)
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vsInstallPath)) {
-    throw "Could not locate the installed Visual Studio 2022 instance"
+foreach ($vsRoot in $vsRoots) {
+    if (-not (Test-Path -LiteralPath $vsRoot -PathType Container)) {
+        continue
+    }
+    foreach ($candidate in Get-ChildItem -LiteralPath $vsRoot -Directory) {
+        $candidateMsvcPath = Join-Path $candidate.FullName "VC\Tools\MSVC"
+        if (Test-Path -LiteralPath $candidateMsvcPath -PathType Container) {
+            $vsInstallPath = $candidate.FullName
+            break
+        }
+    }
+    if ($vsInstallPath) {
+        break
+    }
+}
+
+if (-not $vsInstallPath) {
+    $vswherePath = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path -LiteralPath $vswherePath -PathType Leaf) {
+        $vsInstallPath = (& $vswherePath -latest -products "*" `
+            -property installationPath | Select-Object -First 1)
+    }
+}
+if ([string]::IsNullOrWhiteSpace($vsInstallPath)) {
+    throw "Could not locate the installed Visual Studio 2022 C++ toolchain"
 }
 
 $msvcToolchainPath = Join-Path $vsInstallPath "VC\Tools\MSVC"
 if (-not (Test-Path -LiteralPath $msvcToolchainPath -PathType Container)) {
-    throw "Visual Studio 2022 does not contain the MSVC toolchain: $msvcToolchainPath"
+    throw "Visual Studio does not contain the MSVC toolchain: $msvcToolchainPath"
 }
 Write-Host "Using Visual Studio 2022 at $vsInstallPath"
 
