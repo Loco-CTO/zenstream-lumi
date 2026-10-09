@@ -78,6 +78,8 @@ jobs:
         uses: Jimver/cuda-toolkit@b6fc3a9f3f15256d9d94ffe1254f9c5a2565cde6 # v0.2.30
         with:
           cuda: "12.8.1"
+          method: network
+          sub-packages: '["nvcc", "cudart", "cudart_dev", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
       - name: Install the pinned Vulkan SDK
         uses: jakoch/install-vulkan-sdk-action@3c53c378c9bfbb2ea122a1cc164a837d4004c871 # v1.5.2
         with:
@@ -389,5 +391,4 @@ jobs:
           --verify-tag
           --generate-notes
           --title "Lumi ${GITHUB_REF_NAME}"
-
 
