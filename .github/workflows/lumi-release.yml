@@ -149,11 +149,33 @@ jobs:
       - name: Bundle backend dependencies and verify GPU backends
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $runtimeWheels = @(Get-ChildItem -LiteralPath "dist/wheels/runtime" -Filter "*.whl")
+          if ($runtimeWheels.Count -ne 1) {
+            throw "Expected one unbundled Windows runtime wheel, found $($runtimeWheels.Count)"
+          }
           python -m pip install "delvewheel==1.13.1"
-          delvewheel repair --analyze-existing --add-path "$env:CUDA_PATH\bin;$env:VULKAN_SDK\Bin" --exclude nvcuda.dll --wheel-dir dist/wheels/repaired dist/wheels/runtime/*.whl
-          Remove-Item dist/wheels/runtime/*.whl
-          Move-Item dist/wheels/repaired/*.whl dist/wheels/runtime/
-          python -c "from pathlib import Path; from zipfile import ZipFile; p=next(Path('dist/wheels/runtime').glob('*.whl')); names=[name.casefold() for name in ZipFile(p).namelist()]; missing=[backend for backend in ('ggml-cpu','ggml-cuda','ggml-vulkan') if not any(backend in name for name in names)]; print('Wheel:', p.name); raise SystemExit(f'Missing required backends: {missing}' if missing else 0)"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to install delvewheel (exit code $LASTEXITCODE)"
+          }
+          $repairedDirectory = "dist/wheels/repaired"
+          if (Test-Path -LiteralPath $repairedDirectory) {
+            Remove-Item -LiteralPath $repairedDirectory -Recurse -Force
+          }
+          delvewheel repair --ignore-existing --analyze-existing --add-path "$env:CUDA_PATH\bin;$env:VULKAN_SDK\Bin" --exclude nvcuda.dll --wheel-dir $repairedDirectory $runtimeWheels[0].FullName
+          if ($LASTEXITCODE -ne 0) {
+            throw "delvewheel repair failed (exit code $LASTEXITCODE)"
+          }
+          $repairedWheels = @(Get-ChildItem -LiteralPath $repairedDirectory -Filter "*.whl")
+          if ($repairedWheels.Count -ne 1) {
+            throw "Expected one repaired Windows runtime wheel, found $($repairedWheels.Count)"
+          }
+          Remove-Item -LiteralPath $runtimeWheels[0].FullName
+          Move-Item -LiteralPath $repairedWheels[0].FullName -Destination "dist/wheels/runtime/"
+          python -c "from pathlib import Path; from zipfile import ZipFile; p=next(Path('dist/wheels/runtime').glob('*.whl')); names=[name.casefold() for name in ZipFile(p).namelist()]; missing=[backend for backend in ('ggml-base','ggml-cpu','ggml-cuda','ggml-vulkan') if not any(backend in name for name in names)]; print('Wheel:', p.name); raise SystemExit(f'Missing required backends: {missing}' if missing else 0)"
+          if ($LASTEXITCODE -ne 0) {
+            throw "The repaired Windows wheel is missing required GPU backend DLLs (exit code $LASTEXITCODE)"
+          }
       - name: Save the platform runtime wheel
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
