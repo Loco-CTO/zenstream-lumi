@@ -133,7 +133,8 @@ jobs:
             "wheel",
             "--no-deps",
             "--no-binary=llama-cpp-python",
-            "--wheel-dir dist/wheels/runtime",
+            "--wheel-dir",
+            "dist/wheels/runtime",
             "llama-cpp-python==0.3.35"
           )
           python @wheelArgs
