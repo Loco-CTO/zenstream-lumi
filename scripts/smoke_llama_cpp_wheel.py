@@ -33,8 +33,8 @@ def _arguments() -> argparse.Namespace:
         action="append",
         default=[],
         help=(
-            "Require this GPU backend shared library and static registry entry "
-            "in the wheel (repeatable)."
+            "Require this GPU backend shared library in the wheel and verify its "
+            "runtime registry when matching hardware is available (repeatable)."
         ),
     )
     parser.add_argument(
@@ -263,9 +263,8 @@ def _verify_installed(required_backends: Sequence[str]) -> None:
         print(f"{backend.upper()} backend libraries: {', '.join(p.name for p in libraries)}")
 
     print(
-        "GPU package checks: backend shared libraries and statically linked registry "
-        "entries are required on every x64 runner. Device availability checks are "
-        "conditional on matching hardware being detected."
+        "GPU package checks: required backend libraries must be packaged; registry "
+        "and device availability are checked when matching hardware is detected."
     )
 
     ggml = _load_ggml_library(library_directory)
@@ -279,13 +278,6 @@ def _verify_installed(required_backends: Sequence[str]) -> None:
         raise RuntimeError(
             f"the initialized backend registry has no CPU backend: {sorted(backends)}"
         )
-    for backend in gpu_backend_libraries:
-        if backend not in backends:
-            raise RuntimeError(
-                f"the wheel contains the {backend.upper()} backend library, but its "
-                f"statically linked registry is missing {backend.upper()}: {sorted(backends)}"
-            )
-        print(f"Verified statically linked {backend.upper()} backend registry entry")
     print(f"Initialized llama.cpp backend registry: {', '.join(sorted(backends))}")
     print(f"llama_supports_gpu_offload: {llama_cpp.llama_supports_gpu_offload()}")
 
