@@ -91,3 +91,5 @@ Add-Content -LiteralPath $env:GITHUB_ENV -Value "CUDA_PATH=$cudaRoot"
 Add-Content -LiteralPath $env:GITHUB_ENV -Value "CUDA_PATH_V12_8=$cudaRoot"
 Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $cudaRoot "bin")
 Write-Host "Pinned CUDA 12.8.1 build components installed under $cudaRoot"
+# Robocopy returns nonzero codes for successful copies; validations above decide success.
+exit 0
