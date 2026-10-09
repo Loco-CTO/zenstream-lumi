@@ -29,7 +29,7 @@ $components = @(
     @{
         Name = "cuBLAS runtime and headers"
         File = "libcublas-windows-x86_64-12.8.4.1-archive.zip"
-        Url = "https://developer.download.nvidia.com/compute/cublas/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-12.8.4.1-archive.zip"
+        Url = "https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-12.8.4.1-archive.zip"
         Sha256 = "57a470112cec7e112c95253dde8b3c7184d795dbd92b0bde77a4cb7f8c94c8aa"
     },
     @{
