@@ -4,7 +4,7 @@ Lumi is ZenStream's local, read-only conversational media assistant. It uses the
 
 Lumi is developed and released from its own repository as the `zenstream-lumi` Python package. ZenStream Orchestrator installs a supported Lumi release into its managed runtime directory only after an administrator explicitly enables the integration. Orchestrator then imports the installed package and calls it in-process. Lumi source remains in this repository; it is not copied into the Orchestrator source tree, and Lumi does not require a separately deployed service.
 
-The runtime loads supported Qwen3.5 GGUF files lazily into the Orchestrator process through the CPU-only `llama-cpp-python` binding. Its pinned native wheels are optional release assets, so an Orchestrator that has not enabled Lumi does not need the inference runtime. Model weights stay in the host-supplied data directory and are never committed to this repository.
+The runtime loads supported Qwen3.5 GGUF files lazily into the Orchestrator process through the `llama-cpp-python` binding. Release wheels keep CPU inference available everywhere; Windows x64 and Linux x64 wheels also contain CUDA and Vulkan backends. Linux ARM64 wheels remain CPU-only. Its pinned native wheels are optional release assets, so an Orchestrator that has not enabled Lumi does not need the inference runtime. Model weights stay in the host-supplied data directory and are never committed to this repository.
 
 ## Runtime package contract
 
@@ -51,12 +51,16 @@ installer.remove_model("qwen3.5:0.8b")
 
 `install_model` is synchronous because it downloads and hashes a multi-gigabyte GGUF. Async hosts should call it from a bounded worker lane. Progress events carry a monotonic `current` value bounded by `total=10000`. Importing Lumi or starting the runtime never downloads weights. The installed GGUF files stay outside this repository.
 
-The release workflow builds a host-specific CPU `llama-cpp-python` wheel for Windows x64, Linux x64, and Linux ARM64 with CPython 3.12, 3.13, and 3.14. The optional live smoke and benchmark scripts use an already installed model and never download one:
+The release workflow builds one host-specific `llama-cpp-python` wheel for each supported Python ABI and platform. Windows x64 and Linux x64 builds include CPU, CUDA, and Vulkan backends; Linux ARM64 builds include CPU support. The wheel always contains the CPU backend as the fallback, and the same verified GGUF can be used in either mode. CUDA/Vulkan support depends on compatible GPU drivers already provided by the host operating system. Lumi does not build HIP/ROCm or Metal wheels because those targets are not validated and the project has no macOS release target. See [runtime acceleration and streaming](docs/runtime-acceleration-and-streaming.md) for the platform details and benchmark methodology.
+
+The optional live smoke and benchmark scripts use an already installed model and never download one:
 
 ```powershell
 python scripts/smoke_llama_cpp.py --models-dir C:\path\to\lumi-models --model qwen3.5:0.8b
-python scripts/benchmark_llama_cpp.py --models-dir C:\path\to\lumi-models --model qwen3.5:0.8b --runs 3
+python scripts/benchmark_llama_cpp.py --models-dir C:\path\to\lumi-models --model qwen3.5:2b --runs 4 --json-out lumi-benchmark.json
 ```
+
+The benchmark defaults to comparing `cpu_only` with `automatic`. It reports time to first visible text, prompt and generation timing, tokenizer-counted visible answer tokens per second, runtime end-to-end latency, process RAM, best-effort NVIDIA system VRAM, and the selected backend. Visible answer throughput excludes hidden reasoning and tool-call tokens, so it measures user-visible generation speed rather than the binding's unavailable full completion token rate. `--mode` can be repeated to select a different comparison. Runtime end-to-end timing excludes Lumi tools, web research, service/network overhead, and browser rendering; verify those separately in the running Orchestrator UI.
 
 ## Conversation and privacy
 

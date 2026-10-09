@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 import sqlite3
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from typing import Literal
 from uuid import uuid4
 
 from lumi.agent import AgentLimits, ChatAgent, InferenceError
@@ -17,6 +18,7 @@ from lumi.contracts import (
     ChatMessage,
     ChatRuntime,
     EntityReference,
+    StreamResetReason,
 )
 from lumi.delegation import DelegationClaims, DelegationError, DelegationVerifier
 from lumi.model_catalog import ModelCatalog, ModelConfigurationError, QwenModelOption
@@ -47,6 +49,47 @@ class LumiServiceBusy(RuntimeError):
 class ChatTurn:
     conversation: StoredConversation
     answer: ChatAnswer
+
+
+@dataclass(frozen=True, slots=True)
+class LumiStreamEvent:
+    """A visible delta, partial-turn reset, or authoritative completed chat turn."""
+
+    kind: Literal["delta", "reset", "complete"]
+    text: str | None = None
+    turn: ChatTurn | None = None
+    reason: StreamResetReason | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind == "delta":
+            if (
+                not isinstance(self.text, str)
+                or not self.text
+                or self.turn is not None
+                or self.reason is not None
+            ):
+                raise ValueError("A Lumi delta must contain only nonempty visible text")
+        elif self.kind == "reset":
+            if (
+                self.text is not None
+                or self.turn is not None
+                or self.reason not in {"intermediate", "cpu_fallback"}
+            ):
+                raise ValueError("A Lumi stream reset must contain only a safe reason")
+        elif self.kind == "complete":
+            if (
+                self.text is not None
+                or self.reason is not None
+                or not isinstance(self.turn, ChatTurn)
+            ):
+                raise ValueError("A Lumi completion must carry its saved chat turn")
+        else:
+            raise ValueError("Unsupported Lumi stream event")
+
+
+@dataclass(frozen=True, slots=True)
+class _StreamFailure:
+    error: BaseException
 
 
 class _ConversationLockPool:
@@ -185,6 +228,63 @@ class LumiConversationService:
             thinking=thinking,
         )
 
+    async def stream_chat_for_account(
+        self,
+        account_id: str,
+        conversation_id: str,
+        user_text: str,
+        *,
+        model: str | None = None,
+        thinking: bool | None = None,
+    ) -> AsyncIterator[LumiStreamEvent]:
+        """Stream safe text while running the same single chat turn as ``chat_for_account``."""
+
+        owner_id = _validate_account_id(account_id)
+        queue: asyncio.Queue[LumiStreamEvent | _StreamFailure] = asyncio.Queue()
+
+        async def on_delta(text: str) -> None:
+            await queue.put(LumiStreamEvent(kind="delta", text=text))
+
+        async def on_reset(reason: StreamResetReason) -> None:
+            await queue.put(LumiStreamEvent(kind="reset", reason=reason))
+
+        async def run_turn() -> None:
+            try:
+                turn = await self._run_chat(
+                    owner_id,
+                    conversation_id,
+                    user_text,
+                    create_if_missing=True,
+                    delegation_token=None,
+                    model=model,
+                    thinking=thinking,
+                    on_delta=on_delta,
+                    on_reset=on_reset,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                await queue.put(_StreamFailure(error))
+            else:
+                await queue.put(LumiStreamEvent(kind="complete", turn=turn))
+
+        task = asyncio.create_task(run_turn())
+        try:
+            while True:
+                event = await queue.get()
+                if isinstance(event, _StreamFailure):
+                    raise event.error
+                yield event
+                if event.kind == "complete":
+                    return
+        finally:
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
     async def _run_chat(
         self,
         account_id: str,
@@ -195,6 +295,8 @@ class LumiConversationService:
         delegation_token: str | None,
         model: str | None,
         thinking: bool | None,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reset: Callable[[StreamResetReason], Awaitable[None]] | None = None,
     ) -> ChatTurn:
         account_id = _validate_account_id(account_id)
         try:
@@ -207,6 +309,8 @@ class LumiConversationService:
                     user_text,
                     model,
                     thinking,
+                    on_delta,
+                    on_reset,
                 )
         except TimeoutError as error:
             raise InferenceError("The chat turn exceeded Lumi's configured deadline") from error
@@ -220,6 +324,8 @@ class LumiConversationService:
         user_text: str,
         model: str | None,
         thinking: bool | None,
+        on_delta: Callable[[str], Awaitable[None]] | None,
+        on_reset: Callable[[StreamResetReason], Awaitable[None]] | None,
     ) -> ChatTurn:
         async with self._conversation_locks.hold(
             _conversation_lock_key(account_id, conversation_id)
@@ -277,7 +383,13 @@ class LumiConversationService:
                     self._runtime,
                     self._tools,
                     self._agent_limits,
-                ).answer(context, list(history), user_text)
+                ).answer(
+                    context,
+                    list(history),
+                    user_text,
+                    on_delta=on_delta,
+                    on_reset=on_reset,
+                )
             if not answer.markdown.strip():
                 raise InferenceError("The model returned no user-visible answer")
             updated = await asyncio.to_thread(

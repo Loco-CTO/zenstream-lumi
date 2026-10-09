@@ -513,7 +513,7 @@ class SearXNGSearchTool:
             provider = _bounded_plain_text(row.get("source"), 120)
             source = Source(
                 url=validated_url.url,
-                website_name=provider or validated_url.host[:120],
+                website_name=validated_url.host[:120],
                 title=title or validated_url.host,
                 favicon_url=_favicon_url(validated_url.host),
             )
