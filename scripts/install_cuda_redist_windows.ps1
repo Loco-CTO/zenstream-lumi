@@ -87,6 +87,12 @@ foreach ($fileName in @("CUDA 12.8.props", "CUDA 12.8.targets")) {
     }
 }
 
+$expectedCudaIntegrationPath = Join-Path $cudaRoot "extras\visual_studio_integration\MSBuildExtensions"
+if ([System.IO.Path]::GetFullPath($integrationPath) -ne [System.IO.Path]::GetFullPath($expectedCudaIntegrationPath)) {
+    New-Item -ItemType Directory -Force -Path $expectedCudaIntegrationPath | Out-Null
+    Copy-Item -Path (Join-Path $integrationPath "*") -Destination $expectedCudaIntegrationPath -Force
+}
+
 $vsInstallPath = $null
 $vsRoots = @()
 if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
@@ -131,7 +137,7 @@ Write-Host "Using Visual Studio 2022 at $vsInstallPath"
 
 $buildCustomizationsPath = Join-Path $vsInstallPath "MSBuild\Microsoft\VC\v170\BuildCustomizations"
 New-Item -ItemType Directory -Force -Path $buildCustomizationsPath | Out-Null
-Copy-Item -Path (Join-Path $integrationPath "*") -Destination $buildCustomizationsPath -Force
+Copy-Item -Path (Join-Path $expectedCudaIntegrationPath "*") -Destination $buildCustomizationsPath -Force
 
 $cudaGeneratorToolset = "cuda=$cudaRoot"
 Add-Content -LiteralPath $env:GITHUB_ENV -Value "CMAKE_GENERATOR_TOOLSET=$cudaGeneratorToolset"
