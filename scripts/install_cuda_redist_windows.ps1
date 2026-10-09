@@ -139,9 +139,6 @@ $buildCustomizationsPath = Join-Path $vsInstallPath "MSBuild\Microsoft\VC\v170\B
 New-Item -ItemType Directory -Force -Path $buildCustomizationsPath | Out-Null
 Copy-Item -Path (Join-Path $expectedCudaIntegrationPath "*") -Destination $buildCustomizationsPath -Force
 
-$cudaGeneratorToolset = "cuda=$cudaRoot"
-Add-Content -LiteralPath $env:GITHUB_ENV -Value "CMAKE_GENERATOR_TOOLSET=$cudaGeneratorToolset"
-
 $requiredFiles = @(
     "bin\nvcc.exe",
     "include\cuda_runtime.h",

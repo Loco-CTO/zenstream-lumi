@@ -122,14 +122,21 @@ jobs:
           nvcc --version
           if (-not $env:VULKAN_SDK) { throw "The pinned Vulkan SDK was not installed" }
           & "$env:VULKAN_SDK\Bin\glslc.exe" --version
-          Write-Host "CMAKE_GENERATOR_TOOLSET=$env:CMAKE_GENERATOR_TOOLSET"
+          Write-Host "CMAKE_GENERATOR_TOOLSET=cuda=$env:CUDA_PATH"
       - name: Build the pinned CUDA and Vulkan llama.cpp runtime wheel
-        run: >-
-          python -m pip wheel
-          --no-deps
-          --no-binary=llama-cpp-python
-          --wheel-dir dist/wheels/runtime
-          "llama-cpp-python==0.3.35"
+        shell: pwsh
+        run: |
+          $env:CMAKE_GENERATOR_TOOLSET = "cuda=$env:CUDA_PATH"
+          $wheelArgs = @(
+            "-m",
+            "pip",
+            "wheel",
+            "--no-deps",
+            "--no-binary=llama-cpp-python",
+            "--wheel-dir dist/wheels/runtime",
+            "llama-cpp-python==0.3.35"
+          )
+          python @wheelArgs
       - name: Bundle backend dependencies and verify GPU backends
         shell: pwsh
         run: |
