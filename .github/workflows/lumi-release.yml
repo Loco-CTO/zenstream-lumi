@@ -1,3 +1,59 @@
+STATUS=
+C:/Users/mrhom/Documents/VSCode/zenstream/zenstream-lumi                                                     a0981ae [main]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/chore-lumi-v0-2-0-release                a0f71f2 [chore-lumi-v0-2-0-release]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/chore-lumi-v0-3-3-release                4fc7910 [chore-lumi-v0-3-3-release]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/chore-lumi-v0-3-5-release                9c92925 [chore-lumi-v0-3-5-release]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/chore-lumi-v0-3-7-release                a0981ae [chore-lumi-v0-3-7-release]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-admin-controls                 b8e609f [feat-lumi-admin-controls]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-benchmark-acceptance-20261008  1c288aa [feat-lumi-benchmark-acceptance-20261008]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-benchmark-harness              87e23df [feat-lumi-benchmark-harness]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-chat-core                      afd44ab [feat-lumi-chat-core]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-cpython-314-release            50148f9 [feat-lumi-cpython-314-release]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-ddgs-default-search            1140f78 [feat-lumi-ddgs-default-search]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-gpu-streaming-runtime          30b31f3 [feat-lumi-gpu-streaming-runtime]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-inprocess-service              7dba521 [feat-lumi-inprocess-service]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-live-benchmarks                0ce579c [feat-lumi-live-benchmarks]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-llama-cpp-runtime              d1dd27c [feat-lumi-llama-cpp-runtime]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-model-installation             b35ad4c [feat-lumi-model-installation]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-orchestrator-tools             2d32944 [feat-lumi-orchestrator-tools]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-ort-genai-runtime              42ac8c7 [feat-lumi-ort-genai-runtime]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-qwen-runtime                   243075c [feat-lumi-qwen-runtime]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-release-workflow               c9af660 [feat-lumi-release-workflow]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-release-workflow-v2            1397635 [feat-lumi-release-workflow-v2]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-web-research                   a397332 [feat-lumi-web-research]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-zero-config-web-search         4cd133f [feat-lumi-zero-config-web-search]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/feat-lumi-zero-config-web-search-v2      25c3175 [feat-lumi-zero-config-web-search-v2]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-benchmark-vram-workspace        fb1d88e [fix-lumi-benchmark-vram-workspace]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-benchmark-worker                87e23df [fix-lumi-benchmark-worker]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-chinese-fallback                0064b46 [fix-lumi-chinese-fallback]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-chinese-query-privacy           8a50f34 [fix-lumi-chinese-query-privacy]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-ci-wheel-duration               202e182 [fix-lumi-ci-wheel-duration]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-corrupt-model-recovery          ab7f3ed [fix-lumi-corrupt-model-recovery]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-gpu-streaming-ci                f684407 [fix-lumi-gpu-streaming-ci]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-grounding-and-catalog           9479664 [fix-lumi-grounding-and-catalog]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-library-grounding               8c867a1 [fix-lumi-library-grounding]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-linux-cuda-path                 1ca8f6b [fix-lumi-linux-cuda-path]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-linux-glslc-path                e16ae72 [fix-lumi-linux-glslc-path]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-linux-spirv-config              9500c2c [fix-lumi-linux-spirv-config]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-live-grounding                  09875a8 [fix-lumi-live-grounding]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-local-tool-grounding            625e935 [fix-lumi-local-tool-grounding]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-model-activation                fe35303 [fix-lumi-model-activation]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-native-wheel-speed              47edbd4 [fix-lumi-native-wheel-speed]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-numpy-manylinux-tags            3c90c19 [fix-lumi-numpy-manylinux-tags]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-read-url-privacy                d2f0c23 [fix-lumi-read-url-privacy]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-release-artifact-layout         df65b8d [fix-lumi-release-artifact-layout]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-release-asset-limit             7b399af [fix-lumi-release-asset-limit]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-release-wheel-metadata          8766632 [fix-lumi-release-wheel-metadata]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-runtime-resilience              864a90e [fix-lumi-runtime-resilience]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-search-backoff                  c6f59bf [fix-lumi-search-backoff]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-search-types                    e8bd14a [fix-lumi-search-types]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-turn-deadline                   7dceff8 [fix-lumi-turn-deadline]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-vulkan-spirv-headers            f419867 [fix-lumi-vulkan-spirv-headers]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-web-capability                  fc185e5 [fix-lumi-web-capability]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-lumi-web-query-privacy               5cb4b3f [fix-lumi-web-query-privacy]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/fix-qwen-model-config-directory          01bbea9 [fix-qwen-model-config-directory]
+C:/Users/mrhom/Documents/VSCode/zenstream/.worktrees/zenstream-lumi/test-lumi-multilingual-eval              5ba0ddc [test-lumi-multilingual-eval]
+C:/Users/mrhom/Documents/VSCode/zenstream/zenstream-lumi/.worktrees/zenstream-lumi/fix-lumi-benchmark-vram   30b31f3 [fix-lumi-benchmark-vram]
 name: Lumi release
 
 on:
@@ -57,7 +113,13 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 45
     env:
-      CMAKE_ARGS: -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_BACKEND_DL=OFF -DGGML_CUDA=ON -DGGML_VULKAN=ON
+      # Keep one generic PTX fallback plus native targets for common modern GPUs.
+      # The llama.cpp default compiles many more CUDA images and made wheel builds
+      # spend hours in nvcc; Vulkan remains available as the broad cross-vendor path.
+      CMAKE_ARGS: >-
+        -DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_BACKEND_DL=OFF
+        -DGGML_CUDA=ON -DGGML_VULKAN=ON
+        -DCMAKE_CUDA_ARCHITECTURES=50-virtual;86-real;89-real;90-virtual;120a-real
       CMAKE_BUILD_PARALLEL_LEVEL: "2"
       CMAKE_GENERATOR: Visual Studio 17 2022
       CMAKE_GENERATOR_PLATFORM: x64
@@ -238,7 +300,7 @@ jobs:
             export CUDACXX="$CUDA_HOME/bin/nvcc"
             export PATH="$CUDA_HOME/bin:$PATH"
             export LD_LIBRARY_PATH="$CUDA_HOME/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-            CMAKE_ARGS="$CMAKE_ARGS -DGGML_CUDA=ON -DGGML_VULKAN=ON -DVulkan_GLSLC_EXECUTABLE=$PWD/build-tools/glslc -DSPIRV-Headers_DIR=$SPIRV_HEADERS_PREFIX/share/cmake/SPIRV-Headers"
+            CMAKE_ARGS="$CMAKE_ARGS -DGGML_CUDA=ON -DGGML_VULKAN=ON -DCMAKE_CUDA_ARCHITECTURES=50-virtual;86-real;89-real;90-virtual;120a-real -DVulkan_GLSLC_EXECUTABLE=$PWD/build-tools/glslc -DSPIRV-Headers_DIR=$SPIRV_HEADERS_PREFIX/share/cmake/SPIRV-Headers"
           else
             CMAKE_ARGS="$CMAKE_ARGS -DGGML_CUDA=OFF -DGGML_VULKAN=OFF"
           fi
@@ -383,5 +445,4 @@ jobs:
           --verify-tag
           --generate-notes
           --title "Lumi ${GITHUB_REF_NAME}"
-
 
