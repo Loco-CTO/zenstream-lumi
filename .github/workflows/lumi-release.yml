@@ -202,6 +202,7 @@ jobs:
           path: dist/wheels/runtime/*.whl
           if-no-files-found: error
           retention-days: 1
+          compression-level: 0 # Wheel files are already compressed
 
   native-linux:
     name: Build runtime wheel (${{ matrix.target }})
@@ -341,6 +342,7 @@ jobs:
           path: dist/wheels/runtime/*.whl
           if-no-files-found: error
           retention-days: 1
+          compression-level: 0 # Wheel files are already compressed
 
   release-wheels:
     name: Build dependency wheelhouse (Python ${{ matrix.python }} on ${{ matrix.target }})
@@ -397,6 +399,9 @@ jobs:
           --wheelhouse dist/wheels/runtime
           --wheelhouse dist/wheels/installer
           ${{ matrix.target != 'linux-arm64' && '--require-backend cuda --require-backend vulkan' || '' }}
+      - name: Remove the separately published native runtime wheel from the dependency wheelhouse
+        run: >-
+          python -c "from pathlib import Path; wheels = list(Path('dist/wheels/runtime').glob('llama_cpp_python-*.whl')); assert len(wheels) == 1, f'Expected one native runtime wheel, found {len(wheels)}'; wheels[0].unlink()"
       - name: Save wheelhouse artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
@@ -404,6 +409,7 @@ jobs:
           path: dist/wheels/**/*.whl
           if-no-files-found: error
           retention-days: 1
+          compression-level: 0 # Wheel files are already compressed
 
   publish-release:
     name: Publish Lumi GitHub Release
