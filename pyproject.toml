@@ -50,4 +50,20 @@ maximum-orchestrator-version-exclusive = "2.0.0"
 runtime-distributions = ["click", "ddgs", "diskcache", "jinja2", "llama-cpp-python", "lxml", "numpy", "primp", "typing_extensions"]
 runtime-native-distributions = ["llama-cpp-python"]
 installer-distributions = ["huggingface-hub"]
+# Bump the target ID when its llama.cpp source, toolchain, SDK pins, backend flags,
+# architecture list, or manylinux baseline changes. Releases reuse only wheels
+# whose recorded ID matches this contract.
+native-runtime-bootstrap-tag = "v0.3.8"
+
+[tool.lumi.release.native-runtime-build-ids]
+"windows-x64" = "llama-cpp-python-0.3.35-msvc2022-cuda12.8-vulkan1.4.309-sm75-virtual-sm86-real-v1"
+"linux-x64" = "llama-cpp-python-0.3.35-manylinux2026.10.03-1-gcc-cuda12.8-vulkan-spirv449bc9-shaderc73743588-sm75-virtual-sm86-real-v1"
+"linux-arm64" = "llama-cpp-python-0.3.35-manylinux2026.10.03-1-aarch64-gcc-cpu-only-v1"
+
+# v0.3.8 predates native build IDs, so reuse is allowed only while each target
+# still matches the exact build contract used to create that release's wheels.
+[tool.lumi.release.native-runtime-bootstrap-build-ids]
+"windows-x64" = "llama-cpp-python-0.3.35-msvc2022-cuda12.8-vulkan1.4.309-sm75-virtual-sm86-real-v1"
+"linux-x64" = "llama-cpp-python-0.3.35-manylinux2026.10.03-1-gcc-cuda12.8-vulkan-spirv449bc9-shaderc73743588-sm75-virtual-sm86-real-v1"
+"linux-arm64" = "llama-cpp-python-0.3.35-manylinux2026.10.03-1-aarch64-gcc-cpu-only-v1"
 
