@@ -42,494 +42,6 @@ _REFERENCE_LIKE_PATTERN = re.compile(
     r':::zenstream(?!\{type="[^"\n]+"\s+id="[^"\n]+"\})[^\n]*'
 )
 _THINK_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.IGNORECASE | re.DOTALL)
-_RECOMMENDATION_PARAPHRASE_PATTERNS = (
-    re.compile(
-        r"\b(?:any|some)\s+(?:good|great|fun|interesting|worthwhile)\s+"
-        r"(?:movies?|films?|series|shows?|anime)\b"
-    ),
-    re.compile(
-        r"\b(?:any|some)\s+(?:movies?|films?|series|shows?|anime)\s+"
-        r"(?:for\s+(?:tonight|today|this evening)|to watch|worth watching)\b"
-    ),
-    re.compile(
-        r"\b(?:good|great|fun|interesting)\s+(?:movies?|films?|series|shows?|anime)\s+"
-        r"(?:for\s+(?:tonight|today|this evening)|to watch|worth watching)\b"
-    ),
-    re.compile(
-        r"(?:今夜|今晩|今日).{0,8}(?:見る|観る).{0,8}"
-        r"(?:いい|面白い|おすすめ).{0,8}(?:映画|作品|アニメ|ドラマ)"
-    ),
-    re.compile(r"(?:何か|なにか).{0,4}(?:いい|面白い|おすすめ).{0,4}(?:映画|作品|アニメ|ドラマ)"),
-    re.compile(
-        r"有什么(?:值得看的|好看的|适合看的)(?:电影|影片|电视剧|剧集|动漫|动画|作品)"
-    ),
-    re.compile(
-        r"有没有(?:值得看的|好看的|适合看的)(?:电影|影片|电视剧|剧集|动漫|动画|作品)"
-    ),
-)
-_POSITIVE_RECOMMENDATION_MARKERS = (
-    "recommend",
-    "suggest",
-    "you might like",
-    "you may like",
-    "you could enjoy",
-    "you would enjoy",
-    "you could try",
-    "good fit",
-    "great fit",
-    "worth watching",
-    "fits your request",
-    "matches your request",
-    "suits your taste",
-    "strong pick",
-    "good choice",
-    "good option",
-    "おすすめ",
-    "推薦",
-    "勧め",
-    "観てみて",
-    "見てみて",
-    "見る価値",
-    "観る価値",
-    "ぴったり",
-    "合いそう",
-    "合っています",
-    "推荐",
-    "可以看看",
-    "值得一看",
-    "值得看",
-    "适合",
-    "符合你的",
-    "不妨看看",
-)
-_NEGATIVE_RECOMMENDATION_MARKERS = (
-    "not a match",
-    "not a fit",
-    "not suitable",
-    "doesn't fit",
-    "does not fit",
-    "isn't a fit",
-    "is not a fit",
-    "not recommended",
-    "don't recommend",
-    "do not recommend",
-    "wouldn't recommend",
-    "would not recommend",
-    "avoid",
-    "skip",
-    "おすすめしない",
-    "おすすめしません",
-    "おすすめできない",
-    "勧めない",
-    "合わない",
-    "適さない",
-    "不推荐",
-    "不建议",
-    "不适合",
-    "不匹配",
-    "不符合",
-    "不值得",
-)
-_RECOMMENDATION_CLAUSE_BREAK_PATTERN = re.compile(
-    r"[,，;；]|\b(?:and|but|or|however|although|whereas)\b|"
-    r"但是|不过|然而|可是|而且|但是|然而|そして|しかし|でも|ただし",
-    re.IGNORECASE,
-)
-_RECOMMENDATION_LIST_ITEM_PATTERN = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
-_RECOMMENDATION_MARKERS = (
-    "recommend",
-    "suggest",
-    "what should i watch",
-    "what to watch",
-    "pick something to watch",
-    "find an anime like",
-    "find a movie like",
-    "find a film like",
-    "find a series like",
-    "movies similar to",
-    "films similar to",
-    "anime similar to",
-    "shows similar to",
-    "おすすめ",
-    "似た作品を教えて",
-    "似た映画を教えて",
-    "似たアニメを教えて",
-    "推薦",
-    "推奨",
-    "何を観",
-    "何を見",
-    "推荐",
-    "类似的电影",
-    "类似的作品",
-    "同类作品",
-    "建议看",
-    "看什么",
-    "gợi ý",
-    "đề xuất",
-    "nên xem",
-    "xem gì",
-)
-_OUTSIDE_LIBRARY_MARKERS = (
-    "outside my library",
-    "outside the library",
-    "outside-library",
-    "not in my library",
-    "not in my collection",
-    "even if i don't have",
-    "even if i do not have",
-    "i don't own",
-    "i do not own",
-    "what should i add",
-    "what to add",
-    "ライブラリ外",
-    "ライブラリにない",
-    "ライブラリにない作品",
-    "ライブラリにない映画",
-    "ライブラリ外の作品",
-    "ライブラリに入っていない",
-    "コレクション外",
-    "コレクションにない",
-    "持っていない作品",
-    "持っていない作品も",
-    "持っていないタイトル",
-    "追加すべき",
-    "追加した方が",
-    "追加する作品",
-    "库外",
-    "不在我的库",
-    "不在我的媒体库",
-    "本地库里没有",
-    "我还没有",
-    "我的库里没有",
-    "我的媒体库里没有",
-    "库中没有",
-    "片库外",
-    "库外推荐",
-    "片库中没有",
-    "本地片库中没有",
-    "媒体库里没有",
-    "我没有这部",
-    "建议我添加",
-    "我应该添加什么",
-    "我该加什么",
-    "添加什么作品",
-    "ngoài thư viện",
-    "không có trong thư viện",
-    "ngoài danh sách",
-    "chưa có trong thư viện",
-    "tôi chưa có",
-    "mình chưa có",
-    "nên thêm",
-)
-_CONSTRAINED_RECOMMENDATION_MARKERS = (
-    "similar to",
-    "like ",
-    "for fans of",
-    "same genre",
-    "starring",
-    "directed by",
-    "released in",
-    "highly rated",
-    "rated",
-    "rating",
-    "top ",
-    "top rated",
-    "top-rated",
-    "highest rated",
-    "best rated",
-    "best movie",
-    "best film",
-    "most popular",
-    "popular",
-    "award-winning",
-    "ranked",
-    "from the 90s",
-    "from the 1990s",
-    "from the 80s",
-    "from the 1980s",
-    "based on",
-    "adapted from",
-    "unwatched",
-    "haven't seen",
-    "not watched",
-    "genre",
-    "themes",
-    "theme",
-    "tone",
-    "mood",
-    "politics",
-    "war",
-    "dark fantasy",
-    "のような",
-    "みたいな",
-    "似た",
-    "ジャンル",
-    "テーマ",
-    "雰囲気",
-    "政治",
-    "戦争",
-    "类似",
-    "像",
-    "同类型",
-    "风格",
-    "题材",
-    "评分",
-    "高分",
-    "热门",
-    "最佳",
-    "最好",
-    "战争",
-    "黑暗奇幻",
-    "恐怖",
-    "喜剧",
-    "爱情",
-    "动作",
-    "科幻",
-    "悬疑",
-    "上映于",
-    "导演",
-    "主演",
-    "没看过",
-    "未看过",
-    "高評価",
-    "評価",
-    "人気",
-    "ランキング",
-    "giống như",
-    "thể loại",
-    "chủ đề",
-    "chính trị",
-    "chiến tranh",
-    "cozy",
-    "funny",
-    "comedy",
-    "horror",
-    "romantic",
-    "action",
-    "thriller",
-    "science fiction",
-    "sci-fi",
-    "short movie",
-    "under 2 hours",
-    "less than",
-    "字幕",
-    "吹替",
-    "短い",
-    "新作",
-    "最近",
-    "コメディ",
-    "ホラー",
-    "恋愛",
-    "アクション",
-    "phụ đề",
-    "lồng tiếng",
-    "gần đây",
-    "kinh dị",
-    "hài",
-    "lãng mạn",
-    "dưới",
-)
-_FOLLOW_UP_RECOMMENDATION_MARKERS = (
-    "another",
-    "different",
-    "new one",
-    "something else",
-    "instead",
-    "alternative",
-    "this one",
-    "that one",
-    "the first",
-    "the second",
-    "the one you mentioned",
-    "which one",
-    "それ",
-    "これ",
-    "その作品",
-    "さっきの",
-    "二番目",
-    "2番目",
-    "前の作品",
-    "另一个",
-    "另一部",
-    "换一个",
-    "换一部",
-    "别的",
-    "其他的",
-    "第二个",
-    "第二部",
-    "你提到的",
-    "刚才推荐的",
-    "这部",
-    "那部",
-    "別の作品",
-    "別の",
-    "違う作品",
-    "もう一つ",
-    "cái đó",
-    "phim đó",
-    "một phim khác",
-    "khác",
-    "thứ hai",
-)
-_MOVIE_MARKERS = (
-    "movie",
-    "movies",
-    "film",
-    "films",
-    "映画",
-    "电影",
-    "影片",
-    "phim lẻ",
-    "phim điện ảnh",
-)
-_SERIES_MARKERS = (
-    "series",
-    "tv show",
-    "show",
-    "シリーズ",
-    "ドラマ",
-    "剧集",
-    "电视剧",
-    "连续剧",
-    "phim bộ",
-    "phim truyền hình",
-)
-_ANIME_MARKERS = ("anime", "アニメ", "动漫", "动画")
-_GENERIC_WATCH_MARKERS = (
-    "what should i watch",
-    "what to watch",
-    "something to watch",
-    "watch tonight",
-    "何を観",
-    "何を見",
-    "観たい",
-    "見たい",
-    "今晚看什么",
-    "有什么可看的",
-    "xem gì",
-    "bộ phim",
-    "phim trong thư viện",
-)
-_UNSUPPORTED_MEDIA_MARKERS = (
-    "album",
-    "song",
-    "track",
-    "music",
-    "artist",
-    "podcast",
-    "book",
-    "playlist",
-    "アルバム",
-    "曲",
-    "音楽",
-    "歌",
-    "アーティスト",
-    "ポッドキャスト",
-    "本を",
-    "小説",
-    "プレイリスト",
-    "专辑",
-    "歌曲",
-    "音乐",
-    "歌手",
-    "播客",
-    "书籍",
-    "播放列表",
-    "bài hát",
-    "ca khúc",
-    "nhạc",
-    "nghệ sĩ",
-    "sách",
-)
-_LOCAL_RECOMMENDATIONS_TOOL = "zenstream_home_recommendations"
-_RELATIONSHIP_MARKERS = (
-    "sequel",
-    "prequel",
-    "spin-off",
-    "spin off",
-    "watch order",
-    "franchise order",
-    "series order",
-    "what comes before",
-    "what comes after",
-    "what comes before it",
-    "what comes after it",
-    "preceding installment",
-    "following installment",
-    "where does it fit",
-    "where does this movie fit",
-    "where does that movie fit",
-    "where does this film fit",
-    "where does that film fit",
-    "where does this series fit",
-    "part of the franchise",
-    "order in the series",
-    "previous and next",
-    "where does this fit",
-    "前後の作品",
-    "前作",
-    "次作",
-    "続編",
-    "前日譚",
-    "外伝",
-    "シリーズ全体",
-    "どの位置",
-    "何番目",
-    "順番",
-    "時系列",
-    "续集",
-    "前传",
-    "观看顺序",
-    "系列顺序",
-    "剧情顺序",
-    "属于哪一部",
-    "phần trước",
-    "phần tiếp theo",
-    "tiền truyện",
-    "hậu truyện",
-    "thứ tự xem",
-    "phần nào",
-)
-_RECENT_MEDIA_REFERENCE_MARKERS = (
-    "this movie",
-    "that movie",
-    "this film",
-    "that film",
-    "this series",
-    "that series",
-    "this title",
-    "that title",
-    "the one you mentioned",
-    "the movie you mentioned",
-    "the film you mentioned",
-    "it fit",
-    "it in the series",
-    "it in the franchise",
-    "前後の作品",
-    "この映画",
-    "その映画",
-    "この作品",
-    "その作品",
-    "このシリーズ",
-    "そのシリーズ",
-    "这部电影",
-    "那部电影",
-    "这部作品",
-    "那部作品",
-    "这个系列",
-    "那个系列",
-    "刚才那部",
-    "さっきの",
-    "前に出た",
-    "phim này",
-    "phim đó",
-    "bộ phim này",
-    "bộ phim đó",
-    "tác phẩm này",
-    "tác phẩm đó",
-    "loạt phim này",
-    "loạt phim đó",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -588,389 +100,6 @@ class AgentLimits:
 
 class InferenceError(RuntimeError):
     """A model request failed or exceeded its configured deadline."""
-
-
-def _simple_local_recommendation_kind(
-    user_text: str, history: list[ChatMessage]
-) -> tuple[bool, str | None]:
-    """Identify generic recommendations that can be served from trusted local picks."""
-
-    if history:
-        return False, None
-    text = re.sub(r"\s+", " ", user_text.casefold())
-    if any(marker in text for marker in _OUTSIDE_LIBRARY_MARKERS):
-        return False, None
-    if not any(marker in text for marker in _RECOMMENDATION_MARKERS):
-        return False, None
-    if any(marker in text for marker in _UNSUPPORTED_MEDIA_MARKERS):
-        return False, None
-    if any(
-        marker in text
-        for marker in (
-            *_CONSTRAINED_RECOMMENDATION_MARKERS,
-            *_FOLLOW_UP_RECOMMENDATION_MARKERS,
-        )
-    ):
-        return False, None
-
-    # The local shortcut returns a single trusted Home pick. Keep requests for
-    # ranked lists, a particular year, or a mixed anime/movie category agentic.
-    if re.search(r"\b(?:18|19|20)\d{2}\b", text):
-        return False, None
-    if re.search(
-        r"\b(?:two|three|four|five|six|seven|eight|nine|ten|several|multiple|"
-        r"a few|a couple of|\d+)\s+"
-        r"(?:movies?|films?|series|shows?|anime)\b",
-        text,
-    ):
-        return False, None
-    if re.search(
-        r"(?:[2-9]\d*|[二三四五六七八九十百千两兩][二三四五六七八九十百千两兩]*|几)"
-        r"\s*(?:部|个|本|作品|标题|番組|映画|ドラマ|アニメ)",
-        text,
-    ):
-        return False, None
-
-    wants_movie = any(marker in text for marker in _MOVIE_MARKERS)
-    wants_series = any(marker in text for marker in _SERIES_MARKERS)
-    wants_anime = any(marker in text for marker in _ANIME_MARKERS)
-    explicit_anime_movie = bool(
-        re.search(r"\banime\s+(?:movies?|films?)\b", text)
-        or "アニメ映画" in text
-        or "动画电影" in text
-        or "动漫电影" in text
-    )
-    explicit_anime_series = bool(
-        re.search(r"\banime\s+(?:series|shows?|tv)\b", text)
-        or "アニメシリーズ" in text
-        or "动画剧集" in text
-        or "动漫剧集" in text
-    )
-    if wants_movie and wants_series:
-        return False, None
-    if wants_anime and wants_movie and not explicit_anime_movie:
-        return False, None
-    if wants_anime and wants_series and not explicit_anime_series:
-        return False, None
-    if wants_anime and not (explicit_anime_movie or explicit_anime_series):
-        return False, None
-    if wants_movie:
-        return True, "movie"
-    if wants_series:
-        return True, "series"
-    if any(marker in text for marker in _GENERIC_WATCH_MARKERS):
-        return True, None
-    return False, None
-
-
-_EXPLICIT_RESPONSE_LANGUAGE_MARKERS = {
-    "zh": (
-        "answer in chinese",
-        "reply in chinese",
-        "respond in chinese",
-        "use chinese",
-        "请用中文",
-        "用中文回答",
-        "用中文回复",
-        "请用中文答复",
-        "中文回答",
-    ),
-    "ja": (
-        "answer in japanese",
-        "reply in japanese",
-        "respond in japanese",
-        "use japanese",
-        "日本語で答えて",
-        "日本語で回答",
-        "日本語で返信",
-        "日本語で説明",
-    ),
-    "en": (
-        "answer in english",
-        "reply in english",
-        "respond in english",
-        "use english",
-        "英語で答えて",
-        "英語で回答",
-        "英語で返信",
-        "用英文回答",
-        "请用英语回答",
-    ),
-    "vi": (
-        "answer in vietnamese",
-        "reply in vietnamese",
-        "respond in vietnamese",
-        "use vietnamese",
-        "hãy trả lời bằng tiếng việt",
-        "trả lời bằng tiếng việt",
-    ),
-}
-
-
-def _explicit_response_locale(user_text: str) -> str | None:
-    folded = " ".join(user_text.casefold().split())
-    for locale, markers in _EXPLICIT_RESPONSE_LANGUAGE_MARKERS.items():
-        if any(marker in folded for marker in markers):
-            return locale
-    return None
-
-
-def _recommendation_locale(user_text: str) -> str:
-    """Choose the response language from explicit instructions or the latest user turn."""
-
-    explicit_locale = _explicit_response_locale(user_text)
-    if explicit_locale is not None:
-        return explicit_locale
-
-    folded = " ".join(user_text.casefold().split())
-
-    if any(
-        marker in folded
-        for marker in ("gợi ý", "đề xuất", "thư viện", "phim", "xem", "bạn", "mình")
-    ):
-        return "vi"
-    latin_words = len(re.findall(r"[a-z]{2,}", folded))
-    hiragana_katakana = sum("\u3040" <= char <= "\u30ff" for char in user_text)
-    han = sum(
-        "\u3400" <= char <= "\u9fff" or "\uf900" <= char <= "\ufaff"
-        for char in user_text
-    )
-    english_cue = re.search(
-        r"\b(?:what|why|how|tell|which|when|where|does|do|is|are|please|recommend|"
-        r"find|search|should|could|would|can|about)\b",
-        folded,
-    )
-    if latin_words >= 2 and (
-        english_cue or hiragana_katakana + han < latin_words * 2
-    ):
-        return "en"
-    if hiragana_katakana >= 2:
-        return "ja"
-    if han:
-        return "zh"
-    return "en"
-
-
-def _response_language_instruction(user_text: str, history: list[ChatMessage]) -> str:
-    locale = _recommendation_locale(user_text)
-    explicitly_requested = _explicit_response_locale(user_text) is not None
-    previous_user_message = next(
-        (message for message in reversed(history) if message.role == "user"),
-        None,
-    )
-    if not explicitly_requested:
-        if previous_user_message is None:
-            return ""
-        if _recommendation_locale(previous_user_message.content) == locale:
-            return ""
-        text_has_script = any(
-            "\u3040" <= char <= "\u30ff"
-            or "\u3400" <= char <= "\u9fff"
-            or "\uf900" <= char <= "\ufaff"
-            for char in user_text
-        )
-        latin_words = len(re.findall(r"[a-z]{2,}", user_text.casefold()))
-        if locale == "en":
-            if latin_words < 2:
-                return ""
-        elif not text_has_script:
-            return ""
-    language = {"en": "English", "ja": "Japanese", "zh": "Chinese", "vi": "Vietnamese"}[
-        locale
-    ]
-    return (
-        f"For this turn, answer in {language}. Follow this latest user turn over earlier language "
-        "or source-language instructions."
-    )
-
-
-def _is_recommendation_request(user_text: str, history: list[ChatMessage]) -> bool:
-    folded = " ".join(user_text.casefold().split())
-    if any(marker in folded for marker in _RECOMMENDATION_MARKERS) or any(
-        pattern.search(folded) for pattern in _RECOMMENDATION_PARAPHRASE_PATTERNS
-    ):
-        return True
-    if not any(marker in folded for marker in _FOLLOW_UP_RECOMMENDATION_MARKERS):
-        return False
-    for message in reversed(history):
-        if message.role != "user":
-            continue
-        previous = " ".join(message.content.casefold().split())
-        return any(marker in previous for marker in _RECOMMENDATION_MARKERS)
-    return False
-
-
-def _explicitly_requests_outside_library(
-    user_text: str, history: list[ChatMessage]
-) -> bool:
-    folded = " ".join(user_text.casefold().split())
-    if _is_affirmative_outside_request(folded):
-        return True
-    if not any(marker in folded for marker in _FOLLOW_UP_RECOMMENDATION_MARKERS):
-        return False
-    for message in reversed(history):
-        if message.role != "user":
-            continue
-        previous = " ".join(message.content.casefold().split())
-        return _is_affirmative_outside_request(previous)
-    return False
-
-
-def _is_affirmative_outside_request(folded_text: str) -> bool:
-    if not any(marker in folded_text for marker in _OUTSIDE_LIBRARY_MARKERS):
-        return False
-    text = folded_text.replace("’", "'")
-    english_negation = re.search(
-        r"\b(?:don't|do not|never|not)\b.{0,48}\b"
-        r"(?:recommend(?:ations?)?|suggest(?:ions?)?)\b",
-        text,
-    )
-    japanese_negation = re.search(
-        r"(?:おすすめ|推薦|勧め|すすめ)(?:しないで|しません|しない|できない|ないで)"
-        r"|(?:しないで|しません|勧めない|おすすめしない).{0,20}(?:ライブラリ外|コレクション外|库外)",
-        text,
-    )
-    chinese_negation = re.search(
-        r"(?:不要|别|不必|无需|不用|不想|不希望).{0,16}(?:推荐|建议)"
-        r"|(?:推荐|建议).{0,12}(?:不要|不|别|不必)",
-        text,
-    )
-    return not (english_negation or japanese_negation or chinese_negation)
-
-
-def _recommendation_clause(text: str, position: int) -> str:
-    start = 0
-    end = len(text)
-    for match in _RECOMMENDATION_CLAUSE_BREAK_PATTERN.finditer(text):
-        if match.end() <= position:
-            start = match.end()
-        elif match.start() >= position:
-            end = match.start()
-            break
-    return text[start:end].strip()
-
-
-def _recommendation_rationale(text: str, title: str) -> tuple[bool, str]:
-    is_list_item = bool(_RECOMMENDATION_LIST_ITEM_PATTERN.match(text))
-    cleaned = _REFERENCE_PATTERN.sub("", text)
-    cleaned = _REFERENCE_LIKE_PATTERN.sub("", cleaned).strip()
-    cleaned = _RECOMMENDATION_LIST_ITEM_PATTERN.sub("", cleaned, count=1).strip()
-    title_match = re.search(re.escape(title), cleaned, re.IGNORECASE)
-    if title_match is None:
-        return False, ""
-    clause = _recommendation_clause(cleaned, title_match.start()).casefold()
-    if any(marker in clause for marker in _NEGATIVE_RECOMMENDATION_MARKERS):
-        return False, ""
-    rationale = cleaned[title_match.end() :].strip().lstrip(" —–-:：,，;；")
-    rationale = rationale[:240].strip()
-    positive = any(marker in clause for marker in _POSITIVE_RECOMMENDATION_MARKERS)
-    return positive or (is_list_item and bool(rationale)), rationale
-
-
-def _enforce_local_recommendations(
-    answer: ChatAnswer,
-    user_text: str,
-    current_entities: Mapping[tuple[str, str], EntityReference],
-) -> ChatAnswer:
-    """Render default recommendations only from local entities returned this turn."""
-
-    selected: dict[tuple[str, str], EntityReference] = {}
-    segments = re.split(
-        r"\r?\n+|(?<=[.!?])\s+|(?<=[。！？])\s*", answer.markdown
-    )
-    for segment in (value.strip() for value in segments if value.strip()):
-        references = list(_REFERENCE_PATTERN.finditer(segment))
-        if len(references) != 1:
-            continue
-        match = references[0]
-        key = (match.group("type"), match.group("id"))
-        entity = current_entities.get(key)
-        if entity is None:
-            continue
-        positive, _rationale = _recommendation_rationale(segment, entity.title)
-        if positive:
-            selected.setdefault(key, entity)
-    locale = _recommendation_locale(user_text)
-    if not selected:
-        fallback = {
-            "en": (
-                "I couldn't verify a matching title in your ZenStream library. I won't "
-                "recommend outside-library titles unless you ask."
-            ),
-            "ja": (
-                "ZenStreamライブラリ内に一致する作品があるか確認できませんでした。"
-                "ご希望がない限り、ライブラリ外の作品はおすすめしません。"
-            ),
-            "zh": (
-                "我无法确认您的 ZenStream 媒体库中有匹配作品。"
-                "除非您明确提出，否则我不会推荐库外作品。"
-            ),
-            "vi": (
-                "Mình chưa thể xác nhận có phim phù hợp trong thư viện ZenStream của bạn. "
-                "Mình sẽ không đề xuất phim ngoài thư viện trừ khi bạn yêu cầu."
-            ),
-        }[locale]
-        return replace(answer, markdown=fallback, references=())
-
-    lead = {
-        "en": "Verified options from your ZenStream library:",
-        "ja": "ZenStreamライブラリ内で確認できた候補です:",
-        "zh": "以下是已确认在您 ZenStream 媒体库中的选项：",
-        "vi": "Các lựa chọn đã được xác nhận trong thư viện ZenStream của bạn:",
-    }[locale]
-    recommendations = list(selected.values())[:5]
-    references = tuple(recommendations)
-    lines = [lead]
-    for entity in recommendations:
-        lines.append(f'- {entity.title} :::zenstream{{type="{entity.type}" id="{entity.id}"}}')
-    return replace(answer, markdown="\n\n".join(lines), references=references)
-
-
-def _relationship_follow_up_entity(
-    user_text: str,
-    previous_entities: tuple[EntityReference, ...],
-) -> EntityReference | None:
-    """Resolve an unambiguous relationship follow-up to a trusted local entity."""
-
-    folded = " ".join(user_text.casefold().split())
-    if not any(marker in folded for marker in _RELATIONSHIP_MARKERS):
-        return None
-    candidates = [
-        entity
-        for entity in previous_entities
-        if entity.type in {"movie", "series"}
-    ]
-    if len(candidates) != 1:
-        return None
-    entity = candidates[0]
-    title_in_message = entity.title.casefold() in folded if entity.title else False
-    if not title_in_message and not any(
-        marker in folded for marker in _RECENT_MEDIA_REFERENCE_MARKERS
-    ):
-        return None
-    return entity
-
-
-def _relationship_search_queries(
-    entity: EntityReference, user_text: str
-) -> tuple[tuple[str, str], ...]:
-    """Build small public-only searches from an exact, trusted catalog title."""
-
-    title = " ".join(entity.title.split())[:180]
-    if len(title) < 2:
-        return ()
-    locale = _recommendation_locale(user_text)
-    localized = {
-        "ja": (f'"{title}" シリーズ 順番 前後 公式', "ja"),
-        "zh": (f'"{title}" 系列 顺序 前传 续集 官方', "zh"),
-        "vi": (f'"{title}" thứ tự phần trước phần tiếp theo chính thức', "vi"),
-        "en": (f'"{title}" sequel prequel watch order official', "en"),
-    }[locale]
-    english = (f'"{title}" sequel prequel franchise order official', "en")
-    if localized[1] == "en":
-        return (english,)
-    return localized, english
-
 
 def _collapse_consecutive_duplicate_paragraphs(markdown: str) -> str:
     """Stop a decoding loop from repeating the same paragraph in the final answer."""
@@ -1039,26 +168,12 @@ class ChatAgent:
         if len(user_text) > self._limits.max_user_input_chars:
             raise ValueError("The user message exceeds Lumi's configured input limit")
 
-        local_recommendation, requested_type = _simple_local_recommendation_kind(
-            user_text, history
-        )
-        if local_recommendation:
-            return await self._answer_from_local_recommendations(
-                context,
-                user_text,
-                requested_type,
-            )
-
-        enforce_local_recommendations = _is_recommendation_request(user_text, history) and not (
-            _explicitly_requests_outside_library(user_text, history)
-        )
         return await self._answer_with_tools(
             context,
             history,
             user_text,
-            enforce_local_recommendations=enforce_local_recommendations,
-            on_delta=None if enforce_local_recommendations else on_delta,
-            on_reset=None if enforce_local_recommendations else on_reset,
+            on_delta=on_delta,
+            on_reset=on_reset,
         )
 
     async def _answer_with_tools(
@@ -1067,59 +182,14 @@ class ChatAgent:
         history: list[ChatMessage],
         user_text: str,
         *,
-        enforce_local_recommendations: bool,
         on_delta: Callable[[str], Awaitable[None]] | None = None,
         on_reset: Callable[[StreamResetReason], Awaitable[None]] | None = None,
     ) -> ChatAnswer:
-
         trusted_entities = {
             (entity.type, entity.id): entity
             for entity in context.previous_entities[: self._limits.max_trusted_entities]
         }
-        current_entities: dict[tuple[str, str], EntityReference] = {}
-
-        def remember_local_entities(result: ToolResult) -> None:
-            if result.trust is not EvidenceTrust.LOCAL:
-                return
-            for entity in result.entities:
-                key = (entity.type, entity.id)
-                if (
-                    len(current_entities) >= self._limits.max_trusted_entities
-                    and key not in current_entities
-                ):
-                    break
-                current_entities[key] = entity
-
-        def finish(answer: ChatAnswer) -> ChatAnswer:
-            if not enforce_local_recommendations:
-                return answer
-            return _enforce_local_recommendations(answer, user_text, current_entities)
-
-        relationship_entity = _relationship_follow_up_entity(
-            user_text, context.previous_entities
-        )
         definitions = self._tools.definitions
-        wants_offline = False
-        if relationship_entity is not None:
-            folded = user_text.casefold()
-            wants_offline = any(
-                marker in folded
-                for marker in (
-                    "offline",
-                    "without internet",
-                    "no internet",
-                    "オフライン",
-                    "ネットなし",
-                )
-            )
-            available_names = {"zenstream_catalog_item_detail"}
-            if not wants_offline:
-                available_names.update({"web_search", "web_read"})
-            definitions = tuple(
-                definition
-                for definition in definitions
-                if definition.name in available_names
-            )
 
         sources: dict[str, Source] = {}
         messages = self._bounded_messages(
@@ -1145,90 +215,25 @@ class ChatAgent:
             streamed_text = False
             if on_reset is not None:
                 await on_reset(reason)
-        if relationship_entity is not None:
-            prefetch_calls = [
-                ToolCall(
-                    "lumi-local-relationship-detail",
-                    "zenstream_catalog_item_detail",
-                    {"entity_id": relationship_entity.id},
-                )
-            ]
-            if not wants_offline:
-                prefetch_calls.extend(
-                    ToolCall(
-                        f"lumi-relationship-search-{index}",
-                        "web_search",
-                        {"query": query, "language": language, "max_results": 5},
-                    )
-                    for index, (query, language) in enumerate(
-                        _relationship_search_queries(relationship_entity, user_text),
-                        start=1,
-                    )
-                )
-            for call in prefetch_calls:
-                tool = self._tools.get(call.name)
-                if tool is None or total_calls >= self._limits.max_tool_calls:
-                    continue
-                result = await self._dispatch(
-                    context,
-                    call,
-                    seen_calls,
-                    tool_call_counts,
-                )
-                total_calls += 1
-                tool_rounds = 1
-                remember_local_entities(result)
-                if result.trust is EvidenceTrust.LOCAL:
-                    for entity in result.entities:
-                        key = (entity.type, entity.id)
-                        if key in trusted_entities:
-                            continue
-                        if len(trusted_entities) >= self._limits.max_trusted_entities:
-                            break
-                        trusted_entities[key] = entity
-                for source in result.sources:
-                    if source.url in sources:
-                        sources[source.url] = source
-                    elif len(sources) < self._limits.max_sources:
-                        sources[source.url] = source
-                messages.append(
-                    ChatMessage(role="assistant", content="", tool_calls=(call,))
-                )
-                messages.append(self._tool_message(call, result, messages))
 
         while True:
-            try:
-                response = await self._complete(
-                    context,
-                    messages,
-                    definitions,
-                    on_delta=stream_delta if on_delta is not None else None,
-                    on_reset=reset_stream if on_delta is not None else None,
-                )
-            except InferenceError:
-                if streamed_text:
-                    raise
-                return finish(
-                    self._answer_after_inference_failure(
-                        user_text,
-                        trusted_entities,
-                        sources,
-                        tool_rounds,
-                        total_calls,
-                    )
-                )
+            response = await self._complete(
+                context,
+                messages,
+                definitions,
+                on_delta=stream_delta if on_delta is not None else None,
+                on_reset=reset_stream if on_delta is not None else None,
+            )
             assistant = response.message
             if assistant.role != "assistant":
                 raise InferenceError("Runtime returned a non-assistant message")
             if not assistant.tool_calls:
-                return finish(
-                    self._make_answer(
-                        assistant.content,
-                        trusted_entities,
-                        sources,
-                        tool_rounds,
-                        total_calls,
-                    )
+                return self._make_answer(
+                    assistant.content,
+                    trusted_entities,
+                    sources,
+                    tool_rounds,
+                    total_calls,
                 )
 
             if streamed_text:
@@ -1237,10 +242,8 @@ class ChatAgent:
                 await reset_stream("intermediate")
 
             if tool_rounds >= self._limits.max_tool_rounds:
-                return finish(
-                    await self._answer_after_limit(
-                        context, messages, trusted_entities, sources, tool_rounds, total_calls
-                    )
+                return await self._answer_after_limit(
+                    context, messages, trusted_entities, sources, tool_rounds, total_calls
                 )
 
             tool_rounds += 1
@@ -1266,15 +269,13 @@ class ChatAgent:
                             messages,
                         )
                     )
-                    return finish(
-                        await self._answer_after_limit(
-                            context,
-                            messages,
-                            trusted_entities,
-                            sources,
-                            tool_rounds,
-                            total_calls,
-                        )
+                    return await self._answer_after_limit(
+                        context,
+                        messages,
+                        trusted_entities,
+                        sources,
+                        tool_rounds,
+                        total_calls,
                     )
 
                 if self._remaining_context_chars(messages) < 256:
@@ -1288,15 +289,13 @@ class ChatAgent:
                             messages,
                         )
                     )
-                    return finish(
-                        await self._answer_after_limit(
-                            context,
-                            messages,
-                            trusted_entities,
-                            sources,
-                            tool_rounds,
-                            total_calls,
-                        )
+                    return await self._answer_after_limit(
+                        context,
+                        messages,
+                        trusted_entities,
+                        sources,
+                        tool_rounds,
+                        total_calls,
                     )
 
                 total_calls += 1
@@ -1324,7 +323,6 @@ class ChatAgent:
                         "Tool arguments were rejected because they were not a bounded JSON object.",
                         EvidenceTrust.LOCAL,
                     )
-                remember_local_entities(result)
                 if result.trust is EvidenceTrust.LOCAL:
                     for entity in result.entities:
                         key = (entity.type, entity.id)
@@ -1344,99 +342,9 @@ class ChatAgent:
                 messages.append(self._tool_message(safe_call, result, messages))
 
             if per_round_limit_hit:
-                return finish(
-                    await self._answer_after_limit(
-                        context, messages, trusted_entities, sources, tool_rounds, total_calls
-                    )
+                return await self._answer_after_limit(
+                    context, messages, trusted_entities, sources, tool_rounds, total_calls
                 )
-
-    async def _answer_from_local_recommendations(
-        self,
-        context: ChatContext,
-        user_text: str,
-        requested_type: str | None,
-    ) -> ChatAnswer:
-        """Answer generic recommendations only from the authenticated local Home row."""
-
-        result = await self._dispatch(
-            context,
-            ToolCall("local-recommendation", _LOCAL_RECOMMENDATIONS_TOOL, {}),
-            set(),
-            {},
-        )
-        try:
-            payload = json.loads(result.content)
-        except (TypeError, ValueError):
-            payload = None
-        catalog_result_available = (
-            result.trust is EvidenceTrust.LOCAL
-            and isinstance(payload, dict)
-            and isinstance(payload.get("items"), list)
-        )
-        candidates = [
-            entity
-            for entity in result.entities
-            if entity.type in {"movie", "series"}
-            and (requested_type is None or entity.type == requested_type)
-        ]
-        locale = _recommendation_locale(user_text)
-        if not catalog_result_available:
-            lead = {
-                "en": "I couldn't check your library just now. Please try again.",
-                "ja": "今はライブラリを確認できませんでした。もう一度お試しください。",
-                "zh": "暂时无法查询您的本地媒体库，请稍后再试。",
-                "vi": "Hiện mình chưa thể kiểm tra thư viện. Vui lòng thử lại.",
-            }[locale]
-            markdown = lead
-            references: dict[tuple[str, str], EntityReference] = {}
-        elif not candidates:
-            lead = {
-                "en": (
-                    "I couldn't retrieve a verified local recommendation right now. "
-                    "Try again or search for a title or genre."
-                ),
-                "ja": (
-                    "今は確認済みのローカルおすすめを取得できませんでした。"
-                    "もう一度お試しいただくか、作品名やジャンルで検索してください。"
-                ),
-                "zh": "目前无法获取经过验证的本地推荐。您可以重试，或按片名或类型搜索。",
-                "vi": (
-                    "Hiện mình chưa lấy được đề xuất trong thư viện đã xác minh. "
-                    "Hãy thử lại hoặc tìm theo tên phim hay thể loại."
-                ),
-            }[locale]
-            markdown = lead
-            references = {}
-        else:
-            selected = candidates[0]
-            lead = {
-                "en": (
-                    "I recommend this title because it appears in your permission-filtered "
-                    "ZenStream Home recommendations:"
-                ),
-                "ja": (
-                    "アクセス可能なローカルのおすすめ一覧に掲載されているため、"
-                    "この作品をおすすめします:"
-                ),
-                "zh": "这部作品出现在您有权访问的 ZenStream 本地推荐中：",
-                "vi": (
-                    "Mình gợi ý phim này vì nó xuất hiện trong mục đề xuất ZenStream mà bạn "
-                    "có quyền truy cập:"
-                ),
-            }[locale]
-            markdown = (
-                f'{lead} :::zenstream{{type="{selected.type}" id="{selected.id}"}}'
-            )
-            references = {(selected.type, selected.id): selected}
-
-        sources = {source.url: source for source in result.sources}
-        return self._make_answer(
-            markdown,
-            references,
-            sources,
-            tool_rounds=1,
-            total_calls=1,
-        )
 
     async def _complete(
         self,
@@ -1616,79 +524,11 @@ class ChatAgent:
                 ),
             ),
         ]
-        try:
-            response = await self._complete(context, final_messages, ())
-        except InferenceError:
-            response = None
-        if (
-            response is not None
-            and response.message.role == "assistant"
-            and not response.message.tool_calls
-        ):
-            return self._make_answer(
-                response.message.content,
-                trusted_entities,
-                sources,
-                tool_rounds,
-                total_calls,
-            )
-        fallback = {
-            "en": "I reached the research limit before I could finish a reliable answer.",
-            "ja": "調査の上限に達したため、信頼できる回答を最後まで確認できませんでした。",
-            "zh": "研究已达到限制，我还无法给出可靠完整的答案。",
-            "vi": "Tôi đã đạt giới hạn tra cứu trước khi hoàn tất câu trả lời đáng tin cậy.",
-        }[_recommendation_locale(context.user_message)]
-        return self._make_answer(fallback, trusted_entities, sources, tool_rounds, total_calls)
-
-    def _answer_after_inference_failure(
-        self,
-        user_text: str,
-        trusted_entities: dict[tuple[str, str], EntityReference],
-        sources: dict[str, Source],
-        tool_rounds: int,
-        total_calls: int,
-    ) -> ChatAnswer:
-        """Return a safe localized answer instead of surfacing an inference 503."""
-
-        locale = _recommendation_locale(user_text)
-        entity = next(iter(trusted_entities.values()), None)
-        if entity is not None:
-            message = {
-                "en": (
-                    "I couldn't verify the requested relationship with the local model. "
-                    "This is the exact ZenStream title from our conversation:"
-                ),
-                "ja": (
-                    "ローカルモデルで作品同士の関係を確認できませんでした。"
-                    "会話で確認済みのZenStream作品はこちらです:"
-                ),
-                "zh": "本地模型无法核实作品之间的关系。以下是对话中已确认的 ZenStream 作品：",
-                "vi": (
-                    "Mô hình cục bộ không xác minh được mối liên hệ giữa các tác phẩm. "
-                    "Đây là tựa phim ZenStream đã được xác nhận trong cuộc trò chuyện:"
-                ),
-            }[locale]
-            markdown = (
-                f'{message} :::zenstream{{type="{entity.type}" id="{entity.id}"}}'
-            )
-        else:
-            markdown = {
-                "en": (
-                    "I couldn't complete a reliable answer with the local model. "
-                    "Try a shorter question or select a smaller installed model."
-                ),
-                "ja": (
-                    "ローカルモデルで信頼できる回答を作れませんでした。"
-                    "質問を短くするか、インストール済みの小さいモデルを選んでください。"
-                ),
-                "zh": "本地模型未能生成可靠的回答。请尝试缩短问题，或选择已安装的较小模型。",
-                "vi": (
-                    "Mô hình cục bộ không tạo được câu trả lời đáng tin cậy. "
-                    "Hãy thử hỏi ngắn hơn hoặc chọn mô hình nhỏ hơn đã cài đặt."
-                ),
-            }[locale]
+        response = await self._complete(context, final_messages, ())
+        if response.message.role != "assistant" or response.message.tool_calls:
+            raise InferenceError("Runtime did not return a final answer after the tool limit")
         return self._make_answer(
-            markdown,
+            response.message.content,
             trusted_entities,
             sources,
             tool_rounds,
@@ -1743,10 +583,7 @@ class ChatAgent:
         *,
         available_tools: tuple[ToolDefinition, ...] | None = None,
     ) -> list[ChatMessage]:
-        language_instruction = _response_language_instruction(user_text, history)
         system_content = SYSTEM_PROMPT
-        if language_instruction:
-            system_content += f"\n\n{language_instruction}"
         tool_definitions = (
             self._tools.definitions if available_tools is None else available_tools
         )
@@ -1831,7 +668,8 @@ class ChatAgent:
         tool_rounds: int,
         total_calls: int,
     ) -> ChatAnswer:
-        cleaned = _THINK_BLOCK_PATTERN.sub("", markdown).strip()
+        cleaned = _THINK_BLOCK_PATTERN.sub("", markdown)
+        cleaned = cleaned.strip()
         cleaned = _collapse_consecutive_duplicate_paragraphs(cleaned)
         bounded = cleaned[: self._limits.max_answer_chars]
         used_references: list[EntityReference] = []
