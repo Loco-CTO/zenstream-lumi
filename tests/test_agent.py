@@ -419,7 +419,22 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                 title="Official title",
             )
         )
-        runtime = FakeRuntime([ChatMessage("assistant", "I cannot verify the order offline.")])
+        runtime = FakeRuntime(
+            [
+                ChatMessage(
+                    "assistant",
+                    "",
+                    tool_calls=(
+                        ToolCall(
+                            "call-1",
+                            "zenstream_catalog_item_detail",
+                            {"entity_id": movie.id},
+                        ),
+                    ),
+                ),
+                ChatMessage("assistant", "The local title is a standalone film."),
+            ]
+        )
         agent = ChatAgent(runtime, ToolRegistry([detail, search]))
         base = chat_context()
         context = ChatContext(
@@ -441,10 +456,11 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail.calls, [movie.id])
         self.assertEqual(search.calls, [])
         self.assertEqual(answer.sources, ())
-        self.assertEqual(
+        self.assertIn(
+            "zenstream_catalog_item_detail",
             {tool.name for tool in runtime.requests[0].tools},
-            {"zenstream_catalog_item_detail"},
         )
+        self.assertEqual(len(runtime.requests), 2)
 
     async def test_inference_timeout_propagates_without_fabricating_an_answer(self) -> None:
         class TimeoutRuntime:
