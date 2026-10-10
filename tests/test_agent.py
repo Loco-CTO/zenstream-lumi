@@ -284,7 +284,8 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 ChatMessage(
                     "assistant",
-                    'For a reflective fantasy, try Local Film because it has a similarly calm tone. '
+                    'For a reflective fantasy, try Local Film because it has a '
+                    'similarly calm tone. '
                     ':::zenstream{type="movie" id="movie-1"}',
                 ),
             ]
