@@ -15,6 +15,7 @@ from types import FunctionType, SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import lumi.runtime.llama_cpp as llama_cpp_runtime
 from lumi.contracts import ChatMessage, ModelRequest, ToolDefinition
 from lumi.model_installation import (
     GGUF_FORMAT,
@@ -30,6 +31,7 @@ from lumi.runtime.llama_cpp import (
     LlamaCppRuntimeError,
     VerifiedModelArtifact,
     _initialize_backend_registry,
+    _load_packaged_backend_plugins,
 )
 
 _GGUF_FILENAME = "Qwen_Qwen3.5-test-Q4_K_M.gguf"
@@ -357,6 +359,39 @@ class LlamaCppBackendRegistryTests(unittest.TestCase):
         )
         self.assertEqual(backend_loader.argtypes, [ctypes.c_char_p])
         self.assertIsNone(backend_loader.restype)
+
+    def test_windows_backend_loader_can_find_packaged_runtime_dlls(self) -> None:
+        events: list[tuple[bytes, bool]] = []
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            site_packages = Path(temporary_directory) / "site-packages"
+            backend_directory = site_packages / "llama_cpp" / "lib"
+            dependency_directory = site_packages / "llama_cpp_python.libs"
+            backend_directory.mkdir(parents=True)
+            dependency_directory.mkdir()
+
+            def load_backends(path: bytes) -> None:
+                packaged_path = os.fspath(dependency_directory.resolve())
+                path_entries = os.environ["PATH"].split(os.pathsep)
+                events.append((path, packaged_path in path_entries))
+
+            api = SimpleNamespace(
+                ggml=SimpleNamespace(
+                    ggml_backend_load_all_from_path=_FakeNativeFunction(load_backends)
+                ),
+                ggml_backend_directory=backend_directory,
+            )
+            original_path = os.environ.get("PATH", "")
+
+            with (
+                patch.object(llama_cpp_runtime, "sys", SimpleNamespace(platform="win32")),
+                patch.dict(os.environ, {"PATH": original_path}),
+            ):
+                _load_packaged_backend_plugins(api)
+
+            self.assertEqual(
+                events,
+                [(os.fsencode(backend_directory.resolve()), True)],
+            )
 
 
 class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):

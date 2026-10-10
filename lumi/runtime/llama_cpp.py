@@ -17,6 +17,7 @@ import os
 import re
 import stat
 import struct
+import sys
 import threading
 import time
 from collections.abc import AsyncIterator, Callable, Mapping
@@ -1114,6 +1115,8 @@ def _load_packaged_backend_plugins(api: Any) -> None:
             directory = Path(backend_directory).resolve()
             if not directory.is_dir():
                 raise OSError("llama.cpp package library directory is unavailable")
+            if sys.platform == "win32":
+                _ensure_windows_backend_dependencies_on_path(directory)
             load_all = library.ggml_backend_load_all_from_path
             load_all.argtypes = [ctypes.c_char_p]
             load_all.restype = None
@@ -1125,6 +1128,31 @@ def _load_packaged_backend_plugins(api: Any) -> None:
             )
             return
         _LOADED_BACKEND_REGISTRIES[library_id] = library
+
+
+def _ensure_windows_backend_dependencies_on_path(backend_directory: Path) -> None:
+    """Expose delvewheel's sibling DLL directory to llama.cpp's Windows loader.
+
+    llama.cpp uses ``LoadLibraryW`` for dynamic backend plugins. That lookup does
+    not search the backend DLL's own directory for its imported dependencies, so
+    the repaired wheel's package-local ``llama_cpp_python.libs`` directory must
+    also be on PATH while the plugins are loaded.
+    """
+
+    dependency_directory = backend_directory.parent.parent / "llama_cpp_python.libs"
+    if not dependency_directory.is_dir():
+        return
+
+    dependency_path = os.fspath(dependency_directory.resolve())
+    normalized_dependency_path = os.path.normcase(os.path.abspath(dependency_path))
+    current_entries = [entry for entry in os.environ.get("PATH", "").split(os.pathsep) if entry]
+    if any(
+        os.path.normcase(os.path.abspath(entry)) == normalized_dependency_path
+        for entry in current_entries
+    ):
+        return
+
+    os.environ["PATH"] = os.pathsep.join([dependency_path, *current_entries])
 
 
 def _metadata_layer_count(metadata: Any) -> int | None:
