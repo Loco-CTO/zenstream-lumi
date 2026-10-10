@@ -4,6 +4,7 @@ import asyncio
 import ctypes
 import hashlib
 import json
+import os
 import struct
 import tempfile
 import threading
@@ -14,6 +15,7 @@ from types import FunctionType, SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import lumi.runtime.llama_cpp as llama_cpp_runtime
 from lumi.contracts import ChatMessage, ModelRequest, ToolDefinition
 from lumi.model_installation import (
     GGUF_FORMAT,
@@ -28,6 +30,7 @@ from lumi.runtime.llama_cpp import (
     LlamaCppProtocolError,
     LlamaCppRuntimeError,
     VerifiedModelArtifact,
+    _initialize_backend_registry,
 )
 
 _GGUF_FILENAME = "Qwen_Qwen3.5-test-Q4_K_M.gguf"
@@ -326,6 +329,82 @@ class FakeLlamaAPI:
 
     def list_gpu_devices(self) -> tuple[GpuDevice, ...]:
         return self.gpu_devices
+
+
+class LlamaCppBackendRegistryTests(unittest.TestCase):
+    def test_packaged_backends_load_before_registry_init_once(self) -> None:
+        events: list[tuple[str, object]] = []
+        llama_type = type("FakeLlama", (), {})
+        backend_loader = _FakeNativeFunction(lambda path: events.append(("load", path)))
+        backend_init = _FakeNativeFunction(
+            lambda: events.append(("initialize", None))
+        )
+
+        backend_directory = Path(__file__).resolve().parents[1] / "lumi"
+        encoded_backend_directory = os.fsencode(backend_directory.resolve())
+        api = SimpleNamespace(
+            Llama=llama_type,
+            ggml=SimpleNamespace(ggml_backend_load_all_from_path=backend_loader),
+            ggml_backend_directory=backend_directory,
+            llama_cpp=SimpleNamespace(llama_backend_init=backend_init),
+        )
+
+        _initialize_backend_registry(api)
+        _initialize_backend_registry(api)
+
+        self.assertEqual(
+            events,
+            [("load", encoded_backend_directory), ("initialize", None)],
+        )
+        self.assertEqual(backend_loader.argtypes, [ctypes.c_char_p])
+        self.assertIsNone(backend_loader.restype)
+
+    def test_windows_backend_loader_can_find_packaged_runtime_dlls(self) -> None:
+        events: list[tuple[str, bytes | None, bool]] = []
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            site_packages = Path(temporary_directory) / "site-packages"
+            backend_directory = site_packages / "llama_cpp" / "lib"
+            dependency_directory = site_packages / "llama_cpp_python.libs"
+            backend_directory.mkdir(parents=True)
+            dependency_directory.mkdir()
+
+            def load_backends(path: bytes) -> None:
+                packaged_path = os.fspath(dependency_directory.resolve())
+                path_entries = os.environ["PATH"].split(os.pathsep)
+                events.append(("load", path, packaged_path in path_entries))
+
+            def initialize_backends() -> None:
+                packaged_path = os.fspath(dependency_directory.resolve())
+                path_entries = os.environ["PATH"].split(os.pathsep)
+                events.append(("initialize", None, packaged_path in path_entries))
+
+            api = SimpleNamespace(
+                Llama=type("FakeLlama", (), {}),
+                ggml=SimpleNamespace(
+                    ggml_backend_load_all_from_path=_FakeNativeFunction(load_backends)
+                ),
+                ggml_backend_directory=backend_directory,
+                llama_cpp=SimpleNamespace(
+                    llama_backend_init=_FakeNativeFunction(initialize_backends)
+                ),
+            )
+            original_path = os.environ.get("PATH", "")
+
+            with (
+                patch.object(llama_cpp_runtime, "sys", SimpleNamespace(platform="win32")),
+                patch.dict(os.environ, {"PATH": original_path}),
+            ):
+                _initialize_backend_registry(api)
+                restored_path = os.environ.get("PATH", "")
+
+            self.assertEqual(
+                events,
+                [
+                    ("load", os.fsencode(backend_directory.resolve()), True),
+                    ("initialize", None, True),
+                ],
+            )
+            self.assertEqual(restored_path, original_path)
 
 
 class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
