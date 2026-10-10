@@ -397,6 +397,8 @@ def _compact_item(value: object) -> dict[str, Any] | None:
         return None
 
     compact: dict[str, Any] = {"id": entity_id, "type": entity_type, "title": title}
+    raw_metadata = value.get("metadata")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
     for key, limit in (
         ("overview", 800),
         ("description", 800),
@@ -407,10 +409,15 @@ def _compact_item(value: object) -> dict[str, Any] | None:
         ("albumArtist", 200),
         ("originalTitle", 160),
     ):
-        text = _bounded_text(value.get(key), limit)
+        text = _bounded_text(
+            value.get(key) if value.get(key) is not None else metadata.get(key),
+            limit,
+        )
         if text:
             compact[key] = text
-    aliases = _title_variants(value.get("aliases"))
+    aliases = _title_variants(
+        value.get("aliases") if value.get("aliases") is not None else metadata.get("aliases")
+    )
     if aliases:
         compact["aliases"] = aliases
     provider_ids = _provider_ids(value.get("providerIds"))
@@ -428,6 +435,8 @@ def _compact_item(value: object) -> dict[str, Any] | None:
             compact[key] = number
     for key in ("genres", "artists", "tags"):
         entries = value.get(key)
+        if entries is None:
+            entries = metadata.get(key)
         if isinstance(entries, list):
             selected = [text for entry in entries[:8] if (text := _bounded_text(entry, 80))]
             if selected:

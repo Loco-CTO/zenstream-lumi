@@ -3,18 +3,13 @@ from __future__ import annotations
 import json
 import unittest
 from collections.abc import Mapping
-from dataclasses import replace
 
 from lumi.agent import (
     AgentLimits,
     ChatAgent,
     InferenceError,
-    _enforce_local_recommendations,
-    _is_recommendation_request,
-    _recommendation_locale,
 )
 from lumi.contracts import (
-    ChatAnswer,
     ChatContext,
     ChatMessage,
     EntityReference,
@@ -253,57 +248,6 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         offline_messages = offline_agent._bounded_messages([], "Can you browse the web?")
         self.assertNotIn(WEB_CAPABILITY_INSTRUCTION, offline_messages[0].content)
 
-    def test_recommendation_locale_distinguishes_chinese_and_japanese(self) -> None:
-        self.assertEqual(_recommendation_locale("请用中文回答这个问题。"), "zh")
-        self.assertEqual(_recommendation_locale("この映画について日本語で答えてください。"), "ja")
-
-    def test_explicit_response_language_wins_over_search_and_title_languages(self) -> None:
-        self.assertEqual(
-            _recommendation_locale(
-                "Tell me when 葬送のフリーレン season two starts. Answer in English."
-            ),
-            "en",
-        )
-        self.assertEqual(
-            _recommendation_locale("When does 葬送のフリーレン season two start?"),
-            "en",
-        )
-        self.assertEqual(
-            _recommendation_locale(
-                "请用中文回答：请先搜索日文官方来源，再用英文来源核对。"
-            ),
-            "zh",
-        )
-
-    def test_latest_turn_language_overrides_previous_conversation_language(self) -> None:
-        agent = ChatAgent(FakeRuntime([]), ToolRegistry([]))
-        history = [
-            ChatMessage("user", "请用中文回答我关于这部电影的问题。"),
-            ChatMessage("assistant", "当然可以。"),
-        ]
-        turns = (
-            ("Please answer in English: what is the runtime?", "English"),
-            ("この作品の上映時間を日本語で答えてください。", "Japanese"),
-            ("请用中文回答：片长是多少？", "Chinese"),
-        )
-        for prompt, language in turns:
-            with self.subTest(language=language):
-                messages = agent._bounded_messages(history, prompt)
-                self.assertIn(f"For this turn, answer in {language}.", messages[0].content)
-                self.assertEqual(messages[-1].content, prompt)
-
-    def test_natural_english_follow_up_switches_from_chinese(self) -> None:
-        agent = ChatAgent(FakeRuntime([]), ToolRegistry([]))
-        history = [
-            ChatMessage("user", "请用中文回答我关于这部电影的问题。"),
-            ChatMessage("assistant", "当然可以。"),
-        ]
-
-        messages = agent._bounded_messages(history, "That sounds good")
-
-        self.assertIn("For this turn, answer in English.", messages[0].content)
-        self.assertEqual(messages[-1].content, "That sounds good")
-
     async def test_inference_diagnostics_do_not_log_prompt_or_exception_text(self) -> None:
         class FailingRuntime:
             async def complete(self, request: ModelRequest) -> ModelResponse:
@@ -322,219 +266,13 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("category=RuntimeError", message)
         self.assertNotIn("MUST_NOT_APPEAR_IN_LOGS", message)
 
-    async def test_generic_japanese_movie_recommendation_uses_only_a_local_movie(self) -> None:
-        series = EntityReference("series", "series-1", "ローカルシリーズ")
-        movie = EntityReference("movie", "movie-1", "ローカル映画")
+    async def test_model_uses_local_tool_and_authors_recommendation(self) -> None:
+        movie = EntityReference("movie", "movie-1", "Local Film")
         tool = HomeRecommendationsTool(
             ToolResult(
-                json.dumps(
-                    {
-                        "items": [
-                            {"type": "series", "id": series.id, "title": series.title},
-                            {"type": "movie", "id": movie.id, "title": movie.title},
-                        ]
-                    },
-                    ensure_ascii=False,
-                ),
+                json.dumps({"items": [{"type": "movie", "id": movie.id, "title": movie.title}]}),
                 EvidenceTrust.LOCAL,
-                entities=(series, movie),
-            )
-        )
-        runtime = FakeRuntime([])
-        agent = ChatAgent(runtime, ToolRegistry([tool]))
-
-        answer = await agent.answer(
-            chat_context(),
-            [],
-            "私のZenStreamライブラリにある、今すぐ視聴可能な映画を1本だけおすすめしてください。"
-            "必ずローカルライブラリの検索ツールで確認し、正確な作品名と理由を示してください。",
-        )
-
-        self.assertEqual(answer.references, (movie,))
-        self.assertIn('type="movie" id="movie-1"', answer.markdown)
-        self.assertIn("おすすめ", answer.markdown)
-        self.assertEqual(tool.calls, [chat_context()])
-        self.assertEqual(runtime.requests, [])
-        self.assertEqual(answer.tool_calls, 1)
-
-    async def test_generic_chinese_movie_recommendation_uses_only_a_local_movie(self) -> None:
-        series = EntityReference("series", "series-1", "本地剧集")
-        movie = EntityReference("movie", "movie-1", "本地电影")
-        tool = HomeRecommendationsTool(
-            ToolResult(
-                json.dumps(
-                    {
-                        "items": [
-                            {"type": "series", "id": series.id, "title": series.title},
-                            {"type": "movie", "id": movie.id, "title": movie.title},
-                        ]
-                    },
-                    ensure_ascii=False,
-                ),
-                EvidenceTrust.LOCAL,
-                entities=(series, movie),
-            )
-        )
-        runtime = FakeRuntime([])
-        agent = ChatAgent(runtime, ToolRegistry([tool]))
-
-        answer = await agent.answer(
-            chat_context(),
-            [],
-            "请推荐一部我在 ZenStream 本地电影库里现在能观看的电影。"
-            "请先使用本地搜索工具确认影片确实存在，只推荐一部，并用中文简要说明理由。",
-        )
-
-        self.assertEqual(answer.references, (movie,))
-        self.assertIn("本地推荐", answer.markdown)
-        self.assertIn('type="movie" id="movie-1"', answer.markdown)
-        self.assertEqual(tool.calls, [chat_context()])
-        self.assertEqual(runtime.requests, [])
-        self.assertEqual(answer.tool_calls, 1)
-
-    async def test_chinese_local_recommendation_does_not_invent_when_no_results_exist(
-        self,
-    ) -> None:
-        tool = HomeRecommendationsTool(
-            ToolResult('{"items":[]}', EvidenceTrust.LOCAL)
-        )
-        runtime = FakeRuntime([])
-        agent = ChatAgent(runtime, ToolRegistry([tool]))
-
-        answer = await agent.answer(
-            chat_context(), [], "请从我的 ZenStream 本地媒体库中推荐一部电影。"
-        )
-
-        self.assertEqual(
-            answer.markdown,
-            "目前无法获取经过验证的本地推荐。您可以重试，或按片名或类型搜索。",
-        )
-        self.assertEqual(answer.references, ())
-        self.assertEqual(len(tool.calls), 1)
-        self.assertEqual(runtime.requests, [])
-
-    async def test_default_constrained_recommendation_only_returns_verified_local_titles(
-        self,
-    ) -> None:
-        local_movie = EntityReference("movie", "movie-1", "Local Film")
-        tool = HomeRecommendationsTool(
-            ToolResult(
-                '{"items":[{"type":"movie","id":"movie-1","title":"Local Film"}]}',
-                EvidenceTrust.LOCAL,
-                entities=(local_movie,),
-            )
-        )
-        runtime = FakeRuntime(
-            [
-                ChatMessage(
-                    "assistant",
-                    "",
-                    tool_calls=(
-                        ToolCall("call-1", "zenstream_home_recommendations", {}),
-                    ),
-                ),
-                ChatMessage(
-                    "assistant",
-                    "I recommend Unavailable Show. I recommend Local Film because it matches "
-                    "the political themes.",
-                ),
-            ]
-        )
-        agent = ChatAgent(runtime, ToolRegistry([tool]))
-
-        answer = await agent.answer(
-            chat_context(), [], "Recommend a movie like Code Geass with political intrigue."
-        )
-
-        self.assertIn("Local Film", answer.markdown)
-        self.assertNotIn("Unavailable Show", answer.markdown)
-        self.assertEqual(answer.references, (local_movie,))
-
-    def test_paraphrased_recommendations_are_detected_without_matching_catalog_questions(
-        self,
-    ) -> None:
-        recommendation_prompts = (
-            "Any good films for tonight?",
-            "今夜見るのにいい映画ありますか？",
-            "有什么值得看的电影？",
-        )
-        catalog_questions = (
-            "What films are in my library?",
-            "ライブラリにある映画を一覧で見せて。",
-            "列出我的媒体库里有哪些电影。",
-        )
-
-        for user_text in recommendation_prompts:
-            with self.subTest(user_text=user_text):
-                self.assertTrue(_is_recommendation_request(user_text, []))
-        for user_text in catalog_questions:
-            with self.subTest(user_text=user_text):
-                self.assertFalse(_is_recommendation_request(user_text, []))
-
-    async def test_paraphrased_recommendations_fail_closed_without_local_evidence(self) -> None:
-        prompts = (
-            "Any good films for tonight?",
-            "今夜見るのにいい映画ありますか？",
-            "有什么值得看的电影？",
-        )
-        for user_text in prompts:
-            with self.subTest(user_text=user_text):
-                runtime = FakeRuntime([ChatMessage("assistant", "Try Outside Film.")])
-                answer = await ChatAgent(runtime, ToolRegistry([])).answer(
-                    chat_context(), [], user_text
-                )
-
-                self.assertNotIn("Outside Film", answer.markdown)
-                self.assertEqual(answer.references, ())
-
-    async def test_ordinary_library_inventory_question_is_not_rewritten_as_a_recommendation(
-        self,
-    ) -> None:
-        runtime = FakeRuntime([ChatMessage("assistant", "Your library contains 12 films.")])
-        answer = await ChatAgent(runtime, ToolRegistry([])).answer(
-            chat_context(), [], "What films are in my library?"
-        )
-
-        self.assertEqual(answer.markdown, "Your library contains 12 films.")
-
-    async def test_negated_outside_library_requests_keep_local_enforcement(self) -> None:
-        cases = (
-            (
-                "Don't recommend films outside my library.",
-                "I couldn't verify a matching title",
-            ),
-            (
-                "ライブラリ外の映画をおすすめしないでください。",
-                "ZenStreamライブラリ内に一致する作品があるか確認できませんでした。",
-            ),
-            (
-                "请不要推荐库外电影。",
-                "我无法确认您的 ZenStream 媒体库中有匹配作品。",
-            ),
-        )
-        for user_text, expected_prefix in cases:
-            with self.subTest(user_text=user_text):
-                runtime = FakeRuntime([ChatMessage("assistant", "I recommend Outside Film.")])
-                agent = ChatAgent(
-                    runtime,
-                    ToolRegistry(
-                        [HomeRecommendationsTool(ToolResult('{"items":[]}', EvidenceTrust.LOCAL))]
-                    ),
-                )
-
-                answer = await agent.answer(chat_context(), [], user_text)
-
-                self.assertTrue(answer.markdown.startswith(expected_prefix))
-                self.assertNotIn("Outside Film", answer.markdown)
-
-    async def test_sanitizer_keeps_local_titles_but_drops_unverified_rationale(self) -> None:
-        rejected = EntityReference("movie", "movie-1", "Rejected Film")
-        selected = EntityReference("movie", "movie-2", "Verified Film")
-        tool = HomeRecommendationsTool(
-            ToolResult(
-                '{"items":[]}',
-                EvidenceTrust.LOCAL,
-                entities=(rejected, selected),
+                entities=(movie,),
             )
         )
         runtime = FakeRuntime(
@@ -546,190 +284,40 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 ChatMessage(
                     "assistant",
-                    'Rejected Film is not a match :::zenstream{type="movie" id="movie-1"}. '
-                    'I recommend Verified Film because its political intrigue '
-                    'matches your request, '
-                    'released in 2027 and rated 9.8 '
-                    ':::zenstream{type="movie" id="movie-2"}.',
+                    'For a reflective fantasy, try Local Film because it has a '
+                    'similarly calm tone. '
+                    ':::zenstream{type="movie" id="movie-1"}',
                 ),
             ]
         )
         agent = ChatAgent(runtime, ToolRegistry([tool]))
+        user_text = "葬送のフリーレンのような作品は？"
 
-        answer = await agent.answer(
-            chat_context(), [], "Recommend a movie like Code Geass with political intrigue."
+        answer = await agent.answer(chat_context(), [], user_text)
+
+        self.assertEqual(tool.calls, [chat_context()])
+        self.assertEqual(len(runtime.requests), 2)
+        self.assertEqual(runtime.requests[0].messages[-1].content, user_text)
+        self.assertIn(
+            "zenstream_home_recommendations",
+            {item.name for item in runtime.requests[0].tools},
         )
-
-        self.assertIn("Verified Film", answer.markdown)
-        self.assertNotIn("political intrigue", answer.markdown)
-        self.assertNotIn("2027", answer.markdown)
-        self.assertNotIn("9.8", answer.markdown)
-        self.assertNotIn("Rejected Film", answer.markdown)
-        self.assertEqual(answer.references, (selected,))
-
-    def test_sanitizer_does_not_select_incidental_title_substrings_or_answer_references(
-        self,
-    ) -> None:
-        incidental = EntityReference("movie", "movie-1", "Local Film")
-        answer = ChatAnswer(
-            markdown="Local Film was mentioned incidentally.",
-            references=(incidental,),
-            sources=(),
-            tool_rounds=1,
-            tool_calls=1,
-        )
-
-        sanitized = _enforce_local_recommendations(
-            answer,
-            "Recommend a movie like Code Geass.",
-            {(incidental.type, incidental.id): incidental},
-        )
-
-        self.assertNotIn("Local Film", sanitized.markdown)
-        self.assertEqual(sanitized.references, ())
-
-    async def test_default_chinese_and_japanese_recommendations_fail_closed_without_local_matches(
-        self,
-    ) -> None:
-        cases = (
-            (
-                "请推荐一部类似《Code Geass》的电影。",
-                "我无法确认您的 ZenStream 媒体库中有匹配作品。",
-            ),
-            (
-                "コードギアスに似た映画をおすすめしてください。",
-                "ZenStreamライブラリ内に一致する作品があるか確認できませんでした。",
-            ),
-        )
-        for user_text, localized_prefix in cases:
-            with self.subTest(user_text=user_text):
-                runtime = FakeRuntime([ChatMessage("assistant", "Try an outside title.")])
-                agent = ChatAgent(
-                    runtime,
-                    ToolRegistry(
-                        [HomeRecommendationsTool(ToolResult("{\"items\":[]}", EvidenceTrust.LOCAL))]
-                    ),
-                )
-
-                answer = await agent.answer(chat_context(), [], user_text)
-
-                self.assertTrue(answer.markdown.startswith(localized_prefix))
-                self.assertNotIn("outside title", answer.markdown)
-                self.assertEqual(answer.references, ())
-
-    async def test_explicit_outside_library_opt_in_is_preserved_in_english_japanese_and_chinese(
-        self,
-    ) -> None:
-        prompts = (
-            "Recommend a film outside my library.",
-            "ライブラリ外の映画をおすすめしてください。",
-            "请推荐一部本地片库中没有的电影。",
-        )
-        for user_text in prompts:
-            with self.subTest(user_text=user_text):
-                response = "An outside-library title is Example Film."
-                runtime = FakeRuntime([ChatMessage("assistant", response)])
-                agent = ChatAgent(
-                    runtime,
-                    ToolRegistry(
-                        [HomeRecommendationsTool(ToolResult("{\"items\":[]}", EvidenceTrust.LOCAL))]
-                    ),
-                )
-
-                answer = await agent.answer(chat_context(), [], user_text)
-
-                self.assertEqual(answer.markdown, response)
-                self.assertEqual(runtime.requests[0].messages[-1].content, user_text)
-
-    async def test_outside_library_opt_in_does_not_leak_to_a_new_recommendation(self) -> None:
-        runtime = FakeRuntime([ChatMessage("assistant", "Try an outside title.")])
-        agent = ChatAgent(
-            runtime,
-            ToolRegistry(
-                [HomeRecommendationsTool(ToolResult("{\"items\":[]}", EvidenceTrust.LOCAL))]
-            ),
-        )
-
-        answer = await agent.answer(
-            chat_context(),
-            [
-                ChatMessage("user", "Recommend a film outside my library."),
-                ChatMessage("assistant", "Sure, here are some options."),
-            ],
-            "Recommend an anime like Code Geass.",
-        )
-
-        self.assertIn("I couldn't verify a matching title", answer.markdown)
-        self.assertNotIn("outside title", answer.markdown)
-
-    async def test_constrained_and_outside_library_recommendations_remain_agentic(self) -> None:
-        tool = HomeRecommendationsTool(ToolResult('{"items":[]}', EvidenceTrust.LOCAL))
-        runtime = FakeRuntime(
-            [
-                ChatMessage("assistant", "I will compare local matches for that theme."),
-                ChatMessage("assistant", "I will research an outside-library option."),
-                ChatMessage("assistant", "I will use the previous local results."),
-                ChatMessage("assistant", "I will look for an album."),
-                ChatMessage("assistant", "ライブラリ外の映画を調べます。"),
-                ChatMessage("assistant", "我会查找一部库外电影。"),
-                ChatMessage("assistant", "I will apply your earlier constraints."),
-                ChatMessage("assistant", "I will check the year and requested count."),
-                ChatMessage("assistant", "I will look up ratings before recommending."),
-                ChatMessage("assistant", "I will clarify the mixed anime/movie request."),
-                ChatMessage("assistant", "I will compare both requested media types."),
-                ChatMessage("assistant", "I will rank several local candidates."),
-                ChatMessage("assistant", "候補の本数を確認して検索します。"),
-                ChatMessage("assistant", "高評価の条件を確認します。"),
-                ChatMessage("assistant", "我会查找符合条件的本地电影。"),
-                ChatMessage("assistant", "我会确认库外电影的资料。"),
-            ]
-        )
-        agent = ChatAgent(runtime, ToolRegistry([tool]))
-
-        await agent.answer(chat_context(), [], "Recommend an anime like Code Geass.")
-        await agent.answer(
-            chat_context(), [], "Recommend something outside my library, even if I don't have it."
-        )
-        await agent.answer(chat_context(), [], "Recommend a different one.")
-        await agent.answer(chat_context(), [], "Recommend an album.")
-        await agent.answer(chat_context(), [], "ライブラリにない映画をおすすめして。")
-        await agent.answer(chat_context(), [], "推荐一部我的本地片库中没有的电影。")
-        await agent.answer(
-            chat_context(),
-            [ChatMessage("user", "I prefer mystery movies under two hours.")],
-            "Recommend one movie.",
-        )
-        await agent.answer(chat_context(), [], "Recommend three movies from 1990.")
-        await agent.answer(chat_context(), [], "Recommend a highly rated movie.")
-        await agent.answer(chat_context(), [], "Recommend movies or anime.")
-        await agent.answer(chat_context(), [], "Recommend one movie and one series.")
-        await agent.answer(chat_context(), [], "Recommend the top 3 movies.")
-        await agent.answer(chat_context(), [], "映画を3本おすすめしてください。")
-        await agent.answer(chat_context(), [], "高評価の映画をおすすめしてください。")
-        await agent.answer(chat_context(), [], "推荐一部类似《Code Geass》的电影。")
-        await agent.answer(chat_context(), [], "请推荐一部库外的电影。")
-
-        self.assertEqual(tool.calls, [])
-        self.assertEqual(len(runtime.requests), 16)
-
-    async def test_anime_movie_shortcut_selects_only_movies(self) -> None:
-        series = EntityReference("series", "series-1", "A Local Series")
-        movie = EntityReference("movie", "movie-1", "A Local Film")
-        tool = HomeRecommendationsTool(
-            ToolResult(
-                json.dumps({"items": [{"type": "series"}, {"type": "movie"}]}),
-                EvidenceTrust.LOCAL,
-                entities=(series, movie),
-            )
-        )
-        runtime = FakeRuntime([])
-        agent = ChatAgent(runtime, ToolRegistry([tool]))
-
-        answer = await agent.answer(chat_context(), [], "Recommend one anime movie.")
-
+        self.assertIn("similarly calm tone", answer.markdown)
         self.assertEqual(answer.references, (movie,))
-        self.assertEqual(len(tool.calls), 1)
-        self.assertEqual(runtime.requests, [])
+        self.assertEqual(answer.tool_calls, 1)
+
+    async def test_model_text_is_not_replaced_by_a_recommendation_template(self) -> None:
+        response = "Tell me whether you prefer a quiet journey or more action."
+        runtime = FakeRuntime([ChatMessage("assistant", response)])
+        answer = await ChatAgent(runtime, ToolRegistry([])).answer(
+            chat_context(), [], "Could you suggest something like this?"
+        )
+
+        self.assertEqual(answer.markdown, response)
+        self.assertEqual(
+            runtime.requests[0].messages[-1].content,
+            "Could you suggest something like this?",
+        )
 
     async def test_collapses_consecutive_duplicate_answer_paragraphs(self) -> None:
         agent = ChatAgent(FakeRuntime([]), ToolRegistry([]))
@@ -797,94 +385,6 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("private-delegation", runtime.requests[0].messages[0].content)
         self.assertEqual(runtime.requests[0].tools[0].name, "search_catalog")
 
-    async def test_relationship_follow_up_uses_local_id_and_searches_in_two_languages(self) -> None:
-        movie = EntityReference("movie", "movie-1", "コードギアス 反逆のルルーシュⅠ 興道")
-        source = Source(
-            url="https://geass.jp/L-geass/",
-            website_name="Code Geass Official",
-            title="Code Geass Lelouch of the Re;surrection Official Website",
-        )
-        detail = RelationshipDetailTool(movie)
-        search = RelationshipSearchTool(source)
-        runtime = FakeRuntime(
-            [ChatMessage("assistant", f"{movie.title} は三部作の第1作です。次は『叛道』です。")]
-        )
-        agent = ChatAgent(runtime, ToolRegistry([detail, search]))
-        base = chat_context()
-        context = ChatContext(
-            account_id=base.account_id,
-            conversation_id=base.conversation_id,
-            model=base.model,
-            thinking=base.thinking,
-            turn_id=base.turn_id,
-            delegation_token=base.delegation_token,
-            previous_entities=(movie,),
-        )
-
-        answer = await agent.answer(
-            context,
-            [ChatMessage("assistant", f"Recommended: {movie.title}")],
-            "この映画はシリーズ全体のどの位置にある作品ですか？前後の作品も確認してください。",
-        )
-
-        self.assertEqual(detail.calls, [movie.id])
-        self.assertEqual({call["language"] for call in search.calls}, {"ja", "en"})
-        self.assertTrue(all(movie.title in str(call["query"]) for call in search.calls))
-        self.assertTrue(all(movie.id not in str(call["query"]) for call in search.calls))
-        self.assertTrue(all("account-1" not in str(call) for call in search.calls))
-        self.assertEqual(answer.sources, (source,))
-        self.assertEqual(answer.references, (movie,))
-        self.assertIn(f'type="movie" id="{movie.id}"', answer.markdown)
-        self.assertEqual(answer.tool_calls, 3)
-        self.assertEqual(
-            {tool.name for tool in runtime.requests[0].tools},
-            {"zenstream_catalog_item_detail", "web_search"},
-        )
-        self.assertTrue(
-            any(
-                message.role == "tool" and message.name == "web_search"
-                for message in runtime.requests[0].messages
-            )
-        )
-
-    async def test_chinese_relationship_follow_up_searches_in_chinese_and_english(self) -> None:
-        movie = EntityReference("movie", "movie-1", "コードギアス 反逆のルルーシュⅠ 興道")
-        source = Source(
-            url="https://geass.jp/L-geass/",
-            website_name="Code Geass Official",
-            title="Code Geass Lelouch of the Re;surrection Official Website",
-        )
-        detail = RelationshipDetailTool(movie)
-        search = RelationshipSearchTool(source)
-        runtime = FakeRuntime(
-            [ChatMessage("assistant", f"《{movie.title}》是系列第一部。")]
-        )
-        agent = ChatAgent(runtime, ToolRegistry([detail, search]))
-        base = chat_context()
-        context = ChatContext(
-            account_id=base.account_id,
-            conversation_id=base.conversation_id,
-            model=base.model,
-            thinking=base.thinking,
-            turn_id=base.turn_id,
-            delegation_token=base.delegation_token,
-            previous_entities=(movie,),
-        )
-
-        answer = await agent.answer(
-            context,
-            [ChatMessage("assistant", f"刚才推荐了：{movie.title}")],
-            "这部电影在系列中的观看顺序是什么？请核实前传和续集。",
-        )
-
-        self.assertEqual(detail.calls, [movie.id])
-        self.assertEqual({call["language"] for call in search.calls}, {"zh", "en"})
-        self.assertTrue(all(movie.title in str(call["query"]) for call in search.calls))
-        self.assertTrue(all(movie.id not in str(call["query"]) for call in search.calls))
-        self.assertEqual(answer.sources, (source,))
-        self.assertEqual(answer.references, (movie,))
-        self.assertIn(f'type="movie" id="{movie.id}"', answer.markdown)
-
     async def test_follow_up_receives_recent_trusted_reference_titles(self) -> None:
         movie = EntityReference("movie", "movie-1", "The Local Film")
         runtime = FakeRuntime([ChatMessage("assistant", "It is available locally.")])
@@ -920,7 +420,22 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                 title="Official title",
             )
         )
-        runtime = FakeRuntime([ChatMessage("assistant", "I cannot verify the order offline.")])
+        runtime = FakeRuntime(
+            [
+                ChatMessage(
+                    "assistant",
+                    "",
+                    tool_calls=(
+                        ToolCall(
+                            "call-1",
+                            "zenstream_catalog_item_detail",
+                            {"entity_id": movie.id},
+                        ),
+                    ),
+                ),
+                ChatMessage("assistant", "The local title is a standalone film."),
+            ]
+        )
         agent = ChatAgent(runtime, ToolRegistry([detail, search]))
         base = chat_context()
         context = ChatContext(
@@ -942,49 +457,30 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail.calls, [movie.id])
         self.assertEqual(search.calls, [])
         self.assertEqual(answer.sources, ())
-        self.assertEqual(
+        self.assertIn(
+            "zenstream_catalog_item_detail",
             {tool.name for tool in runtime.requests[0].tools},
-            {"zenstream_catalog_item_detail"},
         )
+        self.assertEqual(len(runtime.requests), 2)
 
-    async def test_inference_timeout_returns_localized_safe_answer(self) -> None:
+    async def test_inference_timeout_propagates_without_fabricating_an_answer(self) -> None:
         class TimeoutRuntime:
             async def complete(self, request: ModelRequest) -> ModelResponse:
                 raise TimeoutError
 
-        movie = EntityReference("movie", "movie-1", "Local film")
-        base = chat_context()
-        context = ChatContext(
-            account_id=base.account_id,
-            conversation_id=base.conversation_id,
-            model=base.model,
-            thinking=base.thinking,
-            turn_id=base.turn_id,
-            previous_entities=(movie,),
-        )
-        agent = ChatAgent(TimeoutRuntime(), ToolRegistry([]))
+        with self.assertRaises(InferenceError):
+            await ChatAgent(TimeoutRuntime(), ToolRegistry([])).answer(
+                chat_context(), [], "What should I watch?"
+            )
 
-        answer = await agent.answer(
-            context,
-            [ChatMessage("assistant", "Local film")],
-            "この映画は三部作の何番目ですか？",
-        )
-
-        self.assertIn("作品同士の関係を確認できませんでした", answer.markdown)
-        self.assertEqual(answer.references, (movie,))
-        self.assertNotIn("temporarily unavailable", answer.markdown)
-
-    async def test_chinese_research_limit_returns_a_chinese_safe_answer(self) -> None:
+    async def test_research_limit_timeout_propagates_without_a_canned_answer(self) -> None:
         class TimeoutRuntime:
             async def complete(self, request: ModelRequest) -> ModelResponse:
                 raise TimeoutError
 
-        context = replace(chat_context(), user_message="请用中文回答并核实官方资料。")
         agent = ChatAgent(TimeoutRuntime(), ToolRegistry([]))
-
-        answer = await agent._answer_after_limit(context, [], {}, {}, 1, 1)
-
-        self.assertEqual(answer.markdown, "研究已达到限制，我还无法给出可靠完整的答案。")
+        with self.assertRaises(InferenceError):
+            await agent._answer_after_limit(chat_context(), [], {}, {}, 1, 1)
 
     async def test_drops_malformed_reference_syntax_and_links_one_exact_trusted_title(self) -> None:
         movie = EntityReference("movie", "movie-1", "A Trusted Film")
@@ -1348,9 +844,14 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.requests[0].model, "qwen3.5:2b")
         self.assertFalse(runtime.requests[0].thinking)
 
-    async def test_removes_inline_thinking_and_rejects_external_entity_ids(self) -> None:
+    async def test_removes_inline_thinking_and_rejects_external_entities(self) -> None:
         runtime = FakeRuntime(
-            [ChatMessage("assistant", "<think>private reasoning</think>Visible answer.")]
+            [
+                ChatMessage(
+                    "assistant",
+                    "<think>private reasoning</think>Visible answer.",
+                )
+            ]
         )
         agent = ChatAgent(runtime, ToolRegistry([]))
 

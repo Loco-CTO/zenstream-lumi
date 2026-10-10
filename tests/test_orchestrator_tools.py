@@ -62,6 +62,47 @@ def media_item(
 
 
 class OrchestratorToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_home_recommendations_keep_nested_genres_for_grounded_filtering(self) -> None:
+        app = FastAPI()
+
+        @app.get("/api/internal/lumi/tools/home/recommendations")
+        async def home_recommendations() -> JSONResponse:
+            return JSONResponse(
+                {
+                    "items": [
+                        {
+                            "id": "anime-series",
+                            "type": "series",
+                            "name": "Local Anime",
+                            "metadata": {
+                                "genres": ["Anime"],
+                                "tags": ["Fantasy"],
+                                "originalTitle": "アニメタイトル",
+                            },
+                        }
+                    ]
+                }
+            )
+
+        registry = build_zenstream_tool_registry(
+            "http://orchestrator.test:9090",
+            SERVICE_TOKEN,
+            transport=httpx.ASGITransport(app=app),
+        )
+        tool = registry.get("zenstream_home_recommendations")
+        assert tool is not None
+
+        result = await tool.execute(make_context(), {})
+
+        self.assertEqual(
+            result.entities,
+            (EntityReference("series", "anime-series", "Local Anime"),),
+        )
+        item = json.loads(result.content)["items"][0]
+        self.assertEqual(item["genres"], ["Anime"])
+        self.assertEqual(item["tags"], ["Fantasy"])
+        self.assertEqual(item["originalTitle"], "アニメタイトル")
+
     async def test_chat_agent_uses_delegated_search_and_returns_validated_reference(self) -> None:
         app = FastAPI()
         captured: list[tuple[str, str, dict[str, str], dict[str, Any]]] = []
