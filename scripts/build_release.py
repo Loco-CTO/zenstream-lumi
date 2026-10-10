@@ -353,6 +353,13 @@ def build_release(
     _project, release = _load_config(project_root)
     package_files = _package_files(project_root / "lumi")
     runtime, installer = _collect_wheels(wheelhouse, release)
+    native_build_ids = release.get("native-runtime-build-ids")
+    if (
+        not isinstance(native_build_ids, dict)
+        or set(native_build_ids) != {"windows-x64", "linux-x64", "linux-arm64"}
+        or any(not isinstance(value, str) or not value for value in native_build_ids.values())
+    ):
+        raise ReleaseBuildError("native runtime build IDs are missing or invalid")
     manifest: dict[str, Any] = {
         "schemaVersion": 1,
         "tag": tag,
@@ -365,6 +372,7 @@ def build_release(
         },
         "runtimeDependencies": [wheel.manifest_entry() for wheel in runtime],
         "installerDependencies": [wheel.manifest_entry() for wheel in installer],
+        "nativeRuntimeBuildIds": native_build_ids,
     }
     output.mkdir(parents=True, exist_ok=True)
     for wheel in (*runtime, *installer):
