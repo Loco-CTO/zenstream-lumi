@@ -20,7 +20,8 @@ import struct
 import sys
 import threading
 import time
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from types import FunctionType, MappingProxyType, SimpleNamespace
@@ -1069,8 +1070,6 @@ def _initialize_backend_registry(api: Any) -> None:
     class flag to avoid repeating the same global initialization in its constructor.
     """
 
-    _load_packaged_backend_plugins(api)
-
     llama_type = getattr(api, "Llama", None)
     backend_initialized_attribute = "_Llama__backend_initialized"
     if (
@@ -1081,10 +1080,17 @@ def _initialize_backend_registry(api: Any) -> None:
 
     native_module = getattr(api, "llama_cpp", None)
     backend_init = getattr(native_module, "llama_backend_init", None)
-    if not callable(backend_init):
-        return
     try:
-        backend_init()
+        backend_directory = getattr(api, "ggml_backend_directory", None)
+        dependency_path = (
+            _windows_backend_dependencies_on_path(Path(backend_directory).resolve())
+            if sys.platform == "win32" and backend_directory is not None
+            else nullcontext()
+        )
+        with dependency_path:
+            _load_packaged_backend_plugins(api)
+            if callable(backend_init):
+                backend_init()
     except Exception as error:
         raise LlamaCppBackendInitializationError(
             "The llama.cpp backend registry could not initialize; CPU fallback is "
@@ -1115,8 +1121,6 @@ def _load_packaged_backend_plugins(api: Any) -> None:
             directory = Path(backend_directory).resolve()
             if not directory.is_dir():
                 raise OSError("llama.cpp package library directory is unavailable")
-            if sys.platform == "win32":
-                _ensure_windows_backend_dependencies_on_path(directory)
             load_all = library.ggml_backend_load_all_from_path
             load_all.argtypes = [ctypes.c_char_p]
             load_all.restype = None
@@ -1130,17 +1134,22 @@ def _load_packaged_backend_plugins(api: Any) -> None:
         _LOADED_BACKEND_REGISTRIES[library_id] = library
 
 
-def _ensure_windows_backend_dependencies_on_path(backend_directory: Path) -> None:
-    """Expose delvewheel's sibling DLL directory to llama.cpp's Windows loader.
+@contextmanager
+def _windows_backend_dependencies_on_path(
+    backend_directory: Path,
+) -> Iterator[None]:
+    """Temporarily expose delvewheel DLLs while llama.cpp registers backends.
 
     llama.cpp uses ``LoadLibraryW`` for dynamic backend plugins. That lookup does
     not search the backend DLL's own directory for its imported dependencies, so
-    the repaired wheel's package-local ``llama_cpp_python.libs`` directory must
-    also be on PATH while the plugins are loaded.
+    the repaired wheel's package-local ``llama_cpp_python.libs`` directory must be
+    on PATH while the plugin DLLs and their dependencies are loaded. Restoring
+    PATH on exit avoids leaking this package-private directory to child processes.
     """
 
     dependency_directory = backend_directory.parent.parent / "llama_cpp_python.libs"
     if not dependency_directory.is_dir():
+        yield
         return
 
     dependency_path = os.fspath(dependency_directory.resolve())
@@ -1150,9 +1159,18 @@ def _ensure_windows_backend_dependencies_on_path(backend_directory: Path) -> Non
         os.path.normcase(os.path.abspath(entry)) == normalized_dependency_path
         for entry in current_entries
     ):
+        yield
         return
 
+    original_path = os.environ.get("PATH")
     os.environ["PATH"] = os.pathsep.join([dependency_path, *current_entries])
+    try:
+        yield
+    finally:
+        if original_path is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = original_path
 
 
 def _metadata_layer_count(metadata: Any) -> int | None:

@@ -31,7 +31,6 @@ from lumi.runtime.llama_cpp import (
     LlamaCppRuntimeError,
     VerifiedModelArtifact,
     _initialize_backend_registry,
-    _load_packaged_backend_plugins,
 )
 
 _GGUF_FILENAME = "Qwen_Qwen3.5-test-Q4_K_M.gguf"
@@ -361,7 +360,7 @@ class LlamaCppBackendRegistryTests(unittest.TestCase):
         self.assertIsNone(backend_loader.restype)
 
     def test_windows_backend_loader_can_find_packaged_runtime_dlls(self) -> None:
-        events: list[tuple[bytes, bool]] = []
+        events: list[tuple[str, bytes | None, bool]] = []
         with tempfile.TemporaryDirectory() as temporary_directory:
             site_packages = Path(temporary_directory) / "site-packages"
             backend_directory = site_packages / "llama_cpp" / "lib"
@@ -372,13 +371,22 @@ class LlamaCppBackendRegistryTests(unittest.TestCase):
             def load_backends(path: bytes) -> None:
                 packaged_path = os.fspath(dependency_directory.resolve())
                 path_entries = os.environ["PATH"].split(os.pathsep)
-                events.append((path, packaged_path in path_entries))
+                events.append(("load", path, packaged_path in path_entries))
+
+            def initialize_backends() -> None:
+                packaged_path = os.fspath(dependency_directory.resolve())
+                path_entries = os.environ["PATH"].split(os.pathsep)
+                events.append(("initialize", None, packaged_path in path_entries))
 
             api = SimpleNamespace(
+                Llama=type("FakeLlama", (), {}),
                 ggml=SimpleNamespace(
                     ggml_backend_load_all_from_path=_FakeNativeFunction(load_backends)
                 ),
                 ggml_backend_directory=backend_directory,
+                llama_cpp=SimpleNamespace(
+                    llama_backend_init=_FakeNativeFunction(initialize_backends)
+                ),
             )
             original_path = os.environ.get("PATH", "")
 
@@ -386,12 +394,17 @@ class LlamaCppBackendRegistryTests(unittest.TestCase):
                 patch.object(llama_cpp_runtime, "sys", SimpleNamespace(platform="win32")),
                 patch.dict(os.environ, {"PATH": original_path}),
             ):
-                _load_packaged_backend_plugins(api)
+                _initialize_backend_registry(api)
+                restored_path = os.environ.get("PATH", "")
 
             self.assertEqual(
                 events,
-                [(os.fsencode(backend_directory.resolve()), True)],
+                [
+                    ("load", os.fsencode(backend_directory.resolve()), True),
+                    ("initialize", None, True),
+                ],
             )
+            self.assertEqual(restored_path, original_path)
 
 
 class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
