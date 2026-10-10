@@ -160,6 +160,10 @@ class LumiReleaseBuildTests(unittest.TestCase):
 
             self.assertEqual(manifest["schemaVersion"], 1)
             self.assertEqual(manifest["tag"], RELEASE_TAG)
+            self.assertEqual(
+                manifest["nativeRuntimeBuildIds"],
+                _PROJECT_METADATA["tool"]["lumi"]["release"]["native-runtime-build-ids"],
+            )
             self.assertEqual(len(manifest["runtimeDependencies"]), 30)
             self.assertEqual(len(manifest["installerDependencies"]), 5)
             runtime_names = {

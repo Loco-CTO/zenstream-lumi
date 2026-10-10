@@ -68,26 +68,36 @@ jobs:
     steps:
       - name: Check out Lumi
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Set up MSVC for the Ninja CUDA build
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
-        with:
-          arch: amd64
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      - name: Reuse a compatible published runtime wheel
+        id: reuse
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/reuse_native_runtime_wheel.py --target windows-x64 --wheel-dir dist/wheels/runtime
+      - name: Set up MSVC for the Ninja CUDA build
+        if: steps.reuse.outputs.hit != 'true'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: amd64
       - name: Install the pinned Ninja build tool
+        if: steps.reuse.outputs.hit != 'true'
         run: python -m pip install "ninja==1.13.0"
       - name: Install pinned CUDA build components
+        if: steps.reuse.outputs.hit != 'true'
         shell: pwsh
         run: ./scripts/install_cuda_redist_windows.ps1
       - name: Install the pinned Vulkan SDK
+        if: steps.reuse.outputs.hit != 'true'
         uses: jakoch/install-vulkan-sdk-action@3c53c378c9bfbb2ea122a1cc164a837d4004c871 # v1.5.2
         with:
           vulkan_version: "1.4.309.0"
           install_runtime: true
           stripdown: true
       - name: Install the SPIR-V headers required by the pinned Vulkan SDK
+        if: steps.reuse.outputs.hit != 'true'
         shell: pwsh
         run: |
           $sourcePath = Join-Path $env:RUNNER_TEMP "SPIRV-Headers"
@@ -121,6 +131,7 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "CMAKE_PREFIX_PATH=$cmakePrefixPath"
 
       - name: Check native GPU build tools
+        if: steps.reuse.outputs.hit != 'true'
         shell: pwsh
         run: |
           nvcc --version
@@ -129,6 +140,7 @@ jobs:
           if (-not $env:VULKAN_SDK) { throw "The pinned Vulkan SDK was not installed" }
           & "$env:VULKAN_SDK\Bin\glslc.exe" --version
       - name: Build the pinned CUDA and Vulkan llama.cpp runtime wheel
+        if: steps.reuse.outputs.hit != 'true'
         shell: pwsh
         run: |
           $env:CUDACXX = Join-Path $env:CUDA_PATH "bin\nvcc.exe"
@@ -146,6 +158,7 @@ jobs:
           )
           python @wheelArgs
       - name: Bundle backend dependencies and verify GPU backends
+        if: steps.reuse.outputs.hit != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -175,6 +188,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "The repaired Windows wheel is missing required GPU backend DLLs (exit code $LASTEXITCODE)"
           }
+      - name: Verify the Windows runtime wheel backends
+        shell: pwsh
+        run: |
+          $wheels = @(Get-ChildItem -LiteralPath "dist/wheels/runtime" -Filter "*.whl")
+          if ($wheels.Count -ne 1) { throw "Expected one Windows runtime wheel, found $($wheels.Count)" }
+          python -c "from zipfile import ZipFile; from pathlib import Path; p=next(Path('dist/wheels/runtime').glob('*.whl')); names=[name.casefold() for name in ZipFile(p).namelist()]; required=('ggml-base','ggml-cpu','ggml-cuda','ggml-vulkan'); missing=[backend for backend in required if not any(backend in name for name in names)]; print('Verified:', p.name); raise SystemExit(f'Missing required backends: {missing}' if missing else 0)"
+          if ($LASTEXITCODE -ne 0) { throw "The Windows runtime wheel failed backend verification" }
       - name: Save the platform runtime wheel
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
@@ -183,40 +203,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  linux-vulkan-tools:
-    name: Build pinned glslc for manylinux 2.28
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    container:
-      image: quay.io/pypa/manylinux_2_28_x86_64:2026.10.03-1@sha256:39df0042d5cc900b085aa25a0659368b42a0006c54c474299b785b44c1b4ff82
-    steps:
-      - name: Check out Lumi
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Build glslc from the pinned Shaderc release
-        run: |
-          manylinux_python=/opt/python/cp312-cp312/bin/python
-          export PATH="$(dirname "$manylinux_python"):$PATH"
-          "$manylinux_python" -m pip install "cmake==3.31.6"
-          git clone --depth 1 --branch v2025.4 https://github.com/google/shaderc.git /tmp/shaderc
-          test "$(git -C /tmp/shaderc rev-parse HEAD)" = "73743588fe9c39f2f1c780a087d94afac691a189"
-          cd /tmp/shaderc
-          "$manylinux_python" utils/git-sync-deps
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON
-          cmake --build build --target glslc_exe --parallel 2
-          build/glslc/glslc --version
-          mkdir -p "$GITHUB_WORKSPACE/dist/tools"
-          cp build/glslc/glslc "$GITHUB_WORKSPACE/dist/tools/glslc"
-      - name: Save the pinned shader compiler
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: linux-vulkan-glslc
-          path: dist/tools/glslc
-          if-no-files-found: error
-          retention-days: 1
-
   native-linux:
     name: Build runtime wheel (${{ matrix.target }})
-    needs: [linux-vulkan-tools]
     runs-on: ${{ matrix.runner }}
     container:
       image: ${{ matrix.container }}
@@ -239,13 +227,28 @@ jobs:
     steps:
       - name: Check out Lumi
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Download the pinned Linux Vulkan shader compiler
-        if: matrix.target == 'linux-x64'
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          name: linux-vulkan-glslc
-          path: build-tools
+      - name: Add the pinned build Python to PATH
+        run: echo "/opt/python/cp312-cp312/bin" >> "$GITHUB_PATH"
+      - name: Reuse a compatible published runtime wheel
+        id: reuse
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/reuse_native_runtime_wheel.py --target "${{ matrix.target }}" --wheel-dir dist/wheels/runtime
+      - name: Build the pinned glslc tool for a native Linux build
+        if: steps.reuse.outputs.hit != 'true' && matrix.target == 'linux-x64'
+        run: |
+          python -m pip install "cmake==3.31.6"
+          git clone --depth 1 --branch v2025.4 https://github.com/google/shaderc.git /tmp/shaderc
+          test "$(git -C /tmp/shaderc rev-parse HEAD)" = "73743588fe9c39f2f1c780a087d94afac691a189"
+          cd /tmp/shaderc
+          python utils/git-sync-deps
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON
+          cmake --build build --target glslc_exe --parallel 2
+          build/glslc/glslc --version
+          mkdir -p "$GITHUB_WORKSPACE/build-tools"
+          cp build/glslc/glslc "$GITHUB_WORKSPACE/build-tools/glslc"
       - name: Install platform build dependencies, build, and repair the llama.cpp runtime wheel
+        if: steps.reuse.outputs.hit != 'true'
         run: |
           dnf install -y dnf-plugins-core gcc-c++
           dnf config-manager --set-enabled powertools
@@ -319,6 +322,18 @@ jobs:
             unzip -Z1 dist/wheels/runtime/*.whl | grep -q 'llama_cpp/lib/libggml-cuda'
             unzip -Z1 dist/wheels/runtime/*.whl | grep -q 'llama_cpp/lib/libggml-vulkan'
           fi
+      - name: Verify the Linux runtime wheel backends
+        run: |
+          wheels=(dist/wheels/runtime/*.whl)
+          test "${#wheels[@]}" -eq 1
+          names="$(unzip -Z1 "${wheels[0]}")"
+          grep -qi 'ggml-base' <<< "$names"
+          grep -qi 'ggml-cpu' <<< "$names"
+          if [[ "${{ matrix.target }}" == "linux-x64" ]]; then
+            grep -qi 'ggml-cuda' <<< "$names"
+            grep -qi 'ggml-vulkan' <<< "$names"
+          fi
+          printf 'Verified: %s\n' "${wheels[0]}"
       - name: Save the platform runtime wheel
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
