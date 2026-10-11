@@ -142,8 +142,13 @@ QUALITY_RUBRIC = {
 ITEMS: dict[str, dict[str, Any]] = {
     "s-moonlit": {
         "id": "lab-series-moonlit-transit", "type": "series", "title": "Moonlit Transit",
+        "aliases": ["月夜列车", "月光列車"],
         "year": 2022, "genres": ["Animation", "Fantasy"],
-        "tags": ["gentle", "hopeful", "slow-paced"],
+        "tags": [
+            "anime", "gentle", "hopeful", "relaxed", "slow-paced", "quiet",
+            "落ち着いた", "穏やか", "ゆっくり", "節奏舒緩", "节奏舒缓", "温暖",
+            "动画", "アニメ",
+        ],
         "overview": (
             "A patient night train carries two young travelers between quiet towns, where each "
             "stop reveals a small act of kindness."
@@ -151,8 +156,12 @@ ITEMS: dict[str, dict[str, Any]] = {
     },
     "s-garden": {
         "id": "lab-series-garden-rain", "type": "series", "title": "A Garden After Rain",
+        "aliases": ["雨后花园", "雨后的花园", "雨上がりの庭"],
         "year": 2021, "genres": ["Animation", "Slice of Life"],
-        "tags": ["warm", "hopeful", "slow-paced"],
+        "tags": [
+            "anime", "warm", "hopeful", "relaxed", "slow-paced", "cozy", "治愈",
+            "温暖", "落ち着いた", "穏やか", "动画", "アニメ",
+        ],
         "overview": (
             "A retired botanist and a new neighbor restore a neglected community garden through "
             "the changing seasons."
@@ -160,8 +169,12 @@ ITEMS: dict[str, dict[str, Any]] = {
     },
     "s-paper": {
         "id": "lab-series-paper-satellites", "type": "series", "title": "Paper Satellites",
+        "aliases": ["纸卫星", "紙の衛星"],
         "year": 2023, "genres": ["Animation", "Science Fiction"],
-        "tags": ["reflective", "quiet", "bittersweet"],
+        "tags": [
+            "anime", "reflective", "quiet", "bittersweet", "relaxed", "slow-paced",
+            "安静", "静か", "穏やか", "节奏舒缓", "动画", "アニメ",
+        ],
         "overview": (
             "Two siblings exchange letters across a remote research station and the coastal town "
             "they left behind."
@@ -501,11 +514,11 @@ SCENARIOS: list[dict[str, Any]] = [
         "ordinal_resolution", "season_count", "language_chinese",
     ),
     _scenario(
-        "ZH-04", "cn-seafog", "《海雾档案》讲什么？",
+        "ZH-04", "cn-seafog", "电视剧《海雾档案》讲什么？",
         "local_detail", "language_chinese",
     ),
     _scenario(
-        "ZH-05", "cn-seafog", "《海雾档案》的演员表里有谁？",
+        "ZH-05", "cn-seafog", "电视剧《海雾档案》的演员表里有谁？",
         "cast_lookup", "web_source", "language_chinese",
     ),
     _scenario(
@@ -513,7 +526,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "followup_resolution", "web_source", "language_chinese",
     ),
     _scenario(
-        "ZH-07", "alias", "我在找《雾中回声》，英文标题是什么？",
+        "ZH-07", "alias", "我在找剧集《雾中回声》，英文标题是什么？",
         "exact_alias", "language_chinese",
     ),
     _scenario(
@@ -620,8 +633,13 @@ class FixtureClient:
                 continue
             if item_type is not None and item["type"] != item_type:
                 continue
-            variants = [item["title"], *item.get("aliases", [])]
-            if any(
+            variants = [
+                item["title"],
+                *item.get("aliases", []),
+                *item.get("genres", []),
+                *item.get("tags", []),
+            ]
+            if needle and any(
                 (compact_name(variant) and (
                     compact_name(variant) in needle or needle in compact_name(variant)
                 ))

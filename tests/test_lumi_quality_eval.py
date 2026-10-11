@@ -161,6 +161,76 @@ class LumiQualityEvaluationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(detail["item"])
         self.assertEqual(detail["seasons"], [])
 
+        recommendation_cases = (
+            (
+                "recommendations", "EN-01", "Recommend relaxed evening anime.",
+                "relaxed evening anime", "en",
+            ),
+            (
+                "ja-recommendations", "JA-01", "落ち着いた雰囲気のアニメをおすすめして。",
+                "落ち着いた アニメ", "ja",
+            ),
+            (
+                "cn-recommendations", "ZH-01", "我想找几部节奏舒缓的动画，能推荐一些吗？",
+                "节奏舒缓 动画", "zh",
+            ),
+        )
+        candidate_ids = {
+            "lab-series-moonlit-transit",
+            "lab-series-garden-rain",
+            "lab-series-paper-satellites",
+        }
+        for conversation_id, turn_id, prompt, query, language in recommendation_cases:
+            context = evaluation.ChatContext(
+                account_id="synthetic-evaluation-user",
+                conversation_id=conversation_id,
+                model="qwen3.5:2b",
+                thinking=False,
+                turn_id=turn_id,
+                user_message=prompt,
+            )
+            recommendations = await evaluation.FixtureClient().search(
+                context,
+                query=query,
+                item_type="series",
+                limit=5,
+                language=language,
+            )
+            self.assertEqual(
+                {item["id"] for item in recommendations["items"]},
+                candidate_ids,
+            )
+        empty_search = await evaluation.FixtureClient().search(
+            evaluation.ChatContext(
+                account_id="synthetic-evaluation-user",
+                conversation_id="cn-recommendations",
+                model="qwen3.5:2b",
+                thinking=False,
+                turn_id="ZH-01",
+                user_message="recommendations",
+            ),
+            query="   ",
+            item_type="series",
+            limit=5,
+            language="zh",
+        )
+        self.assertEqual(empty_search["items"], [])
+        alias = await evaluation.FixtureClient().search(
+            evaluation.ChatContext(
+                account_id="synthetic-evaluation-user",
+                conversation_id="alias",
+                model="qwen3.5:2b",
+                thinking=False,
+                turn_id="ZH-07",
+                user_message="我在找剧集《雾中回声》，英文标题是什么？",
+            ),
+            query="雾中回声",
+            item_type="series",
+            limit=5,
+            language="zh",
+        )
+        self.assertEqual(alias["items"][0]["id"], "lab-series-echoes-in-fog")
+
         context = evaluation.ChatContext(
             account_id="synthetic-evaluation-user",
             conversation_id="glass-current",
