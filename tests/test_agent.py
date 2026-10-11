@@ -558,8 +558,14 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
             0,
         )
 
-        self.assertIn('葬送のフリーレン :::zenstream{type="series" id="series-ja"}', answer.markdown)
-        self.assertIn('灵海回声 :::zenstream{type="series" id="series-zh"}', answer.markdown)
+        self.assertIn(
+            '葬送のフリーレン :::zenstream{type="series" id="series-ja"}',
+            answer.markdown,
+        )
+        self.assertIn(
+            '灵海回声 :::zenstream{type="series" id="series-zh"}',
+            answer.markdown,
+        )
         self.assertEqual(answer.references, (japanese, chinese))
 
     async def test_prefers_longer_title_when_trusted_titles_overlap(self) -> None:
