@@ -54,6 +54,7 @@ jobs:
   # Build once per platform, then validate the wheel under every Python version below.
   native-windows:
     name: Build CUDA and Vulkan runtime wheel (Windows x64)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-2022
     timeout-minutes: 45
     env:
@@ -206,6 +207,7 @@ jobs:
 
   native-linux:
     name: Build runtime wheel (${{ matrix.target }})
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ${{ matrix.runner }}
     container:
       image: ${{ matrix.container }}
