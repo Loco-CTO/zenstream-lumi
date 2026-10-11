@@ -16,7 +16,6 @@ import json
 import os
 import platform
 import random
-import re
 import statistics
 import subprocess
 import sys
@@ -59,6 +58,7 @@ from lumi.web_research import (  # noqa: E402
     WebResearchConfig,
     WebResearchSessions,
 )
+
 DEFAULT_MODELS = ("qwen3.5:0.8b", "qwen3.5:2b", "qwen3.5:4b")
 REQUIRED_QUALITY_LANGUAGES = ("EN", "JA", "ZH")
 EXPERIMENTAL_9B = Qwen35ModelSpec(
@@ -1414,12 +1414,17 @@ async def run_model(
                 stable_first_visible_text_ms: float | None = None
                 stable_last_visible_text_ms: float | None = None
 
-                async def on_delta(piece: str) -> None:
+                async def on_delta(
+                    piece: str,
+                    *,
+                    turn_started_at: float = started_at,
+                    turn_fragments: list[str] = fragments,
+                ) -> None:
                     nonlocal first_delta_ms, first_visible_text_ms
                     nonlocal stable_first_delta_ms, stable_first_visible_text_ms
                     nonlocal stable_last_visible_text_ms
-                    now_ms = (time.perf_counter() - started_at) * 1000
-                    fragments.append(piece)
+                    now_ms = (time.perf_counter() - turn_started_at) * 1000
+                    turn_fragments.append(piece)
                     if first_delta_ms is None:
                         first_delta_ms = now_ms
                     if stable_first_delta_ms is None:
@@ -1431,11 +1436,15 @@ async def run_model(
                     if piece.strip():
                         stable_last_visible_text_ms = now_ms
 
-                async def on_reset(_reason: str) -> None:
+                async def on_reset(
+                    _reason: str,
+                    *,
+                    turn_fragments: list[str] = fragments,
+                ) -> None:
                     nonlocal reset_count, stable_first_delta_ms, stable_first_visible_text_ms
                     nonlocal stable_last_visible_text_ms
                     reset_count += 1
-                    fragments.clear()
+                    turn_fragments.clear()
                     stable_first_delta_ms = None
                     stable_first_visible_text_ms = None
                     stable_last_visible_text_ms = None
@@ -1597,7 +1606,7 @@ def _parse_judgement(text: str) -> dict[str, Any]:
         start = candidate.find("{")
         end = candidate.rfind("}")
         if start < 0 or end <= start:
-            raise ValueError("The evaluator did not return a JSON object")
+            raise ValueError("The evaluator did not return a JSON object") from None
         try:
             judgement = json.loads(candidate[start:end + 1])
         except json.JSONDecodeError as error:
