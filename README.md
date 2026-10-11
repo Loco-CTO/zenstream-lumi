@@ -62,6 +62,35 @@ python scripts/benchmark_llama_cpp.py --models-dir C:\path\to\lumi-models --mode
 
 The benchmark defaults to comparing `cpu_only` with `automatic`. It reports time to first visible text, prompt and generation timing, tokenizer-counted visible answer tokens per second, runtime end-to-end latency, process RAM, best-effort NVIDIA system VRAM, and the selected backend. Visible answer throughput excludes hidden reasoning and tool-call tokens, so it measures user-visible generation speed rather than the binding's unavailable full completion token rate. `--mode` can be repeated to select a different comparison. Runtime end-to-end timing excludes Lumi tools, web research, service/network overhead, and browser rendering; verify those separately in the running Orchestrator UI.
 
+## Local quality evaluation
+
+`scripts/lumi_quality_eval.py` runs a 42-turn synthetic suite through Lumi's current agent, read-only tools, and installed llama.cpp models. It covers multi-turn follow-ups, recommendations, local grounding, requests about current information with frozen fixture evidence, cast lookup, aliases, ambiguity, Chinese and Japanese conversations, read-only requests, and unrelated coding/homework requests. The suite uses local fixtures, including fictional `.example.test` pages; it makes no web requests and does not download models. These cases assess evidence synthesis from fixture results, not live freshness or search-query relevance. Prompts, fixtures, and the rubric are evaluation data only. They are not imported by production code, used to route user text, or used as canned responses.
+
+The default run uses the pinned 0.8B, 2B, and 4B models, with 2B as the acceptance baseline and the 4B model as the local rubric judge. Specify the host-installed release directory so the evaluator can load its existing pinned runtime wheels, and write every generated result outside this repository:
+
+```powershell
+python scripts/lumi_quality_eval.py `
+  --models-dir C:\path\to\lumi-models `
+  --runtime-release-dir C:\path\to\orchestrator\sqlite\lumi\lumi\releases\v0.3.9-release-id `
+  --output-dir $env:USERPROFILE\.codex\lumi-quality-evals
+```
+
+The verified 9B Q4_K_M artifact is not a supported installer model. It is available only by explicit evaluation opt-in, after it has already been installed locally:
+
+```powershell
+python scripts/lumi_quality_eval.py `
+  --models-dir C:\path\to\lumi-models `
+  --experimental-9b-models-dir C:\path\to\verified-9b-model-parent `
+  --runtime-release-dir C:\path\to\orchestrator\sqlite\lumi\lumi\releases\v0.3.9-release-id `
+  --models qwen3.5:0.8b qwen3.5:2b qwen3.5:4b qwen3.5:9b `
+  --include-experimental-9b `
+  --output-dir $env:USERPROFILE\.codex\lumi-quality-evals
+```
+
+The runner records the evaluator, scenario, fixture, rubric, judge-prompt, selected-case, model-manifest, and installed runtime-release hashes. It reports stable first visible text, agent end-to-end latency, prompt-processing and generation time, visible answer token rate across the stable visible-stream window, maximum sampled process working set per model, evaluation-wide process high-water memory, and best-effort system-wide NVIDIA VRAM usage and change. The process high-water mark covers the whole run and must not be compared as a per-model peak. Timings use local fixtures and exclude live web, service, and browser latency.
+
+A same-judge paired comparison reports 9B against 4B and every other candidate against the 2B baseline. Confidence intervals resample complete conversation chains; an incomplete or unscored case prevents a positive advantage classification. The report also flags language and task-category regressions. Model-assisted ordinal scores are not ground truth and require blind human spot review, especially because the default 4B judge also evaluates the 4B candidate. The runner calls a 9B quality advantage clear only with at least 20 fully paired scores, an average gain of at least 0.25/5, a positive lower 95% conversation-cluster bootstrap bound, wins on at least 60% of cases, and no critical-failure increase or meaningful grounding/scope/safety, language, or category regression. This remains an advisory evaluation gate, not an automatic model-catalog change.
+
 ## Conversation and privacy
 
 The web and Android clients continue to use authenticated Orchestrator APIs. Orchestrator derives the current account from its normal session and supplies Lumi only the internal, permission-scoped context it needs. Lumi has no playback, download, delete, metadata-edit, watched-state, favourite-write, or library-write tools. It does not connect directly to the Orchestrator database or media filesystem.
@@ -74,4 +103,4 @@ Web search and page retrieval use the bundled DDGS-compatible adapter by default
 
 ## Development status
 
-The repository contains the Lumi chat core, read-only tool contracts, optional web research, the Qwen3.5 model catalog and installer, local runtime adapters, and tests. Orchestrator release installation, admin controls, client experience, and end-to-end evaluation are developed in their respective repositories and remain separate stages.
+The repository contains the Lumi chat core, read-only tool contracts, optional web research, the Qwen3.5 model catalog and installer, local runtime adapters, tests, and the local synthetic quality-evaluation harness. Orchestrator release installation, admin controls, client experience, and live browser verification are developed in their respective repositories and remain separate stages.
