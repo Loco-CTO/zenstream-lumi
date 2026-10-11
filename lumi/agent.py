@@ -685,26 +685,82 @@ class ChatAgent:
 
         validated_markdown = _REFERENCE_PATTERN.sub(keep_reference, bounded)
         validated_markdown = _REFERENCE_LIKE_PATTERN.sub("", validated_markdown).strip()
-        if not used_references:
-            title_matches = [
-                entity
-                for entity in trusted_entities.values()
-                if len(entity.title.strip()) >= 3
-                and entity.title.casefold() in validated_markdown.casefold()
-            ]
-            unique_title_matches = {
-                (entity.type, entity.id): entity for entity in title_matches
-            }
-            if len(unique_title_matches) == 1:
-                entity = next(iter(unique_title_matches.values()))
-                title_pattern = re.compile(re.escape(entity.title), re.IGNORECASE)
-                reference = f' :::zenstream{{type="{entity.type}" id="{entity.id}"}}'
-                validated_markdown = title_pattern.sub(
-                    lambda match: match.group(0) + reference,
-                    validated_markdown,
-                    count=1,
+        entities_by_title: dict[str, dict[tuple[str, str], EntityReference]] = {}
+        for entity in trusted_entities.values():
+            title = entity.title.strip()
+            if len(title) < 3:
+                continue
+            entities_by_title.setdefault(title.casefold(), {})[
+                (entity.type, entity.id)
+            ] = entity
+
+        explicit_references = {(entity.type, entity.id) for entity in used_references}
+        reference_spans = [
+            match.span() for match in _REFERENCE_PATTERN.finditer(validated_markdown)
+        ]
+        linked_title_spans: list[tuple[int, int]] = []
+        for entity in used_references:
+            title = entity.title.strip()
+            if len(title) < 3:
+                continue
+            title_pattern = re.compile(re.escape(title), re.IGNORECASE)
+            for match in title_pattern.finditer(validated_markdown):
+                reference_start = match.end()
+                while (
+                    reference_start < len(validated_markdown)
+                    and validated_markdown[reference_start].isspace()
+                ):
+                    reference_start += 1
+                reference_match = _REFERENCE_PATTERN.match(
+                    validated_markdown, reference_start
                 )
-                used_references.append(entity)
+                if reference_match and (
+                    reference_match.group("type"),
+                    reference_match.group("id"),
+                ) == (entity.type, entity.id):
+                    linked_title_spans.append(match.span())
+        protected_spans = reference_spans + linked_title_spans
+        title_occurrences: list[tuple[int, int, EntityReference]] = []
+        for title_entities in entities_by_title.values():
+            if len(title_entities) != 1:
+                continue
+            entity_key, entity = next(iter(title_entities.items()))
+            if entity_key in explicit_references:
+                continue
+            title_pattern = re.compile(re.escape(entity.title.strip()), re.IGNORECASE)
+            for match in title_pattern.finditer(validated_markdown):
+                if any(
+                    start < match.end() and match.start() < end
+                    for start, end in protected_spans
+                ):
+                    continue
+                title_occurrences.append((match.start(), match.end(), entity))
+
+        # Prefer the longest trusted title when mentions overlap, while still
+        # allowing a shorter title to link if it appears separately in the answer.
+        title_occurrences.sort(key=lambda item: (-(item[1] - item[0]), item[0]))
+        selected_occurrences: list[tuple[int, int, EntityReference]] = []
+        selected_entities: set[tuple[str, str]] = set()
+        for occurrence in title_occurrences:
+            start, end, entity = occurrence
+            entity_key = (entity.type, entity.id)
+            if entity_key in selected_entities or any(
+                selected_start < end and start < selected_end
+                for selected_start, selected_end, _ in selected_occurrences
+            ):
+                continue
+            selected_occurrences.append(occurrence)
+            selected_entities.add(entity_key)
+
+        selected_occurrences.sort(key=lambda item: item[0])
+        used_references.extend(entity for _, _, entity in selected_occurrences)
+        for _, end, entity in sorted(
+            selected_occurrences, key=lambda item: item[0], reverse=True
+        ):
+            reference = f' :::zenstream{{type="{entity.type}" id="{entity.id}"}}'
+            validated_markdown = (
+                validated_markdown[:end] + reference + validated_markdown[end:]
+            )
         unique_references = {
             (entity.type, entity.id): entity for entity in used_references
         }
