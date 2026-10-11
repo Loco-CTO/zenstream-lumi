@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from collections import Counter
 from pathlib import Path
+from unittest.mock import patch
 
 import lumi.model_installation as model_installation
 from scripts import lumi_quality_eval as evaluation
@@ -280,7 +281,7 @@ class LumiQualityEvaluationTests(unittest.IsolatedAsyncioTestCase):
         for index in range(20):
             base_scores = {dimension: 3 for dimension in evaluation.SCORE_DIMENSIONS}
             candidate_scores = {dimension: 4 for dimension in evaluation.SCORE_DIMENSIONS}
-            language = "JA" if index < 3 else "EN"
+            language = "JA" if index < 3 else "ZH" if index < 6 else "EN"
             baseline.append({
                 "id": f"{language}-{index}",
                 "conversation": f"chain-{index}",
@@ -299,17 +300,47 @@ class LumiQualityEvaluationTests(unittest.IsolatedAsyncioTestCase):
                     "critical_failure": False, "scores": candidate_scores,
                 },
             })
-        self.assertTrue(evaluation.compare_models(baseline, candidate)["clear_quality_advantage"])
+        def compare(base_rows, candidate_rows, judge="qwen3.5:9b"):
+            return evaluation.compare_models(
+                base_rows,
+                candidate_rows,
+                baseline_model_id="qwen3.5:2b",
+                candidate_model_id="qwen3.5:4b",
+                judge_model=judge,
+            )
+
+        self.assertTrue(compare(baseline, candidate)["clear_quality_advantage"])
         self.assertFalse(
-            evaluation.compare_models(baseline[:5], candidate[:5])["clear_quality_advantage"]
+            compare(baseline[:5], candidate[:5])["clear_quality_advantage"]
         )
-        partial = evaluation.compare_models(baseline, candidate[:19])
+        partial = compare(baseline, candidate[:19])
         self.assertFalse(partial["all_selected_cases_scored_in_both_models"])
         self.assertFalse(partial["clear_quality_advantage"])
+        unscored = [dict(row) for row in candidate]
+        unscored[8] = dict(
+            unscored[8],
+            judgement={"status": "judge_error", "judge_model": "qwen3.5:9b"},
+        )
+        unscored_result = compare(baseline, unscored)
+        self.assertFalse(unscored_result["all_selected_cases_scored_in_both_models"])
+        self.assertFalse(unscored_result["clear_quality_advantage"])
+        self_scored = compare(baseline, candidate, judge="qwen3.5:4b")
+        self.assertFalse(self_scored["judge_independent_of_compared_models"])
+        self.assertFalse(self_scored["clear_quality_advantage"])
+        truncated = [dict(row) for row in baseline]
+        truncated_candidate = [dict(row) for row in candidate]
+        truncated_languages = ["EN"] * 15 + ["JA"] * 3 + ["ZH"] * 2
+        for index, language in enumerate(truncated_languages):
+            for rows in (truncated, truncated_candidate):
+                rows[index]["id"] = f"{language}-{index}"
+        truncated_result = compare(truncated, truncated_candidate)
+        self.assertEqual(truncated_result["required_language_coverage"]["ZH"], 2)
+        self.assertFalse(truncated_result["all_required_languages_covered"])
+        self.assertFalse(truncated_result["clear_quality_advantage"])
         language_regression = [dict(row) for row in candidate]
         for row in language_regression[:3]:
             row["judgement"] = dict(row["judgement"], overall=1)
-        regression = evaluation.compare_models(baseline, language_regression)
+        regression = compare(baseline, language_regression)
         self.assertTrue(regression["meaningful_language_regression"])
         self.assertFalse(regression["clear_quality_advantage"])
         one_chain_baseline = [
@@ -318,9 +349,89 @@ class LumiQualityEvaluationTests(unittest.IsolatedAsyncioTestCase):
         one_chain_candidate = [
             dict(row, conversation="single-chain") for row in candidate
         ]
-        clustered = evaluation.compare_models(one_chain_baseline, one_chain_candidate)
+        clustered = compare(one_chain_baseline, one_chain_candidate)
         self.assertIsNone(clustered["bootstrap_95_percent_interval"])
         self.assertFalse(clustered["clear_quality_advantage"])
+
+    def test_raw_rescore_combines_provenanced_model_outputs(self) -> None:
+        selected_ids = ["EN-01"]
+        selection = {
+            "count": 1,
+            "case_ids": selected_ids,
+            "case_ids_sha256": evaluation._json_digest(selected_ids),
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            run_directories = []
+            for model_id in ("qwen3.5:2b", "qwen3.5:4b"):
+                run_directory = Path(temporary_directory) / model_id.replace(":", "-")
+                run_directory.mkdir()
+                run_directories.append(run_directory)
+                source = {
+                    "evaluation_suite": evaluation.suite_metadata(),
+                    "evaluation_selection": selection,
+                }
+                (run_directory / "run-source.json").write_text(
+                    json.dumps(source), encoding="utf-8"
+                )
+                (run_directory / "summary.json").write_text(
+                    json.dumps({"models": {model_id: {"model_id": model_id}}}),
+                    encoding="utf-8",
+                )
+                filename = model_id.replace(":", "-")
+                (run_directory / f"{filename}-model.json").write_text(
+                    json.dumps({"model_id": model_id, "manifest_sha256": "manifest"}),
+                    encoding="utf-8",
+                )
+                (run_directory / f"{filename}.jsonl").write_text(
+                    json.dumps({"id": "EN-01", "answer": model_id}) + "\n",
+                    encoding="utf-8",
+                )
+            with patch.object(
+                evaluation,
+                "_validate_installed_manifest",
+                return_value={"manifest_sha256": "manifest"},
+            ):
+                provenance, results, summaries = evaluation._load_raw_run(
+                    run_directories,
+                    ["qwen3.5:2b", "qwen3.5:4b"],
+                    Path("models"),
+                    Path("experimental"),
+                )
+            self.assertEqual(len(provenance["source_runs"]), 2)
+            self.assertEqual(results["qwen3.5:2b"][0]["answer"], "qwen3.5:2b")
+            self.assertEqual(results["qwen3.5:4b"][0]["answer"], "qwen3.5:4b")
+            self.assertEqual(set(summaries), {"qwen3.5:2b", "qwen3.5:4b"})
+            self.assertEqual(
+                len(provenance["candidate_input_artifacts"]["qwen3.5:2b"]["raw_output_sha256"]),
+                64,
+            )
+
+    def test_raw_rescore_rejects_different_case_selections(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            run_directories = []
+            for case_id in ("EN-01", "EN-02"):
+                run_directory = Path(temporary_directory) / case_id
+                run_directory.mkdir()
+                run_directories.append(run_directory)
+                selection = {
+                    "count": 1,
+                    "case_ids": [case_id],
+                    "case_ids_sha256": evaluation._json_digest([case_id]),
+                }
+                (run_directory / "run-source.json").write_text(
+                    json.dumps({
+                        "evaluation_suite": evaluation.suite_metadata(),
+                        "evaluation_selection": selection,
+                    }),
+                    encoding="utf-8",
+                )
+                (run_directory / "summary.json").write_text(
+                    json.dumps({"models": {}}), encoding="utf-8"
+                )
+            with self.assertRaisesRegex(ValueError, "same selected evaluation cases"):
+                evaluation._load_raw_run(
+                    run_directories, None, Path("models"), Path("experimental")
+                )
 
 
 if __name__ == "__main__":

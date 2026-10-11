@@ -89,7 +89,23 @@ python scripts/lumi_quality_eval.py `
 
 The runner records the evaluator, scenario, fixture, rubric, judge-prompt, selected-case, model-manifest, and installed runtime-release hashes. It reports stable first visible text, agent end-to-end latency, prompt-processing and generation time, visible answer token rate across the stable visible-stream window, maximum sampled process working set per model, evaluation-wide process high-water memory, and best-effort system-wide NVIDIA VRAM usage and change. The process high-water mark covers the whole run and must not be compared as a per-model peak. Timings use local fixtures and exclude live web, service, and browser latency.
 
-A same-judge paired comparison reports 9B against 4B and every other candidate against the 2B baseline. Confidence intervals resample complete conversation chains; an incomplete or unscored case prevents a positive advantage classification. The report also flags language and task-category regressions. Model-assisted ordinal scores are not ground truth and require blind human spot review, especially because the default 4B judge also evaluates the 4B candidate. The runner calls a 9B quality advantage clear only with at least 20 fully paired scores, an average gain of at least 0.25/5, a positive lower 95% conversation-cluster bootstrap bound, wins on at least 60% of cases, and no critical-failure increase or meaningful grounding/scope/safety, language, or category regression. This remains an advisory evaluation gate, not an automatic model-catalog change.
+The same run can report paired comparisons, but a comparison is eligible to show a clear quality advantage only when its judge is independent of both compared models, all selected cases have scores, at least 20 cases are paired, and at least three cases in each required language (English, Japanese, and Chinese) are covered. It also requires an average gain of at least 0.25/5, a positive lower 95% conversation-cluster bootstrap bound, wins on at least 60% of cases, no increase in critical failures, and no meaningful grounding, scope, safety, language, or task-category regression. Model-assisted ordinal scores are not ground truth and still require blind human review. A default 4B judge can describe the 4B/9B pair, but cannot establish a clear advantage for that pair.
+
+Raw candidate outputs can be rescored with a different local judge without repeating inference. The source run, case IDs, rubric hashes, raw output digests, and installed model manifests are checked before scoring, and rescores are written separately. Repeat `--judge-existing-dir` to combine candidate outputs from separate runs that used the exact same case selection:
+
+```powershell
+python scripts/lumi_quality_eval.py `
+  --models-dir C:\path\to\lumi-models `
+  --experimental-9b-models-dir C:\path\to\verified-9b-model-parent `
+  --runtime-release-dir C:\path\to\orchestrator\sqlite\lumi\lumi\releases\v0.3.9-release-id `
+  --judge-existing-dir C:\path\to\existing-quality-run `
+  --models qwen3.5:4b qwen3.5:9b `
+  --judge-model qwen3.5:2b `
+  --include-experimental-9b `
+  --output-dir $env:USERPROFILE\.codex\lumi-quality-evals
+```
+
+For the 9B-versus-4B comparison, use a judge other than 4B or 9B. A limited run can be useful for debugging, but missing any required language coverage prevents the comparison from qualifying.
 
 ## Conversation and privacy
 

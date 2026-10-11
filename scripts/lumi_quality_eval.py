@@ -60,6 +60,7 @@ from lumi.web_research import (  # noqa: E402
     WebResearchSessions,
 )
 DEFAULT_MODELS = ("qwen3.5:0.8b", "qwen3.5:2b", "qwen3.5:4b")
+REQUIRED_QUALITY_LANGUAGES = ("EN", "JA", "ZH")
 EXPERIMENTAL_9B = Qwen35ModelSpec(
     model_id="qwen3.5:9b",
     directory_name="qwen3.5-9b",
@@ -1740,7 +1741,12 @@ def _cluster_bootstrap_interval(
 
 
 def compare_models(
-    baseline: list[dict[str, Any]], candidate: list[dict[str, Any]]
+    baseline: list[dict[str, Any]],
+    candidate: list[dict[str, Any]],
+    *,
+    baseline_model_id: str,
+    candidate_model_id: str,
+    judge_model: str | None,
 ) -> dict[str, Any]:
     base_by_id = {row["id"]: row for row in baseline}
     candidate_by_id = {row["id"]: row for row in candidate}
@@ -1805,11 +1811,24 @@ def compare_models(
         values["paired_cases"] >= 3 and values["mean_overall_score_delta"] < -0.10
         for values in category_differences.values()
     )
+    language_coverage = {
+        language: language_differences.get(language, {}).get("paired_cases", 0)
+        for language in REQUIRED_QUALITY_LANGUAGES
+    }
+    all_required_languages_covered = all(
+        count >= 3 for count in language_coverage.values()
+    )
+    judge_independent_of_pair = judge_model is not None and judge_model not in {
+        baseline_model_id,
+        candidate_model_id,
+    }
     clear_advantage = bool(
         mean_difference is not None
         and interval is not None
         and len(paired) >= 20
         and all_selected_cases_scored
+        and all_required_languages_covered
+        and judge_independent_of_pair
         and mean_difference >= 0.25
         and interval[0] > 0
         and positive_fraction is not None
@@ -1823,6 +1842,13 @@ def compare_models(
         and not meaningful_category_regression
     )
     return {
+        "baseline_model": baseline_model_id,
+        "candidate_model": candidate_model_id,
+        "judge_model": judge_model,
+        "judge_independent_of_compared_models": judge_independent_of_pair,
+        "required_language_minimum_paired_cases": 3,
+        "required_language_coverage": language_coverage,
+        "all_required_languages_covered": all_required_languages_covered,
         "paired_scored_cases": len(paired),
         "all_selected_cases_scored_in_both_models": all_selected_cases_scored,
         "unpaired_or_unscored_case_ids": sorted(all_case_ids - {row["id"] for row in paired}),
@@ -1892,20 +1918,228 @@ def build_run_summary(
         }
     if "qwen3.5:2b" in results:
         output["paired_comparisons_to_2b_baseline"] = {
-            model_id: compare_models(results["qwen3.5:2b"], rows)
+            model_id: compare_models(
+                results["qwen3.5:2b"], rows,
+                baseline_model_id="qwen3.5:2b",
+                candidate_model_id=model_id,
+                judge_model=judge_metadata.get("judge_model"),
+            )
             for model_id, rows in results.items()
             if model_id != "qwen3.5:2b"
         }
     if "qwen3.5:4b" in results and "qwen3.5:9b" in results:
         output["qwen3.5:9b_vs_qwen3.5:4b"] = compare_models(
-            results["qwen3.5:4b"], results["qwen3.5:9b"]
+            results["qwen3.5:4b"], results["qwen3.5:9b"],
+            baseline_model_id="qwen3.5:4b",
+            candidate_model_id="qwen3.5:9b",
+            judge_model=judge_metadata.get("judge_model"),
         )
     return output
 
 
+def _load_raw_run(
+    run_directories: list[Path],
+    selected_model_ids: list[str] | None,
+    models_directory: Path,
+    experimental_directory: Path,
+) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]]]:
+    current_suite = suite_metadata()
+    run_records: list[dict[str, Any]] = []
+    model_locations: dict[str, tuple[Path, dict[str, Any]]] = {}
+    shared_selection: dict[str, Any] | None = None
+    candidate_inputs: dict[str, dict[str, Any]] = {}
+    for run_directory in run_directories:
+        requested_root = run_directory.expanduser()
+        if requested_root.is_symlink():
+            raise ValueError("Source evaluation runs must not be symlinks")
+        run_root = requested_root.resolve()
+        if not run_root.is_dir():
+            raise ValueError("Each source evaluation run must be a real directory")
+        source_path = run_root / "run-source.json"
+        summary_path = run_root / "summary.json"
+        if source_path.is_symlink() or summary_path.is_symlink():
+            raise ValueError("Evaluation provenance files must not be symlinks")
+        if not source_path.is_file() or not summary_path.is_file():
+            raise ValueError("A source directory is not a complete Lumi quality evaluation")
+        source_bytes = source_path.read_bytes()
+        source = json.loads(source_bytes)
+        old_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        old_suite = source.get("evaluation_suite", {})
+        for field in (
+            "scenario_sha256",
+            "fixture_sha256",
+            "rubric_sha256",
+            "judge_system_prompt_sha256",
+        ):
+            if old_suite.get(field) != current_suite.get(field):
+                raise ValueError(
+                    "The source run uses different evaluation cases or rubric; "
+                    "generate a fresh candidate run instead"
+                )
+        selection = source.get("evaluation_selection", {})
+        expected_ids = selection.get("case_ids")
+        if (
+            not isinstance(expected_ids, list)
+            or not expected_ids
+            or selection.get("count") != len(expected_ids)
+            or selection.get("case_ids_sha256") != _json_digest(expected_ids)
+        ):
+            raise ValueError("A source run has invalid selected-case provenance")
+        if shared_selection is not None and selection != shared_selection:
+            raise ValueError("Source runs must use the same selected evaluation cases")
+        shared_selection = selection
+        old_models = old_summary.get("models", {})
+        if not isinstance(old_models, dict):
+            raise ValueError("A source run has an invalid model summary")
+        for model_id, model_summary in old_models.items():
+            if model_id in model_locations:
+                raise ValueError(f"Model {model_id} appears in more than one source run")
+            model_locations[model_id] = (run_root, model_summary)
+        run_records.append({
+            "directory": str(run_root),
+            "run_source_sha256": hashlib.sha256(source_bytes).hexdigest(),
+            "source": source,
+            "model_ids": sorted(old_models),
+        })
+    if shared_selection is None:
+        raise ValueError("Provide at least one source evaluation run")
+    expected_ids = shared_selection["case_ids"]
+    models = selected_model_ids or list(model_locations)
+    if not models or any(model_id not in model_locations for model_id in models):
+        raise ValueError("Select models that have outputs in the source run set")
+    results: dict[str, list[dict[str, Any]]] = {}
+    model_summaries: dict[str, dict[str, Any]] = {}
+    for model_id in models:
+        run_root, model_summary = model_locations[model_id]
+        filename = model_id.replace(":", "-")
+        raw_path = run_root / f"{filename}.jsonl"
+        model_path = run_root / f"{filename}-model.json"
+        if raw_path.is_symlink() or model_path.is_symlink():
+            raise ValueError(f"The source files for {model_id} must not be symlinks")
+        if not raw_path.is_file() or not model_path.is_file():
+            raise ValueError(f"The source run is missing raw outputs for {model_id}")
+        model_record_bytes = model_path.read_bytes()
+        recorded_model = json.loads(model_record_bytes)
+        if recorded_model.get("model_id") != model_id:
+            raise ValueError(f"The source manifest record does not identify {model_id}")
+        model_root = (
+            experimental_directory if model_id == EXPERIMENTAL_9B.model_id
+            else models_directory
+        )
+        installed = _validate_installed_manifest(model_id, model_root)
+        if installed["manifest_sha256"] != recorded_model.get("manifest_sha256"):
+            raise ValueError(f"The installed model artifact for {model_id} changed since the run")
+        raw_bytes = raw_path.read_bytes()
+        rows = [
+            json.loads(line)
+            for line in raw_bytes.decode("utf-8").splitlines()
+            if line.strip()
+        ]
+        row_ids = [row.get("id") for row in rows]
+        if len(row_ids) != len(set(row_ids)) or set(row_ids) != set(expected_ids):
+            raise ValueError(f"The raw case IDs for {model_id} do not match run provenance")
+        if any("judgement" in row for row in rows):
+            raise ValueError(f"The raw outputs for {model_id} already contain scores")
+        results[model_id] = rows
+        model_summaries[model_id] = model_summary
+        candidate_inputs[model_id] = {
+            "source_run_directory": str(run_root),
+            "raw_output_sha256": hashlib.sha256(raw_bytes).hexdigest(),
+            "model_record_sha256": hashlib.sha256(model_record_bytes).hexdigest(),
+            "installed_model_manifest_sha256": installed["manifest_sha256"],
+        }
+    return {
+        "source_runs": run_records,
+        "candidate_input_artifacts": candidate_inputs,
+        "rescore_git": git_snapshot(),
+        "evaluation_selection": shared_selection,
+    }, results, model_summaries
+
+
+async def rescore_existing_run(args: argparse.Namespace) -> Path:
+    runtime_release_directory = args.runtime_release_dir.expanduser().resolve()
+    runtime_dependencies = load_runtime_dependencies(runtime_release_directory)
+    runtime_release = runtime_release_metadata(runtime_release_directory)
+    models_directory = args.models_dir.expanduser().resolve()
+    experimental_directory = (
+        args.experimental_9b_models_dir.expanduser().resolve()
+        if args.experimental_9b_models_dir else models_directory
+    )
+    source, raw_results, model_summaries = _load_raw_run(
+        args.judge_existing_dir,
+        args.models,
+        models_directory,
+        experimental_directory,
+    )
+    needs_9b = (
+        EXPERIMENTAL_9B.model_id in raw_results
+        or args.judge_model == EXPERIMENTAL_9B.model_id
+    )
+    if needs_9b and not args.include_experimental_9b:
+        raise ValueError("The 9B model requires explicit --include-experimental-9b opt-in")
+    judge_root = (
+        experimental_directory
+        if args.judge_model == EXPERIMENTAL_9B.model_id else models_directory
+    )
+    output_root = validate_output_directory(args.output_dir)
+    run_id = (
+        f"rescore-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-"
+        f"{git_snapshot().get('head', 'unknown')[:8]}"
+    )
+    run_directory = output_root / run_id
+    if run_directory.exists():
+        run_directory = output_root / f"{run_id}-{uuid.uuid4().hex[:8]}"
+    run_directory.mkdir(parents=True)
+    provenance = {
+        **source,
+        "judge_model": args.judge_model,
+        "runtime_release": runtime_release,
+        "runtime_dependency_paths": [str(path) for path in runtime_dependencies],
+        "acceleration_mode": args.acceleration_mode,
+    }
+    (run_directory / "rescore-source.json").write_text(
+        json.dumps(provenance, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    if args.judge_model == EXPERIMENTAL_9B.model_id:
+        with _experimental_9b_registration():
+            judged_results, judge_metadata = await judge_results(
+                args.judge_model, judge_root, raw_results,
+                acceleration_mode=args.acceleration_mode,
+            )
+    else:
+        judged_results, judge_metadata = await judge_results(
+            args.judge_model, judge_root, raw_results,
+            acceleration_mode=args.acceleration_mode,
+        )
+    for model_id, rows in judged_results.items():
+        path = run_directory / f"{model_id.replace(':', '-')}.judged.jsonl"
+        with path.open("w", encoding="utf-8", newline="\n") as stream:
+            for row in rows:
+                stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+    summary = build_run_summary(
+        judged_results,
+        model_summaries,
+        source=provenance,
+        judge_metadata=judge_metadata,
+    )
+    summary["run_directory"] = str(run_directory)
+    summary["run_process_memory"] = {
+        **process_memory_snapshot(),
+        "peak_scope": "rescore process across judge inference",
+    }
+    summary_path = run_directory / "summary.json"
+    summary_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    _emit_event("rescore_complete", summary=str(summary_path))
+    return summary_path
+
+
 async def run_suite(args: argparse.Namespace) -> Path:
     requires_experimental_registration = (
-        EXPERIMENTAL_9B.model_id in args.models
+        EXPERIMENTAL_9B.model_id in (args.models or DEFAULT_MODELS)
         or args.judge_model == EXPERIMENTAL_9B.model_id
     )
     if requires_experimental_registration:
@@ -1917,11 +2151,11 @@ async def run_suite(args: argparse.Namespace) -> Path:
 async def _run_suite_impl(args: argparse.Namespace) -> Path:
     print(json.dumps({
         "event": "evaluation_starting",
-        "models": args.models,
+        "models": args.models or list(DEFAULT_MODELS),
         "limit": args.limit,
         "judge_model": None if args.skip_judge else args.judge_model,
     }, ensure_ascii=False), flush=True)
-    selected = list(dict.fromkeys(args.models))
+    selected = list(dict.fromkeys(args.models or DEFAULT_MODELS))
     if not selected or any(model_id not in MODEL_IDS for model_id in selected):
         raise ValueError("Select one or more supported evaluation model IDs")
     if EXPERIMENTAL_9B.model_id in selected and not args.include_experimental_9b:
@@ -2070,13 +2304,19 @@ def main() -> None:
         type=Path,
         help="Parent containing the opt-in qwen3.5-9b directory",
     )
-    parser.add_argument("--models", nargs="+", choices=MODEL_IDS, default=list(DEFAULT_MODELS))
+    parser.add_argument("--models", nargs="+", choices=MODEL_IDS)
     parser.add_argument(
         "--include-experimental-9b",
         action="store_true",
         help="Opt in to evaluating the verified but unsupported 9B artifact",
     )
     parser.add_argument("--judge-model", choices=MODEL_IDS, default="qwen3.5:4b")
+    parser.add_argument(
+        "--judge-existing-dir",
+        type=Path,
+        action="append",
+        help="Add a source run to rescore; repeat to combine runs with identical case selections",
+    )
     parser.add_argument(
         "--limit",
         type=int,
@@ -2100,7 +2340,12 @@ def main() -> None:
     )
     args = parser.parse_args()
     try:
-        path = asyncio.run(run_suite(args))
+        if args.judge_existing_dir:
+            if args.skip_judge:
+                raise ValueError("--skip-judge cannot be combined with --judge-existing-dir")
+            path = asyncio.run(rescore_existing_run(args))
+        else:
+            path = asyncio.run(run_suite(args))
     except (ValueError, OSError, importlib.metadata.PackageNotFoundError) as error:
         parser.error(str(error))
     print(f"Evaluation summary: {path}")
