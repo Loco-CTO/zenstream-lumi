@@ -498,6 +498,148 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(':::zenstream{type="movie" id="movie-1"}', answer.markdown)
         self.assertEqual(answer.references, (movie,))
 
+    async def test_links_each_unambiguous_trusted_title_in_a_multi_title_answer(self) -> None:
+        first = EntityReference("series", "series-1", "First Trusted Title")
+        second = EntityReference("movie", "movie-2", "Second Trusted Film")
+        agent = ChatAgent(FakeRuntime([]), ToolRegistry([]))
+
+        answer = agent._make_answer(
+            "First Trusted Title has a quieter pace than Second Trusted Film.",
+            {("series", first.id): first, ("movie", second.id): second},
+            {},
+            0,
+            0,
+        )
+
+        self.assertIn(
+            'First Trusted Title :::zenstream{type="series" id="series-1"}',
+            answer.markdown,
+        )
+        self.assertIn(
+            'Second Trusted Film :::zenstream{type="movie" id="movie-2"}',
+            answer.markdown,
+        )
+        self.assertEqual(answer.references, (first, second))
+
+    async def test_keeps_explicit_reference_and_links_other_trusted_title(self) -> None:
+        first = EntityReference("series", "series-1", "First Trusted Title")
+        second = EntityReference("movie", "movie-2", "Second Trusted Film")
+        agent = ChatAgent(FakeRuntime([]), ToolRegistry([]))
+
+        answer = agent._make_answer(
+            'First Trusted Title :::zenstream{type="series" id="series-1"} and '
+            "Second Trusted Film are both available.",
+            {("series", first.id): first, ("movie", second.id): second},
+            {},
+            0,
+            0,
+        )
+
+        self.assertEqual(
+            answer.markdown.count(':::zenstream{type="series" id="series-1"}'),
+            1,
+        )
+        self.assertIn(
+            'Second Trusted Film :::zenstream{type="movie" id="movie-2"}',
+            answer.markdown,
+        )
+        self.assertEqual(answer.references, (first, second))
+
+    async def test_links_trusted_titles_in_japanese_and_chinese_text(self) -> None:
+        japanese = EntityReference("series", "series-ja", "葬送のフリーレン")
+        chinese = EntityReference("series", "series-zh", "灵海回声")
+        agent = ChatAgent(FakeRuntime([]), ToolRegistry([]))
+
+        answer = agent._make_answer(
+            "葬送のフリーレンに似た作品として、灵海回声があります。",
+            {("series", japanese.id): japanese, ("series", chinese.id): chinese},
+            {},
+            0,
+            0,
+        )
+
+        self.assertIn(
+            '葬送のフリーレン :::zenstream{type="series" id="series-ja"}',
+            answer.markdown,
+        )
+        self.assertIn(
+            '灵海回声 :::zenstream{type="series" id="series-zh"}',
+            answer.markdown,
+        )
+        self.assertEqual(answer.references, (japanese, chinese))
+
+    async def test_prefers_longer_title_when_trusted_titles_overlap(self) -> None:
+        short = EntityReference("movie", "movie-short", "Shared Trusted Name")
+        long = EntityReference("series", "series-long", "The Shared Trusted Name")
+        agent = ChatAgent(FakeRuntime([]), ToolRegistry([]))
+
+        answer = agent._make_answer(
+            "The Shared Trusted Name is in the local catalog.",
+            {("movie", short.id): short, ("series", long.id): long},
+            {},
+            0,
+            0,
+        )
+
+        self.assertIn(
+            'The Shared Trusted Name :::zenstream{type="series" id="series-long"}',
+            answer.markdown,
+        )
+        self.assertNotIn(
+            'Shared Trusted Name :::zenstream{type="movie" id="movie-short"}',
+            answer.markdown,
+        )
+        self.assertEqual(answer.references, (long,))
+
+    async def test_does_not_auto_link_short_title_inside_explicit_long_title(self) -> None:
+        short = EntityReference("movie", "movie-short", "Shared Trusted Name")
+        long = EntityReference("series", "series-long", "The Shared Trusted Name")
+        agent = ChatAgent(FakeRuntime([]), ToolRegistry([]))
+
+        answer = agent._make_answer(
+            'The Shared Trusted Name :::zenstream{type="series" id="series-long"} '
+            "is in the local catalog.",
+            {("movie", short.id): short, ("series", long.id): long},
+            {},
+            0,
+            0,
+        )
+
+        self.assertIn(
+            'The Shared Trusted Name :::zenstream{type="series" id="series-long"}',
+            answer.markdown,
+        )
+        self.assertNotIn(
+            'Shared Trusted Name :::zenstream{type="movie" id="movie-short"}',
+            answer.markdown,
+        )
+        self.assertEqual(answer.references, (long,))
+
+    async def test_does_not_auto_link_ambiguous_or_untrusted_entity_ids(self) -> None:
+        movie = EntityReference("movie", "movie-1", "Shared Trusted Title")
+        series = EntityReference("series", "series-1", "Shared Trusted Title")
+        agent = ChatAgent(FakeRuntime([]), ToolRegistry([]))
+
+        ambiguous = agent._make_answer(
+            "Shared Trusted Title is in the results.",
+            {("movie", movie.id): movie, ("series", series.id): series},
+            {},
+            0,
+            0,
+        )
+        untrusted = agent._make_answer(
+            'A result :::zenstream{type="movie" id="invented-id"}',
+            {("movie", movie.id): movie},
+            {},
+            0,
+            0,
+        )
+
+        self.assertNotIn(":::zenstream", ambiguous.markdown)
+        self.assertEqual(ambiguous.references, ())
+        self.assertNotIn("invented-id", untrusted.markdown)
+        self.assertEqual(untrusted.references, ())
+
     async def test_rejects_unknown_state_changing_tool_without_dispatch(self) -> None:
         tool = SearchCatalogTool()
         runtime = FakeRuntime(
