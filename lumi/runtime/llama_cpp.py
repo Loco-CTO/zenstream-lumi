@@ -349,7 +349,6 @@ class LlamaCppChatRuntime(ChatRuntime):
                     self._inference_phase,
                     type(error).__name__,
                     (time.perf_counter() - worker_started) * 1000,
-                    exc_info=True,
                 )
                 raise
             logger.info(
@@ -482,7 +481,6 @@ class LlamaCppChatRuntime(ChatRuntime):
                     self._inference_phase,
                     type(error).__name__,
                     (time.perf_counter() - worker_started) * 1000,
-                    exc_info=True,
                 )
                 loop.call_soon_threadsafe(events.put_nowait, _StreamWorkerResult(error=error))
             else:
@@ -1078,7 +1076,6 @@ class LlamaCppChatRuntime(ChatRuntime):
                     request.turn_id or "unknown",
                     self._inference_phase,
                     type(error).__name__,
-                    exc_info=True,
                 )
                 # Drop traceback frames that retain the failed model through the
                 # synchronous binding iterator before attempting a CPU reload.

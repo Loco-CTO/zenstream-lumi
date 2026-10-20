@@ -298,7 +298,6 @@ class LumiConversationService:
                     turn_id,
                     type(error).__name__,
                     (time.perf_counter() - started) * 1000,
-                    exc_info=True,
                 )
                 await queue.put(_StreamFailure(error))
             else:
@@ -428,7 +427,6 @@ class LumiConversationService:
                 turn_id,
                 type(error).__name__,
                 (time.perf_counter() - started) * 1000,
-                exc_info=True,
             )
             raise
 

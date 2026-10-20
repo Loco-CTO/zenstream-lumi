@@ -500,7 +500,6 @@ class ChatAgent:
                                 context.turn_id,
                                 type(error).__name__,
                                 (time.perf_counter() - close_started) * 1000,
-                                exc_info=True,
                             )
                             raise
                         _LOGGER.info(
@@ -552,7 +551,6 @@ class ChatAgent:
                 context.turn_id,
                 type(error).__name__,
                 (time.perf_counter() - started) * 1000,
-                exc_info=True,
             )
             raise InferenceError(
                 "Model runtime remained busy waiting for an earlier request"
@@ -564,7 +562,6 @@ class ChatAgent:
                 phase,
                 type(error).__name__,
                 (time.perf_counter() - started) * 1000,
-                exc_info=True,
             )
             raise InferenceError("Model request exceeded the configured time limit") from error
         except asyncio.CancelledError:
@@ -581,7 +578,6 @@ class ChatAgent:
                 context.turn_id,
                 phase,
                 (time.perf_counter() - started) * 1000,
-                exc_info=True,
             )
             raise
         except Exception as error:
@@ -591,7 +587,6 @@ class ChatAgent:
                 phase,
                 type(error).__name__,
                 (time.perf_counter() - started) * 1000,
-                exc_info=True,
             )
             raise InferenceError("Model request failed") from error
 
@@ -721,7 +716,6 @@ class ChatAgent:
                 tool.definition.name,
                 type(error).__name__,
                 (time.perf_counter() - tool_started) * 1000,
-                exc_info=True,
             )
             return ToolResult("The read-only lookup failed.", EvidenceTrust.LOCAL)
 
@@ -829,7 +823,6 @@ class ChatAgent:
                 context.turn_id,
                 type(error).__name__,
                 (time.perf_counter() - started) * 1000,
-                exc_info=True,
             )
             return ToolResult(
                 "No external search was sent because a safe query could not be planned.",
