@@ -21,6 +21,21 @@ Status: initial implementation decisions, 2026-10-06
 - Keeps conversation model and thinking choices with the conversation. New conversations inherit the configured user/server default.
 - Limits tool steps, distinct web searches, fetched pages, repeated queries, context, output, inference time, and simultaneous inference. Tool availability stays bounded and explicit.
 
+The embedded llama.cpp runtime executes one native inference at a time. Concurrent
+chat turns can wait for this slot, but queue admission and generation each receive
+their own bounded deadline (120 seconds each by default). `ModelRequest` carries
+the inference timeout, and runtimes advertising `manages_inference_timeout` enforce
+it after admission. The agent retains a combined admission/generation deadline and
+keeps its original deadline for other runtimes; the service's overall turn deadline
+still bounds the complete workflow. Admission timeouts are reported separately from
+model execution timeouts. Native execution timeout logs identify model loading,
+prompt preparation, or generation without logging prompts or responses.
+
+Stream consumers explicitly close runtime iterators on completion, callback failure,
+and cancellation. The native iterator is also closed before its worker exits.
+Cancellation remains cooperative: the runtime retains its slot until the native
+worker actually finishes, so an abandoned native call cannot overlap another one.
+
 ### Clients
 
 - Continue to call the Orchestrator for authenticated Lumi APIs.

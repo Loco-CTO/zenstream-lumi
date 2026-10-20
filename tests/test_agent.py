@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
 from collections.abc import Mapping
@@ -14,8 +15,10 @@ from lumi.contracts import (
     ChatMessage,
     EntityReference,
     EvidenceTrust,
+    ModelAdmissionTimeout,
     ModelRequest,
     ModelResponse,
+    ModelStreamEvent,
     Source,
     ToolCall,
     ToolDefinition,
@@ -226,6 +229,83 @@ def chat_context() -> ChatContext:
 
 
 class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_admission_timeout_is_reported_separately_from_generation(self) -> None:
+        class BusyRuntime:
+            async def complete(self, request):
+                raise ModelAdmissionTimeout
+
+        with self.assertLogs("lumi.agent", level="WARNING") as captured:
+            with self.assertRaisesRegex(InferenceError, "runtime remained busy"):
+                await ChatAgent(BusyRuntime(), ToolRegistry([]))._complete(
+                    chat_context(), [ChatMessage("user", "hello")], ()
+                )
+        self.assertIn("phase=admission", captured.output[0])
+
+    async def test_failed_delta_delivery_closes_the_runtime_stream(self) -> None:
+        closed = asyncio.Event()
+
+        async def events():
+            try:
+                yield ModelStreamEvent(kind="delta", text="answer")
+                await asyncio.Event().wait()
+            finally:
+                closed.set()
+
+        iterator = events()
+
+        class StreamingRuntime:
+            def stream(self, request):
+                return iterator
+
+        async def disconnected(_text):
+            raise RuntimeError("disconnected")
+
+        try:
+            with self.assertRaises(InferenceError):
+                await ChatAgent(StreamingRuntime(), ToolRegistry([]))._complete(
+                    chat_context(), [ChatMessage("user", "hello")], (), on_delta=disconnected
+                )
+            self.assertTrue(closed.is_set(), "the native stream must close before returning")
+        finally:
+            await iterator.aclose()
+
+    async def test_cancellation_during_delivery_closes_runtime_iterator(self) -> None:
+        closed = asyncio.Event()
+        delivering = asyncio.Event()
+
+        async def events():
+            try:
+                yield ModelStreamEvent(kind="delta", text="answer")
+            finally:
+                closed.set()
+
+        iterator = events()
+
+        class StreamingRuntime:
+            def stream(self, request):
+                return iterator
+
+        async def blocked_delivery(_text):
+            delivering.set()
+            await asyncio.Event().wait()
+
+        task = asyncio.create_task(
+            ChatAgent(StreamingRuntime(), ToolRegistry([]))._complete(
+                chat_context(), [ChatMessage("user", "hello")], (), on_delta=blocked_delivery
+            )
+        )
+        try:
+            await asyncio.wait_for(delivering.wait(), 1)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertTrue(closed.is_set())
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await iterator.aclose()
+
     async def test_web_capability_prompt_is_tied_to_the_available_tools(self) -> None:
         runtime = FakeRuntime(
             [ChatMessage("assistant", "Yes, I can search public web pages with Lumi.")]

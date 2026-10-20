@@ -10,13 +10,21 @@ import tempfile
 import threading
 import unittest
 import weakref
+from dataclasses import replace
 from pathlib import Path
 from types import FunctionType, SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 import lumi.runtime.llama_cpp as llama_cpp_runtime
-from lumi.contracts import ChatMessage, ModelRequest, ToolDefinition
+from lumi.agent import AgentLimits, ChatAgent
+from lumi.contracts import (
+    ChatContext,
+    ChatMessage,
+    ModelAdmissionTimeout,
+    ModelRequest,
+    ToolDefinition,
+)
 from lumi.model_installation import (
     GGUF_FORMAT,
     MODEL_MANIFEST_SCHEMA_VERSION,
@@ -32,6 +40,7 @@ from lumi.runtime.llama_cpp import (
     VerifiedModelArtifact,
     _initialize_backend_registry,
 )
+from lumi.tools import ToolRegistry
 
 _GGUF_FILENAME = "Qwen_Qwen3.5-test-Q4_K_M.gguf"
 # Each fake Llama constructor receives its own binding in a copied globals dict.
@@ -1126,6 +1135,160 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.02)
         self.assertEqual(runtime._slot._value, 1)
         await runtime.close()
+
+    async def test_queue_wait_preserves_the_agents_generation_budget(self) -> None:
+        runtime = self.make_runtime(FakeLlamaAPI("A short answer."))
+        await runtime.open()
+        context = ChatContext("account-1", "conversation-1", "qwen3.5:2b", False, "turn-1")
+        try:
+            for streaming in (False, True):
+                with self.subTest(streaming=streaming):
+                    await runtime._slot.acquire()
+                    original = runtime._generate_sync
+                    started = asyncio.Event()
+                    allow_result = asyncio.Event()
+                    loop = asyncio.get_running_loop()
+
+                    def delayed(
+                        request,
+                        cancellation,
+                        emit_delta,
+                        *,
+                        loop=loop,
+                        started=started,
+                        allow_result=allow_result,
+                        original=original,
+                    ):
+                        loop.call_soon_threadsafe(started.set)
+                        asyncio.run_coroutine_threadsafe(allow_result.wait(), loop).result(2)
+                        return original(request, cancellation, emit_delta)
+
+                    async def delta(_text):
+                        pass
+
+                    with patch.object(runtime, "_generate_sync", delayed):
+                        agent = ChatAgent(
+                            runtime, ToolRegistry([]), AgentLimits(inference_timeout_seconds=0.6)
+                        )
+                        task = asyncio.create_task(
+                            agent._complete(
+                                context,
+                                [ChatMessage("user", "hello")],
+                                (),
+                                on_delta=delta if streaming else None,
+                            )
+                        )
+                        try:
+                            await asyncio.sleep(0.4)
+                            runtime._slot.release()
+                            await asyncio.wait_for(started.wait(), 2)
+                            await asyncio.sleep(0.4)
+                            allow_result.set()
+                            result = await asyncio.wait_for(task, 2)
+                            self.assertEqual(result.message.content, "A short answer.")
+                        finally:
+                            allow_result.set()
+                            if not task.done():
+                                task.cancel()
+                            await asyncio.gather(task, return_exceptions=True)
+        finally:
+            await runtime.close()
+
+    async def test_admission_timeout_does_not_start_or_release_another_worker(self) -> None:
+        api = FakeLlamaAPI("answer")
+        runtime = self.make_runtime(api)
+        await runtime.open()
+        await runtime._slot.acquire()
+        request = replace(self.make_request(), inference_timeout_seconds=0.02)
+        try:
+            for streaming in (False, True):
+                with self.subTest(streaming=streaming):
+                    with self.assertRaises(ModelAdmissionTimeout):
+                        if streaming:
+                            await anext(runtime.stream(request))
+                        else:
+                            await runtime.complete(request)
+                    self.assertEqual(api.loads, [])
+                    self.assertTrue(runtime._slot.locked())
+        finally:
+            runtime._slot.release()
+            await runtime.close()
+
+    async def test_cancelled_generation_closes_iterator_before_traceback_collection(self) -> None:
+        api = FakeLlamaAPI("A short answer.")
+        original_factory = api.chat_formatter_to_chat_completion_handler
+        closed = threading.Event()
+
+        def factory(formatter):
+            original_handler = original_factory(formatter)
+
+            def handler(**options):
+                result = original_handler(**options)
+
+                def iterator():
+                    try:
+                        yield from result
+                    finally:
+                        closed.set()
+
+                return iterator()
+
+            return handler
+
+        api.chat_formatter_to_chat_completion_handler = factory
+        runtime = self.make_runtime(api)
+        await runtime.open()
+
+        def reject_delta(_event):
+            raise asyncio.CancelledError
+
+        try:
+            try:
+                await asyncio.to_thread(
+                    runtime._generate_sync, self.make_request(), threading.Event(), reject_delta
+                )
+            except asyncio.CancelledError as error:
+                self.assertIsNotNone(error.__traceback__)
+                self.assertTrue(closed.is_set(), "cleanup must not depend on traceback collection")
+            else:
+                self.fail("generation should have been cancelled")
+        finally:
+            await runtime.close()
+
+    async def test_generation_timeout_retains_slot_until_native_worker_exits(self) -> None:
+        runtime = self.make_runtime(FakeLlamaAPI("answer"))
+        await runtime.open()
+        request = replace(self.make_request(), inference_timeout_seconds=0.05)
+        try:
+            for streaming in (False, True):
+                with self.subTest(streaming=streaming):
+                    release = threading.Event()
+                    cancelled = threading.Event()
+
+                    def blocked(
+                        _request, cancellation, emit_delta, *, release=release, cancelled=cancelled
+                    ):
+                        release.wait(2)
+                        if cancellation.is_set():
+                            cancelled.set()
+                            raise asyncio.CancelledError
+                        raise AssertionError("the worker should be cancelled")
+
+                    try:
+                        with patch.object(runtime, "_generate_sync", blocked):
+                            with self.assertRaises(TimeoutError):
+                                if streaming:
+                                    await anext(runtime.stream(request))
+                                else:
+                                    await runtime.complete(request)
+                        self.assertTrue(runtime._slot.locked())
+                    finally:
+                        release.set()
+                        await asyncio.wait_for(runtime._slot.acquire(), 2)
+                        runtime._slot.release()
+                    self.assertTrue(cancelled.is_set())
+        finally:
+            await runtime.close()
 
     async def test_closing_stream_cancels_blocked_native_iterator_without_slot_leak(self) -> None:
         api = FakeLlamaAPI(
