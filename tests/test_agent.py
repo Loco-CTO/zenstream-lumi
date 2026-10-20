@@ -229,6 +229,22 @@ def chat_context() -> ChatContext:
 
 
 class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_model_request_carries_turn_id_without_logging_message_contents(self) -> None:
+        runtime = FakeRuntime([ChatMessage("assistant", "Private answer text")])
+        private_prompt = "Private prompt text"
+
+        with self.assertLogs("lumi.agent", level="INFO") as captured:
+            answer = await ChatAgent(runtime, ToolRegistry([])).answer(
+                chat_context(), [], private_prompt
+            )
+
+        log_text = "\n".join(captured.output)
+        self.assertEqual(answer.markdown, "Private answer text")
+        self.assertEqual(runtime.requests[0].turn_id, "turn-1")
+        self.assertIn("turn_id=turn-1", log_text)
+        self.assertNotIn(private_prompt, log_text)
+        self.assertNotIn(answer.markdown, log_text)
+
     async def test_admission_timeout_is_reported_separately_from_generation(self) -> None:
         class BusyRuntime:
             async def complete(self, request):
