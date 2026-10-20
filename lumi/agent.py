@@ -171,7 +171,8 @@ class ChatAgent:
             raise ValueError("The user message exceeds Lumi's configured input limit")
 
         _LOGGER.info(
-            "Lumi agent turn started turn_id=%s history_messages=%d input_chars=%d available_tools=%d",
+            "Lumi agent turn started turn_id=%s history_messages=%d input_chars=%d "
+            "available_tools=%d",
             context.turn_id,
             len(history),
             len(user_text),
@@ -246,7 +247,8 @@ class ChatAgent:
                     total_calls,
                 )
                 _LOGGER.info(
-                    "Lumi agent turn completed turn_id=%s tool_rounds=%d tool_calls=%d answer_chars=%d references=%d sources=%d",
+                    "Lumi agent turn completed turn_id=%s tool_rounds=%d tool_calls=%d "
+                    "answer_chars=%d references=%d sources=%d",
                     context.turn_id,
                     tool_rounds,
                     total_calls,
@@ -276,7 +278,8 @@ class ChatAgent:
             original_calls = assistant.tool_calls[: self._limits.max_tool_calls_per_round]
             prepared_calls = [self._prepare_call(call) for call in original_calls]
             _LOGGER.info(
-                "Lumi agent tool round started turn_id=%s round=%d requested_calls=%d accepted_calls=%d calls_used=%d",
+                "Lumi agent tool round started turn_id=%s round=%d requested_calls=%d "
+                "accepted_calls=%d calls_used=%d",
                 context.turn_id,
                 tool_rounds,
                 len(assistant.tool_calls),
@@ -409,11 +412,15 @@ class ChatAgent:
         )
         phase = "runtime_setup"
         _LOGGER.info(
-            "Lumi inference started turn_id=%s model=%s thinking=%s mode=%s messages=%d prompt_chars=%d tools=%d timeout_seconds=%.1f runtime=%s",
+            "Lumi inference started turn_id=%s model=%s thinking=%s mode=%s messages=%d "
+            "prompt_chars=%d tools=%d timeout_seconds=%.1f runtime=%s",
             context.turn_id,
             request.model,
             request.thinking,
-            "stream" if on_delta is not None and callable(getattr(self._runtime, "stream", None)) else "complete",
+            "stream"
+            if on_delta is not None
+            and callable(getattr(self._runtime, "stream", None))
+            else "complete",
             len(request.messages),
             sum(len(message.content) for message in request.messages),
             len(request.tools),
@@ -438,7 +445,8 @@ class ChatAgent:
                             if first_event_ms is None:
                                 first_event_ms = (time.perf_counter() - started) * 1000
                                 _LOGGER.info(
-                                    "Lumi inference first event turn_id=%s kind=%s time_to_first_event_ms=%.1f",
+                                    "Lumi inference first event turn_id=%s kind=%s "
+                                    "time_to_first_event_ms=%.1f",
                                     context.turn_id,
                                     kind or "unknown",
                                     first_event_ms,
@@ -454,7 +462,9 @@ class ChatAgent:
                                 delivery_seconds += time.perf_counter() - delivery_started
                                 if delta_count == 1 or delta_count % 64 == 0:
                                     _LOGGER.info(
-                                        "Lumi inference stream progress turn_id=%s delta_count=%d visible_chars=%d callback_ms_total=%.1f elapsed_ms=%.1f",
+                                        "Lumi inference stream progress turn_id=%s "
+                                        "delta_count=%d visible_chars=%d "
+                                        "callback_ms_total=%.1f elapsed_ms=%.1f",
                                         context.turn_id,
                                         delta_count,
                                         visible_chars,
@@ -471,7 +481,8 @@ class ChatAgent:
                                     raise InferenceError("Runtime returned an invalid stream reset")
                                 reset_count += 1
                                 _LOGGER.info(
-                                    "Lumi inference stream reset turn_id=%s reason=%s elapsed_ms=%.1f",
+                                    "Lumi inference stream reset turn_id=%s reason=%s "
+                                    "elapsed_ms=%.1f",
                                     context.turn_id,
                                     reason,
                                     (time.perf_counter() - started) * 1000,
@@ -496,7 +507,8 @@ class ChatAgent:
                             await close()
                         except Exception as error:
                             _LOGGER.warning(
-                                "Lumi inference stream close failed turn_id=%s category=%s duration_ms=%.1f",
+                                "Lumi inference stream close failed turn_id=%s category=%s "
+                                "duration_ms=%.1f",
                                 context.turn_id,
                                 type(error).__name__,
                                 (time.perf_counter() - close_started) * 1000,
@@ -510,7 +522,10 @@ class ChatAgent:
                 if response is None:
                     raise InferenceError("Runtime ended without a completion event")
                 _LOGGER.info(
-                    "Lumi inference completed turn_id=%s phase=runtime_stream duration_ms=%.1f time_to_first_event_ms=%s delta_count=%d visible_chars=%d reset_count=%d callback_ms_total=%.1f prompt_tokens=%s completion_tokens=%s model_total_ms=%s",
+                    "Lumi inference completed turn_id=%s phase=runtime_stream "
+                    "duration_ms=%.1f time_to_first_event_ms=%s delta_count=%d "
+                    "visible_chars=%d reset_count=%d callback_ms_total=%.1f prompt_tokens=%s "
+                    "completion_tokens=%s model_total_ms=%s",
                     context.turn_id,
                     (time.perf_counter() - started) * 1000,
                     f"{first_event_ms:.1f}" if first_event_ms is not None else "none",
@@ -535,7 +550,8 @@ class ChatAgent:
                 self._runtime.complete(request), timeout=timeout
             )
             _LOGGER.info(
-                "Lumi inference completed turn_id=%s phase=runtime_complete duration_ms=%.1f prompt_tokens=%s completion_tokens=%s model_total_ms=%s",
+                "Lumi inference completed turn_id=%s phase=runtime_complete duration_ms=%.1f "
+                "prompt_tokens=%s completion_tokens=%s model_total_ms=%s",
                 context.turn_id,
                 (time.perf_counter() - completion_started) * 1000,
                 response.prompt_tokens,
@@ -606,7 +622,8 @@ class ChatAgent:
             return ToolResult("This read-only tool is unavailable.", EvidenceTrust.LOCAL)
         if not isinstance(call.arguments, Mapping):
             _LOGGER.warning(
-                "Lumi tool dispatch rejected turn_id=%s tool=%s phase=arguments category=invalid_object",
+                "Lumi tool dispatch rejected turn_id=%s tool=%s phase=arguments "
+                "category=invalid_object",
                 context.turn_id,
                 tool.definition.name,
             )
@@ -633,7 +650,8 @@ class ChatAgent:
             )
         if len(encoded_arguments) > self._limits.max_tool_argument_chars:
             _LOGGER.warning(
-                "Lumi tool dispatch rejected turn_id=%s tool=%s phase=arguments category=too_large argument_chars=%d",
+                "Lumi tool dispatch rejected turn_id=%s tool=%s phase=arguments "
+                "category=too_large argument_chars=%d",
                 context.turn_id,
                 tool.definition.name,
                 len(encoded_arguments),
@@ -680,7 +698,8 @@ class ChatAgent:
         tool_call_counts[call.name] = calls_used + 1
         tool_started = time.perf_counter()
         _LOGGER.info(
-            "Lumi tool execution started turn_id=%s tool=%s call_number=%d argument_count=%d argument_chars=%d timeout_seconds=%.1f",
+            "Lumi tool execution started turn_id=%s tool=%s call_number=%d argument_count=%d "
+            "argument_chars=%d timeout_seconds=%.1f",
             context.turn_id,
             tool.definition.name,
             tool_call_counts[call.name],
@@ -703,7 +722,8 @@ class ChatAgent:
             raise
         except TimeoutError:
             _LOGGER.warning(
-                "Lumi tool execution failed turn_id=%s tool=%s phase=execution category=TimeoutError duration_ms=%.1f",
+                "Lumi tool execution failed turn_id=%s tool=%s phase=execution "
+                "category=TimeoutError duration_ms=%.1f",
                 context.turn_id,
                 tool.definition.name,
                 (time.perf_counter() - tool_started) * 1000,
@@ -711,7 +731,8 @@ class ChatAgent:
             return ToolResult("The read-only lookup exceeded its time limit.", EvidenceTrust.LOCAL)
         except Exception as error:
             _LOGGER.warning(
-                "Lumi tool execution failed turn_id=%s tool=%s phase=execution category=%s duration_ms=%.1f",
+                "Lumi tool execution failed turn_id=%s tool=%s phase=execution category=%s "
+                "duration_ms=%.1f",
                 context.turn_id,
                 tool.definition.name,
                 type(error).__name__,
@@ -721,7 +742,8 @@ class ChatAgent:
 
         if not isinstance(result, ToolResult):
             _LOGGER.error(
-                "Lumi tool execution failed turn_id=%s tool=%s phase=result category=invalid_result duration_ms=%.1f result_type=%s",
+                "Lumi tool execution failed turn_id=%s tool=%s phase=result "
+                "category=invalid_result duration_ms=%.1f result_type=%s",
                 context.turn_id,
                 tool.definition.name,
                 (time.perf_counter() - tool_started) * 1000,
@@ -731,7 +753,8 @@ class ChatAgent:
                 "The read-only lookup returned an invalid result.", EvidenceTrust.LOCAL
             )
         _LOGGER.info(
-            "Lumi tool execution completed turn_id=%s tool=%s duration_ms=%.1f result_chars=%d entities=%d sources=%d trust=%s",
+            "Lumi tool execution completed turn_id=%s tool=%s duration_ms=%.1f "
+            "result_chars=%d entities=%d sources=%d trust=%s",
             context.turn_id,
             tool.definition.name,
             (time.perf_counter() - tool_started) * 1000,
@@ -835,7 +858,8 @@ class ChatAgent:
             or message.tool_calls[0].name != original_call.name
         ):
             _LOGGER.warning(
-                "Lumi external search planning rejected turn_id=%s reason=invalid_plan role=%s tool_calls=%d duration_ms=%.1f",
+                "Lumi external search planning rejected turn_id=%s reason=invalid_plan "
+                "role=%s tool_calls=%d duration_ms=%.1f",
                 context.turn_id,
                 message.role,
                 len(message.tool_calls),
@@ -849,7 +873,8 @@ class ChatAgent:
         arguments = message.tool_calls[0].arguments
         query = arguments.get("query") if isinstance(arguments, Mapping) else None
         _LOGGER.info(
-            "Lumi external search planning completed turn_id=%s tool=%s query_chars=%d duration_ms=%.1f",
+            "Lumi external search planning completed turn_id=%s tool=%s query_chars=%d "
+            "duration_ms=%.1f",
             context.turn_id,
             tool.definition.name,
             len(query) if isinstance(query, str) else 0,

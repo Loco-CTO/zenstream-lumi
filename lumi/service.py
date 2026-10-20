@@ -51,7 +51,10 @@ def _diagnostic_turn_id(value: str | None) -> str:
         not isinstance(value, str)
         or not value
         or len(value) > 64
-        or any(not (character.isascii() and (character.isalnum() or character in "_-")) for character in value)
+        or any(
+            not (character.isascii() and (character.isalnum() or character in "_-"))
+            for character in value
+        )
     ):
         raise ValueError("A diagnostic turn ID must be a short safe identifier")
     return value
@@ -320,7 +323,8 @@ class LumiConversationService:
                     visible_chars += len(event.text or "")
                     if delta_count == 1 or delta_count % 64 == 0:
                         _LOGGER.info(
-                            "Lumi stream relay progress turn_id=%s event_count=%d delta_count=%d visible_chars=%d elapsed_ms=%.1f",
+                            "Lumi stream relay progress turn_id=%s event_count=%d "
+                            "delta_count=%d visible_chars=%d elapsed_ms=%.1f",
                             turn_id,
                             event_count,
                             delta_count,
@@ -341,7 +345,8 @@ class LumiConversationService:
         finally:
             if not task.done():
                 _LOGGER.info(
-                    "Lumi stream relay cancelling turn task turn_id=%s event_count=%d delta_count=%d",
+                    "Lumi stream relay cancelling turn task turn_id=%s event_count=%d "
+                    "delta_count=%d",
                     turn_id,
                     event_count,
                     delta_count,
@@ -352,7 +357,8 @@ class LumiConversationService:
             except asyncio.CancelledError:
                 pass
             _LOGGER.info(
-                "Lumi stream relay closed turn_id=%s event_count=%d delta_count=%d visible_chars=%d duration_ms=%.1f",
+                "Lumi stream relay closed turn_id=%s event_count=%d delta_count=%d "
+                "visible_chars=%d duration_ms=%.1f",
                 turn_id,
                 event_count,
                 delta_count,
@@ -398,7 +404,8 @@ class LumiConversationService:
                     on_reset,
                 )
             _LOGGER.info(
-                "Lumi turn completed turn_id=%s duration_ms=%.1f tool_rounds=%d tool_calls=%d answer_chars=%d",
+                "Lumi turn completed turn_id=%s duration_ms=%.1f tool_rounds=%d tool_calls=%d "
+                "answer_chars=%d",
                 turn_id,
                 (time.perf_counter() - started) * 1000,
                 result.answer.tool_rounds,
@@ -478,7 +485,8 @@ class LumiConversationService:
                 )
             else:
                 _LOGGER.info(
-                    "Lumi turn stage completed turn_id=%s stage=conversation_read duration_ms=%.1f history_messages=%d",
+                    "Lumi turn stage completed turn_id=%s stage=conversation_read "
+                    "duration_ms=%.1f history_messages=%d",
                     turn_id,
                     (time.perf_counter() - snapshot_started) * 1000,
                     len(snapshot.messages),
@@ -536,7 +544,8 @@ class LumiConversationService:
                     on_reset=on_reset,
                 )
                 _LOGGER.info(
-                    "Lumi turn stage completed turn_id=%s stage=agent_answer duration_ms=%.1f tool_rounds=%d tool_calls=%d",
+                    "Lumi turn stage completed turn_id=%s stage=agent_answer duration_ms=%.1f "
+                    "tool_rounds=%d tool_calls=%d",
                     turn_id,
                     (time.perf_counter() - inference_started) * 1000,
                     answer.tool_rounds,

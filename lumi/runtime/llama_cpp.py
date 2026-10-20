@@ -314,7 +314,8 @@ class LlamaCppChatRuntime(ChatRuntime):
         )
         if not self._opened or self._closing or self._closed:
             logger.warning(
-                "Lumi runtime request rejected turn_id=%s phase=availability opened=%s closing=%s closed=%s",
+                "Lumi runtime request rejected turn_id=%s phase=availability opened=%s "
+                "closing=%s closed=%s",
                 request.turn_id or "unknown",
                 self._opened,
                 self._closing,
@@ -344,7 +345,8 @@ class LlamaCppChatRuntime(ChatRuntime):
                 response = self._complete_sync(request, cancellation)
             except BaseException as error:
                 logger.error(
-                    "Lumi runtime worker failed turn_id=%s mode=complete phase=%s category=%s duration_ms=%.1f",
+                    "Lumi runtime worker failed turn_id=%s mode=complete phase=%s category=%s "
+                    "duration_ms=%.1f",
                     request.turn_id or "unknown",
                     self._inference_phase,
                     type(error).__name__,
@@ -364,7 +366,8 @@ class LlamaCppChatRuntime(ChatRuntime):
             async with asyncio.timeout(request.inference_timeout_seconds):
                 response = await asyncio.shield(worker)
             logger.info(
-                "Lumi runtime request completed turn_id=%s mode=complete duration_ms=%.1f prompt_tokens=%s completion_tokens=%s",
+                "Lumi runtime request completed turn_id=%s mode=complete duration_ms=%.1f "
+                "prompt_tokens=%s completion_tokens=%s",
                 request.turn_id or "unknown",
                 (time.perf_counter() - started) * 1000,
                 response.prompt_tokens,
@@ -379,14 +382,16 @@ class LlamaCppChatRuntime(ChatRuntime):
             worker.add_done_callback(self._finish_cancelled_worker)
             if isinstance(error, TimeoutError):
                 logger.warning(
-                    "Lumi runtime request timed out turn_id=%s mode=complete phase=%s duration_ms=%.1f",
+                    "Lumi runtime request timed out turn_id=%s mode=complete phase=%s "
+                    "duration_ms=%.1f",
                     request.turn_id or "unknown",
                     self._inference_phase,
                     (time.perf_counter() - started) * 1000,
                 )
             else:
                 logger.info(
-                    "Lumi runtime request cancelled turn_id=%s mode=complete phase=%s duration_ms=%.1f",
+                    "Lumi runtime request cancelled turn_id=%s mode=complete phase=%s "
+                    "duration_ms=%.1f",
                     request.turn_id or "unknown",
                     self._inference_phase,
                     (time.perf_counter() - started) * 1000,
@@ -421,7 +426,8 @@ class LlamaCppChatRuntime(ChatRuntime):
         )
         if not self._opened or self._closing or self._closed:
             logger.warning(
-                "Lumi runtime request rejected turn_id=%s phase=availability opened=%s closing=%s closed=%s",
+                "Lumi runtime request rejected turn_id=%s phase=availability opened=%s "
+                "closing=%s closed=%s",
                 request.turn_id or "unknown",
                 self._opened,
                 self._closing,
@@ -452,7 +458,8 @@ class LlamaCppChatRuntime(ChatRuntime):
                 event_counts["visible_chars"] += len(event.text or "")
                 if event_counts["deltas"] == 1 or event_counts["deltas"] % 64 == 0:
                     logger.info(
-                        "Lumi runtime stream progress turn_id=%s delta_count=%d visible_chars=%d elapsed_ms=%.1f",
+                        "Lumi runtime stream progress turn_id=%s delta_count=%d "
+                        "visible_chars=%d elapsed_ms=%.1f",
                         request.turn_id or "unknown",
                         event_counts["deltas"],
                         event_counts["visible_chars"],
@@ -476,7 +483,8 @@ class LlamaCppChatRuntime(ChatRuntime):
                 response = self._generate_sync(request, cancellation, publish)
             except BaseException as error:
                 logger.error(
-                    "Lumi runtime worker failed turn_id=%s mode=stream phase=%s category=%s duration_ms=%.1f",
+                    "Lumi runtime worker failed turn_id=%s mode=stream phase=%s category=%s "
+                    "duration_ms=%.1f",
                     request.turn_id or "unknown",
                     self._inference_phase,
                     type(error).__name__,
@@ -485,7 +493,8 @@ class LlamaCppChatRuntime(ChatRuntime):
                 loop.call_soon_threadsafe(events.put_nowait, _StreamWorkerResult(error=error))
             else:
                 logger.info(
-                    "Lumi runtime worker completed turn_id=%s mode=stream duration_ms=%.1f prompt_tokens=%s completion_tokens=%s",
+                    "Lumi runtime worker completed turn_id=%s mode=stream duration_ms=%.1f "
+                    "prompt_tokens=%s completion_tokens=%s",
                     request.turn_id or "unknown",
                     (time.perf_counter() - worker_started) * 1000,
                     response.prompt_tokens,
@@ -516,7 +525,8 @@ class LlamaCppChatRuntime(ChatRuntime):
                         raise item.error
                     assert item.response is not None
                     logger.info(
-                        "Lumi runtime stream completed turn_id=%s event_count=%d delta_count=%d visible_chars=%d duration_ms=%.1f",
+                        "Lumi runtime stream completed turn_id=%s event_count=%d "
+                        "delta_count=%d visible_chars=%d duration_ms=%.1f",
                         request.turn_id or "unknown",
                         event_counts["events"],
                         event_counts["deltas"],
@@ -532,7 +542,8 @@ class LlamaCppChatRuntime(ChatRuntime):
             worker.add_done_callback(self._finish_cancelled_worker)
             if isinstance(error, TimeoutError):
                 logger.warning(
-                    "Lumi runtime request timed out turn_id=%s mode=stream phase=%s duration_ms=%.1f event_count=%d delta_count=%d visible_chars=%d",
+                    "Lumi runtime request timed out turn_id=%s mode=stream phase=%s "
+                    "duration_ms=%.1f event_count=%d delta_count=%d visible_chars=%d",
                     request.turn_id or "unknown",
                     self._inference_phase,
                     (time.perf_counter() - started) * 1000,
@@ -542,7 +553,8 @@ class LlamaCppChatRuntime(ChatRuntime):
                 )
             else:
                 logger.info(
-                    "Lumi runtime request cancelled turn_id=%s mode=stream phase=%s duration_ms=%.1f event_count=%d delta_count=%d visible_chars=%d",
+                    "Lumi runtime request cancelled turn_id=%s mode=stream phase=%s "
+                    "duration_ms=%.1f event_count=%d delta_count=%d visible_chars=%d",
                     request.turn_id or "unknown",
                     self._inference_phase,
                     (time.perf_counter() - started) * 1000,
@@ -565,7 +577,8 @@ class LlamaCppChatRuntime(ChatRuntime):
                     self._last_used = time.monotonic()
                     self._slot.release()
             logger.info(
-                "Lumi runtime stream closed turn_id=%s phase=%s event_count=%d delta_count=%d duration_ms=%.1f",
+                "Lumi runtime stream closed turn_id=%s phase=%s event_count=%d delta_count=%d "
+                "duration_ms=%.1f",
                 request.turn_id or "unknown",
                 self._inference_phase,
                 event_counts["events"],
@@ -586,7 +599,8 @@ class LlamaCppChatRuntime(ChatRuntime):
                 await self._slot.acquire()
         except TimeoutError as error:
             logger.warning(
-                "Lumi runtime stage failed turn_id=%s stage=admission_wait category=%s duration_ms=%.1f",
+                "Lumi runtime stage failed turn_id=%s stage=admission_wait category=%s "
+                "duration_ms=%.1f",
                 request.turn_id or "unknown",
                 type(error).__name__,
                 (time.perf_counter() - started) * 1000,
@@ -772,7 +786,9 @@ class LlamaCppChatRuntime(ChatRuntime):
             raise asyncio.CancelledError
         assert loaded is not None
         logger.info(
-            "Lumi runtime stage completed turn_id=%s stage=model_load warm=%s duration_ms=%.1f model_load_ms=%s backend=%s device=%s offloaded_layers=%d total_layers=%d",
+            "Lumi runtime stage completed turn_id=%s stage=model_load warm=%s "
+            "duration_ms=%.1f model_load_ms=%s backend=%s device=%s offloaded_layers=%d "
+            "total_layers=%d",
             request.turn_id or "unknown",
             warm_model,
             (time.perf_counter() - load_started) * 1000,
@@ -795,7 +811,8 @@ class LlamaCppChatRuntime(ChatRuntime):
             self._inference_phase = "prompt_preparation"
             prompt_started = time.perf_counter()
             logger.info(
-                "Lumi runtime stage started turn_id=%s stage=prompt_preparation message_count=%d tool_count=%d thinking=%s",
+                "Lumi runtime stage started turn_id=%s stage=prompt_preparation "
+                "message_count=%d tool_count=%d thinking=%s",
                 request.turn_id or "unknown",
                 len(messages),
                 len(tools),
@@ -846,7 +863,9 @@ class LlamaCppChatRuntime(ChatRuntime):
             if output_limit <= 0:
                 raise ValueError("The prompt leaves no room for a Qwen3.5 response")
             logger.info(
-                "Lumi runtime stage completed turn_id=%s stage=prompt_preparation duration_ms=%.1f prompt_chars=%d prompt_tokens=%d context_limit=%d output_limit=%d",
+                "Lumi runtime stage completed turn_id=%s stage=prompt_preparation "
+                "duration_ms=%.1f prompt_chars=%d prompt_tokens=%d context_limit=%d "
+                "output_limit=%d",
                 request.turn_id or "unknown",
                 (time.perf_counter() - prompt_started) * 1000,
                 len(prompt),
@@ -880,7 +899,8 @@ class LlamaCppChatRuntime(ChatRuntime):
                 self._inference_phase = "generation"
                 generation_started = time.perf_counter()
                 logger.info(
-                    "Lumi runtime stage started turn_id=%s stage=generation mode=%s prompt_tokens=%d max_tokens=%d",
+                    "Lumi runtime stage started turn_id=%s stage=generation mode=%s "
+                    "prompt_tokens=%d max_tokens=%d",
                     request.turn_id or "unknown",
                     "stream" if emit_delta is not None else "complete",
                     prompt_tokens,
@@ -1001,7 +1021,8 @@ class LlamaCppChatRuntime(ChatRuntime):
                         first_generation_token_ns = time.perf_counter_ns()
                         prompt_duration_ns = first_generation_token_ns - started_ns
                         logger.info(
-                            "Lumi runtime first generation token turn_id=%s time_to_first_token_ms=%.1f",
+                            "Lumi runtime first generation token turn_id=%s "
+                            "time_to_first_token_ms=%.1f",
                             request.turn_id or "unknown",
                             prompt_duration_ns / 1_000_000,
                         )
@@ -1053,7 +1074,8 @@ class LlamaCppChatRuntime(ChatRuntime):
                     content = ""
                     discard_partial_turn()
                 logger.info(
-                    "Lumi runtime stage completed turn_id=%s stage=generation duration_ms=%.1f first_token_ms=%s response_chars=%d tool_calls=%d",
+                    "Lumi runtime stage completed turn_id=%s stage=generation "
+                    "duration_ms=%.1f first_token_ms=%s response_chars=%d tool_calls=%d",
                     request.turn_id or "unknown",
                     (time.perf_counter_ns() - started_ns) / 1_000_000,
                     f"{prompt_duration_ns / 1_000_000:.1f}"
@@ -1072,7 +1094,8 @@ class LlamaCppChatRuntime(ChatRuntime):
             if loaded.acceleration.uses_gpu:
                 fallback_reason = "GPU inference failed; CPU will be used for later turns."
                 logger.warning(
-                    "Lumi runtime GPU inference failed turn_id=%s phase=%s category=%s; starting CPU fallback",
+                    "Lumi runtime GPU inference failed turn_id=%s phase=%s category=%s; "
+                    "starting CPU fallback",
                     request.turn_id or "unknown",
                     self._inference_phase,
                     type(error).__name__,
@@ -1124,7 +1147,8 @@ class LlamaCppChatRuntime(ChatRuntime):
             total_duration_ns=total_duration_ns,
         )
         logger.info(
-            "Lumi runtime request result ready turn_id=%s duration_ms=%.1f load_ms=%s prompt_ms=%s generation_ms=%s prompt_tokens=%d response_chars=%d tool_calls=%d",
+            "Lumi runtime request result ready turn_id=%s duration_ms=%.1f load_ms=%s "
+            "prompt_ms=%s generation_ms=%s prompt_tokens=%d response_chars=%d tool_calls=%d",
             request.turn_id or "unknown",
             (time.perf_counter() - total_started) * 1000,
             load_duration_ns // 1_000_000,
