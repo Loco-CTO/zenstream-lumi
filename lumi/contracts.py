@@ -217,6 +217,11 @@ class ModelRequest:
     thinking: bool
     context_size: int
     output_tokens: int
+    inference_timeout_seconds: float | None = None
+
+
+class ModelAdmissionTimeout(TimeoutError):
+    """The runtime stayed occupied before this request could start inference."""
 
 
 @dataclass(frozen=True, slots=True)

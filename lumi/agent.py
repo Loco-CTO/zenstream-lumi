@@ -19,6 +19,7 @@ from lumi.contracts import (
     ChatRuntime,
     EntityReference,
     EvidenceTrust,
+    ModelAdmissionTimeout,
     ModelRequest,
     ModelResponse,
     Source,
@@ -362,42 +363,63 @@ class ChatAgent:
             thinking=context.thinking,
             context_size=self._limits.context_size,
             output_tokens=self._limits.output_tokens,
+            inference_timeout_seconds=self._limits.inference_timeout_seconds,
+        )
+        # Native runtimes bound admission and execution independently. Retain a
+        # combined guard here so delivery callbacks cannot keep the call alive.
+        timeout = (
+            2 * self._limits.inference_timeout_seconds
+            if getattr(self._runtime, "manages_inference_timeout", False) is True
+            else self._limits.inference_timeout_seconds
         )
         try:
             stream = getattr(self._runtime, "stream", None)
             if on_delta is not None and callable(stream):
                 response: ModelResponse | None = None
-                async with asyncio.timeout(self._limits.inference_timeout_seconds):
-                    async for event in stream(request):
-                        kind = getattr(event, "kind", None)
-                        if kind == "delta":
-                            text = getattr(event, "text", None)
-                            if not isinstance(text, str) or not text:
-                                raise InferenceError("Runtime returned an invalid text delta")
-                            await on_delta(text)
-                        elif kind == "reset":
-                            if on_reset is None:
-                                raise InferenceError(
-                                    "Runtime reset a stream that cannot be recovered"
-                                )
-                            reason = getattr(event, "reason", None)
-                            if reason not in {"intermediate", "cpu_fallback"}:
-                                raise InferenceError("Runtime returned an invalid stream reset")
-                            await on_reset(reason)
-                        elif kind == "complete":
-                            candidate = getattr(event, "response", None)
-                            if not isinstance(candidate, ModelResponse) or response is not None:
-                                raise InferenceError("Runtime returned an invalid completion event")
-                            response = candidate
-                        else:
-                            raise InferenceError("Runtime returned an unsupported stream event")
+                iterator = stream(request)
+                try:
+                    async with asyncio.timeout(timeout):
+                        async for event in iterator:
+                            kind = getattr(event, "kind", None)
+                            if kind == "delta":
+                                text = getattr(event, "text", None)
+                                if not isinstance(text, str) or not text:
+                                    raise InferenceError("Runtime returned an invalid text delta")
+                                await on_delta(text)
+                            elif kind == "reset":
+                                if on_reset is None:
+                                    raise InferenceError(
+                                        "Runtime reset a stream that cannot be recovered"
+                                    )
+                                reason = getattr(event, "reason", None)
+                                if reason not in {"intermediate", "cpu_fallback"}:
+                                    raise InferenceError("Runtime returned an invalid stream reset")
+                                await on_reset(reason)
+                            elif kind == "complete":
+                                candidate = getattr(event, "response", None)
+                                if not isinstance(candidate, ModelResponse) or response is not None:
+                                    raise InferenceError(
+                                        "Runtime returned an invalid completion event"
+                                    )
+                                response = candidate
+                            else:
+                                raise InferenceError("Runtime returned an unsupported stream event")
+                finally:
+                    close = getattr(iterator, "aclose", None)
+                    if callable(close):
+                        await close()
                 if response is None:
                     raise InferenceError("Runtime ended without a completion event")
                 return response
             return await asyncio.wait_for(
                 self._runtime.complete(request),
-                timeout=self._limits.inference_timeout_seconds,
+                timeout=timeout,
             )
+        except ModelAdmissionTimeout as error:
+            _LOGGER.warning("Lumi inference failed phase=admission category=TimeoutError")
+            raise InferenceError(
+                "Model runtime remained busy waiting for an earlier request"
+            ) from error
         except TimeoutError as error:
             _LOGGER.warning(
                 "Lumi inference failed phase=complete category=%s", type(error).__name__

@@ -13,6 +13,7 @@ import gc
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import stat
@@ -31,6 +32,7 @@ from uuid import uuid4
 from lumi.contracts import (
     ChatMessage,
     ChatRuntime,
+    ModelAdmissionTimeout,
     ModelRequest,
     ModelResponse,
     ModelStreamEvent,
@@ -222,6 +224,8 @@ class LlamaCppChatRuntime(ChatRuntime):
     and imported only when an installed model is first selected.
     """
 
+    manages_inference_timeout = True
+
     def __init__(self, config: LlamaCppConfig, *, api: Any | None = None) -> None:
         self.config = config
         self._api = api
@@ -246,6 +250,7 @@ class LlamaCppChatRuntime(ChatRuntime):
         )
         self._acceleration_state = "not_loaded"
         self._forced_cpu_reason: str | None = None
+        self._inference_phase = "idle"
 
     async def open(self) -> None:
         """Make the runtime available without importing llama.cpp or loading a model."""
@@ -304,7 +309,7 @@ class LlamaCppChatRuntime(ChatRuntime):
         if not self._opened or self._closing or self._closed:
             raise RuntimeError("Open the Lumi runtime before making requests")
         self._validate_request(request)
-        await self._slot.acquire()
+        await self._acquire_request_slot(request)
         if not self._opened or self._closing or self._closed:
             self._slot.release()
             raise RuntimeError("The Lumi runtime is not available")
@@ -313,14 +318,17 @@ class LlamaCppChatRuntime(ChatRuntime):
         worker = asyncio.create_task(asyncio.to_thread(self._complete_sync, request, cancellation))
         release_in_callback = False
         try:
-            response = await asyncio.shield(worker)
+            async with asyncio.timeout(request.inference_timeout_seconds):
+                response = await asyncio.shield(worker)
             return response
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, TimeoutError) as error:
             # Stop between native token steps. Keep the single-flight slot until the
             # worker exits because a native step already in progress cannot be killed.
             cancellation.set()
             release_in_callback = True
             worker.add_done_callback(self._finish_cancelled_worker)
+            if isinstance(error, TimeoutError):
+                logger.warning("Lumi runtime timed out phase=%s", self._inference_phase)
             raise
         finally:
             if not release_in_callback:
@@ -341,7 +349,7 @@ class LlamaCppChatRuntime(ChatRuntime):
         if not self._opened or self._closing or self._closed:
             raise RuntimeError("Open the Lumi runtime before making requests")
         self._validate_request(request)
-        await self._slot.acquire()
+        await self._acquire_request_slot(request)
         if not self._opened or self._closing or self._closed:
             self._slot.release()
             raise RuntimeError("The Lumi runtime is not available")
@@ -367,8 +375,18 @@ class LlamaCppChatRuntime(ChatRuntime):
         worker = asyncio.create_task(asyncio.to_thread(run_worker))
         release_in_callback = False
         try:
+            deadline = (
+                None
+                if request.inference_timeout_seconds is None
+                else loop.time() + request.inference_timeout_seconds
+            )
             while True:
-                item = await events.get()
+                # Never keep a timeout context open across yield: its cancellation
+                # would otherwise escape into the caller's delivery callback.
+                if deadline is not None and loop.time() >= deadline:
+                    raise TimeoutError
+                async with asyncio.timeout_at(deadline):
+                    item = await events.get()
                 if isinstance(item, _StreamWorkerResult):
                     if item.error is not None:
                         raise item.error
@@ -376,10 +394,12 @@ class LlamaCppChatRuntime(ChatRuntime):
                     yield ModelStreamEvent(kind="complete", response=item.response)
                     return
                 yield item
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, TimeoutError) as error:
             cancellation.set()
             release_in_callback = True
             worker.add_done_callback(self._finish_cancelled_worker)
+            if isinstance(error, TimeoutError):
+                logger.warning("Lumi runtime timed out phase=%s", self._inference_phase)
             raise
         finally:
             if not release_in_callback:
@@ -394,6 +414,15 @@ class LlamaCppChatRuntime(ChatRuntime):
                     )
                     self._last_used = time.monotonic()
                     self._slot.release()
+
+    async def _acquire_request_slot(self, request: ModelRequest) -> None:
+        # Queue wait has its own bound; it must not spend the generation budget.
+        try:
+            async with asyncio.timeout(request.inference_timeout_seconds):
+                await self._slot.acquire()
+        except TimeoutError as error:
+            raise ModelAdmissionTimeout("The native inference slot remained occupied") from error
+        self._inference_phase = "worker_start"
 
     def acceleration_status(self) -> dict[str, Any]:
         """Return stable JSON-safe acceleration state for an admin status view."""
@@ -438,6 +467,14 @@ class LlamaCppChatRuntime(ChatRuntime):
                 self._slot.release()
 
     def _validate_request(self, request: ModelRequest) -> None:
+        timeout = request.inference_timeout_seconds
+        if timeout is not None and (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise ValueError("Inference timeout must be finite and positive")
         if request.model not in self.config.model_artifacts:
             raise ValueError("The selected Qwen3.5 model is not installed and enabled")
         if not isinstance(request.thinking, bool):
@@ -532,6 +569,7 @@ class LlamaCppChatRuntime(ChatRuntime):
         cancellation: threading.Event,
         emit_delta: Callable[[ModelStreamEvent], None] | None,
     ) -> ModelResponse:
+        self._inference_phase = "model_load"
         if cancellation.is_set():
             raise asyncio.CancelledError
         loaded = self._loaded
@@ -559,6 +597,7 @@ class LlamaCppChatRuntime(ChatRuntime):
         total_duration_ns = 0
         result: Any | None = None
         try:
+            self._inference_phase = "prompt_preparation"
             api = self._api_module()
             formatter = api.Jinja2ChatFormatter(
                 template=loaded.chat_template,
@@ -626,6 +665,7 @@ class LlamaCppChatRuntime(ChatRuntime):
             started_ns = time.perf_counter_ns()
             loaded.model.chat_handler = chat_handler
             try:
+                self._inference_phase = "generation"
                 if cancellation.is_set():
                     raise asyncio.CancelledError
                 result = loaded.model.create_chat_completion(
@@ -816,6 +856,15 @@ class LlamaCppChatRuntime(ChatRuntime):
                     "Embedded Qwen3.5 GPU inference failed; CPU fallback is ready"
                 ) from error
             raise LlamaCppRuntimeError("Embedded Qwen3.5 inference failed") from error
+        finally:
+            close_result = getattr(result, "close", None)
+            if callable(close_result):
+                try:
+                    close_result()
+                except Exception as error:
+                    logger.warning(
+                        "Lumi native stream cleanup failed category=%s", type(error).__name__
+                    )
 
         if not isinstance(text, str) or len(text) > self.config.max_response_chars:
             raise LlamaCppProtocolError("The Qwen3.5 response is malformed or too large")
