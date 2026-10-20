@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import sqlite3
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -39,6 +41,23 @@ SCOPE_CONVERSATION_LIST = "lumi.conversations.list"
 SCOPE_CONVERSATION_CONFIGURE = "lumi.conversations.configure"
 SCOPE_PREFERENCE_WRITE = "lumi.preferences.write"
 SCOPE_MODELS_READ = "lumi.models.read"
+_LOGGER = logging.getLogger(__name__)
+
+
+def _diagnostic_turn_id(value: str | None) -> str:
+    if value is None:
+        return uuid4().hex
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 64
+        or any(
+            not (character.isascii() and (character.isalnum() or character in "_-"))
+            for character in value
+        )
+    ):
+        raise ValueError("A diagnostic turn ID must be a short safe identifier")
+    return value
 
 
 class LumiServiceBusy(RuntimeError):
@@ -236,11 +255,18 @@ class LumiConversationService:
         *,
         model: str | None = None,
         thinking: bool | None = None,
+        turn_id: str | None = None,
     ) -> AsyncIterator[LumiStreamEvent]:
         """Stream safe text while running the same single chat turn as ``chat_for_account``."""
 
         owner_id = _validate_account_id(account_id)
+        turn_id = _diagnostic_turn_id(turn_id)
+        started = time.perf_counter()
         queue: asyncio.Queue[LumiStreamEvent | _StreamFailure] = asyncio.Queue()
+        _LOGGER.info("Lumi stream relay started turn_id=%s", turn_id)
+        event_count = 0
+        delta_count = 0
+        visible_chars = 0
 
         async def on_delta(text: str) -> None:
             await queue.put(LumiStreamEvent(kind="delta", text=text))
@@ -258,14 +284,31 @@ class LumiConversationService:
                     delegation_token=None,
                     model=model,
                     thinking=thinking,
+                    turn_id=turn_id,
                     on_delta=on_delta,
                     on_reset=on_reset,
                 )
             except asyncio.CancelledError:
+                _LOGGER.info(
+                    "Lumi stream turn task cancelled turn_id=%s duration_ms=%.1f",
+                    turn_id,
+                    (time.perf_counter() - started) * 1000,
+                )
                 raise
             except Exception as error:
+                _LOGGER.error(
+                    "Lumi stream turn task failed turn_id=%s category=%s duration_ms=%.1f",
+                    turn_id,
+                    type(error).__name__,
+                    (time.perf_counter() - started) * 1000,
+                )
                 await queue.put(_StreamFailure(error))
             else:
+                _LOGGER.info(
+                    "Lumi stream turn task completed turn_id=%s duration_ms=%.1f",
+                    turn_id,
+                    (time.perf_counter() - started) * 1000,
+                )
                 await queue.put(LumiStreamEvent(kind="complete", turn=turn))
 
         task = asyncio.create_task(run_turn())
@@ -274,16 +317,54 @@ class LumiConversationService:
                 event = await queue.get()
                 if isinstance(event, _StreamFailure):
                     raise event.error
+                event_count += 1
+                if event.kind == "delta":
+                    delta_count += 1
+                    visible_chars += len(event.text or "")
+                    if delta_count == 1 or delta_count % 64 == 0:
+                        _LOGGER.info(
+                            "Lumi stream relay progress turn_id=%s event_count=%d "
+                            "delta_count=%d visible_chars=%d elapsed_ms=%.1f",
+                            turn_id,
+                            event_count,
+                            delta_count,
+                            visible_chars,
+                            (time.perf_counter() - started) * 1000,
+                        )
+                else:
+                    _LOGGER.info(
+                        "Lumi stream relay event turn_id=%s kind=%s event_count=%d elapsed_ms=%.1f",
+                        turn_id,
+                        event.kind,
+                        event_count,
+                        (time.perf_counter() - started) * 1000,
+                    )
                 yield event
                 if event.kind == "complete":
                     return
         finally:
             if not task.done():
+                _LOGGER.info(
+                    "Lumi stream relay cancelling turn task turn_id=%s event_count=%d "
+                    "delta_count=%d",
+                    turn_id,
+                    event_count,
+                    delta_count,
+                )
                 task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 pass
+            _LOGGER.info(
+                "Lumi stream relay closed turn_id=%s event_count=%d delta_count=%d "
+                "visible_chars=%d duration_ms=%.1f",
+                turn_id,
+                event_count,
+                delta_count,
+                visible_chars,
+                (time.perf_counter() - started) * 1000,
+            )
 
     async def _run_chat(
         self,
@@ -295,13 +376,22 @@ class LumiConversationService:
         delegation_token: str | None,
         model: str | None,
         thinking: bool | None,
+        turn_id: str | None = None,
         on_delta: Callable[[str], Awaitable[None]] | None = None,
         on_reset: Callable[[StreamResetReason], Awaitable[None]] | None = None,
     ) -> ChatTurn:
         account_id = _validate_account_id(account_id)
+        turn_id = _diagnostic_turn_id(turn_id)
+        started = time.perf_counter()
+        _LOGGER.info(
+            "Lumi turn started turn_id=%s user_message_chars=%d deadline_seconds=%.1f",
+            turn_id,
+            len(user_text),
+            self._agent_limits.turn_timeout_seconds,
+        )
         try:
             async with asyncio.timeout(self._agent_limits.turn_timeout_seconds):
-                return await self._complete_turn(
+                result = await self._complete_turn(
                     account_id,
                     delegation_token,
                     conversation_id,
@@ -309,11 +399,43 @@ class LumiConversationService:
                     user_text,
                     model,
                     thinking,
+                    turn_id,
                     on_delta,
                     on_reset,
                 )
+            _LOGGER.info(
+                "Lumi turn completed turn_id=%s duration_ms=%.1f tool_rounds=%d tool_calls=%d "
+                "answer_chars=%d",
+                turn_id,
+                (time.perf_counter() - started) * 1000,
+                result.answer.tool_rounds,
+                result.answer.tool_calls,
+                len(result.answer.markdown),
+            )
+            return result
+        except asyncio.CancelledError:
+            _LOGGER.info(
+                "Lumi turn cancelled turn_id=%s duration_ms=%.1f",
+                turn_id,
+                (time.perf_counter() - started) * 1000,
+            )
+            raise
         except TimeoutError as error:
+            _LOGGER.error(
+                "Lumi turn failed turn_id=%s phase=turn_deadline category=%s duration_ms=%.1f",
+                turn_id,
+                type(error).__name__,
+                (time.perf_counter() - started) * 1000,
+            )
             raise InferenceError("The chat turn exceeded Lumi's configured deadline") from error
+        except Exception as error:
+            _LOGGER.error(
+                "Lumi turn failed turn_id=%s phase=turn category=%s duration_ms=%.1f",
+                turn_id,
+                type(error).__name__,
+                (time.perf_counter() - started) * 1000,
+            )
+            raise
 
     async def _complete_turn(
         self,
@@ -324,12 +446,22 @@ class LumiConversationService:
         user_text: str,
         model: str | None,
         thinking: bool | None,
+        turn_id: str,
         on_delta: Callable[[str], Awaitable[None]] | None,
         on_reset: Callable[[StreamResetReason], Awaitable[None]] | None,
     ) -> ChatTurn:
+        lock_started = time.perf_counter()
+        _LOGGER.info("Lumi turn stage started turn_id=%s stage=conversation_lock", turn_id)
         async with self._conversation_locks.hold(
             _conversation_lock_key(account_id, conversation_id)
         ):
+            _LOGGER.info(
+                "Lumi turn stage completed turn_id=%s stage=conversation_lock wait_ms=%.1f",
+                turn_id,
+                (time.perf_counter() - lock_started) * 1000,
+            )
+            snapshot_started = time.perf_counter()
+            _LOGGER.info("Lumi turn stage started turn_id=%s stage=conversation_read", turn_id)
             try:
                 snapshot = await asyncio.to_thread(
                     self._store.get_snapshot,
@@ -345,6 +477,19 @@ class LumiConversationService:
                     conversation_id,
                     model=model,
                     thinking=thinking,
+                )
+                _LOGGER.info(
+                    "Lumi conversation created turn_id=%s duration_ms=%.1f",
+                    turn_id,
+                    (time.perf_counter() - snapshot_started) * 1000,
+                )
+            else:
+                _LOGGER.info(
+                    "Lumi turn stage completed turn_id=%s stage=conversation_read "
+                    "duration_ms=%.1f history_messages=%d",
+                    turn_id,
+                    (time.perf_counter() - snapshot_started) * 1000,
+                    len(snapshot.messages),
                 )
 
             conversation = snapshot.conversation
@@ -376,9 +521,17 @@ class LumiConversationService:
                     snapshot.messages,
                     self._agent_limits.max_trusted_entities,
                 ),
-                turn_id=uuid4().hex,
+                turn_id=turn_id,
             )
+            slot_started = time.perf_counter()
+            _LOGGER.info("Lumi turn stage started turn_id=%s stage=inference_slot_wait", turn_id)
             async with self._inference_slots:
+                _LOGGER.info(
+                    "Lumi turn stage completed turn_id=%s stage=inference_slot_wait wait_ms=%.1f",
+                    turn_id,
+                    (time.perf_counter() - slot_started) * 1000,
+                )
+                inference_started = time.perf_counter()
                 answer = await ChatAgent(
                     self._runtime,
                     self._tools,
@@ -390,14 +543,29 @@ class LumiConversationService:
                     on_delta=on_delta,
                     on_reset=on_reset,
                 )
+                _LOGGER.info(
+                    "Lumi turn stage completed turn_id=%s stage=agent_answer duration_ms=%.1f "
+                    "tool_rounds=%d tool_calls=%d",
+                    turn_id,
+                    (time.perf_counter() - inference_started) * 1000,
+                    answer.tool_rounds,
+                    answer.tool_calls,
+                )
             if not answer.markdown.strip():
                 raise InferenceError("The model returned no user-visible answer")
+            store_started = time.perf_counter()
+            _LOGGER.info("Lumi turn stage started turn_id=%s stage=conversation_write", turn_id)
             updated = await asyncio.to_thread(
                 self._store.append_turn,
                 account_id,
                 conversation_id,
                 user_text,
                 answer,
+            )
+            _LOGGER.info(
+                "Lumi turn stage completed turn_id=%s stage=conversation_write duration_ms=%.1f",
+                turn_id,
+                (time.perf_counter() - store_started) * 1000,
             )
             return ChatTurn(updated, answer)
 

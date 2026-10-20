@@ -331,6 +331,7 @@ class LumiServiceAPITests(unittest.TestCase):
                     "account-1",
                     "stream-conversation",
                     "Explain the research result.",
+                    turn_id="trace-123",
                 )
             ]
 
@@ -347,6 +348,9 @@ class LumiServiceAPITests(unittest.TestCase):
         turn = events[-1].turn
         self.assertEqual(turn.answer.markdown, "Final streamed answer.")
         self.assertEqual(len(self.runtime.requests), 3)
+        self.assertEqual(
+            {request.turn_id for request in self.runtime.requests}, {"trace-123"}
+        )
         self.assertEqual(self.runtime.complete_calls, 0)
         self.assertEqual(len(self.catalog_tool.calls), 2)
         snapshot = self.store.get_snapshot("account-1", "stream-conversation", 10)

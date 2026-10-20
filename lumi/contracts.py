@@ -218,6 +218,7 @@ class ModelRequest:
     context_size: int
     output_tokens: int
     inference_timeout_seconds: float | None = None
+    turn_id: str = field(default="", repr=False, compare=False)
 
 
 class ModelAdmissionTimeout(TimeoutError):
