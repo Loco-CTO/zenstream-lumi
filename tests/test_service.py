@@ -39,7 +39,7 @@ from lumi.service import (
     LumiConversationService,
     _conversation_lock_key,
 )
-from lumi.storage import ConversationStore
+from lumi.storage import ConversationNotFound, ConversationStore
 from lumi.tools import ToolRegistry
 
 _SERVICE_TOKEN = "test-only-internal-service-token-value"
@@ -266,6 +266,34 @@ class LumiServiceAPITests(unittest.TestCase):
             ).status_code,
             401,
         )
+
+    def test_account_scoped_conversations_can_be_renamed_and_deleted(self) -> None:
+        conversation = self.store.create_conversation("account-1", "qwen3.5:2b")
+
+        async def mutate_conversation() -> None:
+            renamed = await self.service.rename_conversation_for_account(
+                "account-1", conversation.id, "A clearer title"
+            )
+            self.assertEqual(renamed.title, "A clearer title")
+
+            with self.assertRaises(ConversationNotFound):
+                await self.service.delete_conversation_for_account(
+                    "account-2", conversation.id
+                )
+            self.assertEqual(
+                self.store.list_conversations("account-1")[0].title,
+                "A clearer title",
+            )
+
+            await self.service.delete_conversation_for_account(
+                "account-1", conversation.id
+            )
+            with self.assertRaises(ConversationNotFound):
+                await self.service.get_conversation_for_account(
+                    "account-1", conversation.id
+                )
+
+        asyncio.run(mutate_conversation())
 
     def test_chat_creates_delegated_conversation_and_persists_visible_turn(self) -> None:
         response = self.client.post(

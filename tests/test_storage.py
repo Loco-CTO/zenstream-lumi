@@ -73,6 +73,50 @@ class ConversationStoreTests(unittest.TestCase):
         self.assertEqual(snapshot.messages[1].sources, (source,))
         self.assertEqual(len(snapshot.messages), 2)
 
+    def test_conversation_can_be_renamed_without_changing_its_messages(self) -> None:
+        conversation = self.store.create_conversation("account-1", "qwen3.5:2b")
+        self.store.append_turn(
+            "account-1",
+            conversation.id,
+            "Find a show",
+            ChatAnswer("Try Frieren.", (), (), 0, 0),
+        )
+
+        renamed = self.store.rename_conversation(
+            "account-1", conversation.id, "  A\tbetter   title  "
+        )
+        snapshot = self.store.get_snapshot("account-1", conversation.id)
+
+        self.assertEqual(renamed.title, "A better title")
+        self.assertEqual(self.store.list_conversations("account-1")[0].title, "A better title")
+        self.assertEqual(len(snapshot.messages), 2)
+
+    def test_conversation_title_must_be_nonempty_and_bounded(self) -> None:
+        conversation = self.store.create_conversation("account-1", "qwen3.5:2b")
+
+        for title in (" \n\t ", "x" * 121):
+            with self.subTest(title_length=len(title)), self.assertRaises(ValueError):
+                self.store.rename_conversation("account-1", conversation.id, title)
+
+    def test_delete_is_owner_scoped_and_removes_messages(self) -> None:
+        conversation = self.store.create_conversation("account-1", "qwen3.5:2b")
+        self.store.append_turn(
+            "account-1",
+            conversation.id,
+            "Question",
+            ChatAnswer("Answer", (), (), 0, 0),
+        )
+
+        with self.assertRaises(ConversationNotFound):
+            self.store.delete_conversation("account-2", conversation.id)
+        self.assertEqual(len(self.store.get_snapshot("account-1", conversation.id).messages), 2)
+
+        self.store.delete_conversation("account-1", conversation.id)
+
+        self.assertEqual(self.store.list_conversations("account-1"), ())
+        with self.assertRaises(ConversationNotFound):
+            self.store.get_snapshot("account-1", conversation.id)
+
     def test_conversation_operations_are_scoped_to_the_owner(self) -> None:
         conversation = self.store.create_conversation("account-1", "qwen3.5:2b")
 
