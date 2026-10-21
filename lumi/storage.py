@@ -207,6 +207,46 @@ class ConversationStore:
         messages = tuple(_message_from_row(row) for row in reversed(message_rows))
         return ConversationSnapshot(_conversation_from_row(conversation_row), messages)
 
+    def rename_conversation(
+        self, owner_id: str, conversation_id: str, title: str
+    ) -> StoredConversation:
+        self._validate_owner(owner_id)
+        renamed_title = _renamed_title(title)
+        now = _utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            result = connection.execute(
+                """
+                UPDATE conversations
+                SET title = ?, updated_at = ?
+                WHERE id = ? AND owner_id = ?
+                """,
+                (renamed_title, now, conversation_id, owner_id),
+            )
+            if result.rowcount != 1:
+                raise ConversationNotFound("Conversation not found.")
+            row = connection.execute(
+                """
+                SELECT id, owner_id, title, model, thinking, created_at, updated_at
+                FROM conversations WHERE id = ? AND owner_id = ?
+                """,
+                (conversation_id, owner_id),
+            ).fetchone()
+            connection.commit()
+        return _conversation_from_row(row)
+
+    def delete_conversation(self, owner_id: str, conversation_id: str) -> None:
+        self._validate_owner(owner_id)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            result = connection.execute(
+                "DELETE FROM conversations WHERE id = ? AND owner_id = ?",
+                (conversation_id, owner_id),
+            )
+            if result.rowcount != 1:
+                raise ConversationNotFound("Conversation not found.")
+            connection.commit()
+
     def update_choice(
         self,
         owner_id: str,
@@ -441,6 +481,15 @@ def _json_sources(sources: tuple[Source, ...]) -> str:
 def _bounded_title(value: str) -> str:
     title = " ".join(value.strip().split())
     return (title or _NEW_CONVERSATION_TITLE)[:120]
+
+
+def _renamed_title(value: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError("A conversation title is required")
+    title = " ".join(value.split())
+    if not title or len(title) > 120:
+        raise ValueError("A conversation title must contain 1 to 120 characters")
+    return title
 
 
 def _utc_now() -> str:

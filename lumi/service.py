@@ -611,6 +611,38 @@ class LumiConversationService:
             self._history_limit,
         )
 
+    async def rename_conversation_for_account(
+        self,
+        account_id: str,
+        conversation_id: str,
+        title: str,
+    ) -> StoredConversation:
+        owner_id = _validate_account_id(account_id)
+        async with self._conversation_locks.hold(
+            _conversation_lock_key(owner_id, conversation_id)
+        ):
+            return await asyncio.to_thread(
+                self._store.rename_conversation,
+                owner_id,
+                conversation_id,
+                title,
+            )
+
+    async def delete_conversation_for_account(
+        self,
+        account_id: str,
+        conversation_id: str,
+    ) -> None:
+        owner_id = _validate_account_id(account_id)
+        async with self._conversation_locks.hold(
+            _conversation_lock_key(owner_id, conversation_id)
+        ):
+            await asyncio.to_thread(
+                self._store.delete_conversation,
+                owner_id,
+                conversation_id,
+            )
+
     async def update_choice(
         self,
         delegation_token: str,
