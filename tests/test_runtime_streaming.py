@@ -90,7 +90,7 @@ class RuntimeStreamingCancellationTests(unittest.TestCase):
             load_duration_ns=1,
         )
 
-        def load_model(_model_id: str):
+        def load_model(_model_id: str, _requested_tokens: int, _cancellation):
             load_started.set()
             if not allow_load_to_finish.wait(timeout=3):
                 raise TimeoutError("test did not release the model load")
@@ -117,7 +117,7 @@ class RuntimeStreamingCancellationTests(unittest.TestCase):
             except BaseException as error:
                 worker_errors.append(error)
 
-        with patch.object(runtime, "_load_model", side_effect=load_model):
+        with patch.object(runtime, "_ensure_context_capacity_sync", side_effect=load_model):
             with patch.object(runtime, "_api_module", side_effect=unexpected_api_access):
                 worker = threading.Thread(target=generate, daemon=True)
                 worker.start()

@@ -44,7 +44,7 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.lumi.release]
-runtime-api-version = 1
+runtime-api-version = 2
 minimum-orchestrator-version = "1.7.3"
 maximum-orchestrator-version-exclusive = "2.0.0"
 runtime-distributions = ["click", "ddgs", "diskcache", "jinja2", "llama-cpp-python", "lxml", "numpy", "primp", "typing_extensions"]

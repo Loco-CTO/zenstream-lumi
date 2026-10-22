@@ -14,9 +14,10 @@ from typing import Literal
 
 from lumi.contracts import ChatAnswer, EntityReference, Source
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _MAX_CONVERSATION_LIST = 100
-_MAX_STORED_MESSAGES = 200
+_MAX_STORED_MESSAGES = 50
+_MAX_MESSAGE_PAGE = 50
 _NEW_CONVERSATION_TITLE = "New conversation"
 
 
@@ -51,12 +52,24 @@ class StoredMessage:
     created_at: str
     references: tuple[EntityReference, ...] = ()
     sources: tuple[Source, ...] = ()
+    ordinal: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class ConversationSnapshot:
     conversation: StoredConversation
     messages: tuple[StoredMessage, ...]
+    summary: str | None = None
+    summary_through_ordinal: int = 0
+    has_older_messages: bool = False
+    has_unsummarized_older_messages: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class MessagePage:
+    messages: tuple[StoredMessage, ...]
+    next_before_ordinal: int | None
+    has_more: bool
 
 
 class ConversationStore:
@@ -195,17 +208,216 @@ class ConversationStore:
                 raise ConversationNotFound("Conversation not found.")
             message_rows = connection.execute(
                 """
-                SELECT id, conversation_id, owner_id, role, content, created_at,
+                SELECT ordinal, id, conversation_id, owner_id, role, content, created_at,
                        references_json, sources_json
                 FROM messages
                 WHERE conversation_id = ? AND owner_id = ?
                 ORDER BY ordinal DESC
                 LIMIT ?
                 """,
-                (conversation_id, owner_id, bounded_limit),
+                (conversation_id, owner_id, bounded_limit + 1),
             ).fetchall()
-        messages = tuple(_message_from_row(row) for row in reversed(message_rows))
-        return ConversationSnapshot(_conversation_from_row(conversation_row), messages)
+            summary_row = connection.execute(
+                """
+                SELECT summary, message_ordinal
+                FROM conversation_summaries
+                WHERE conversation_id = ? AND owner_id = ?
+                """,
+                (conversation_id, owner_id),
+            ).fetchone()
+        has_older_messages = len(message_rows) > bounded_limit
+        messages = tuple(_message_from_row(row) for row in reversed(message_rows[:bounded_limit]))
+        has_unsummarized_older = False
+        if has_older_messages and messages:
+            has_unsummarized_older = self._has_unsummarized_messages_before(
+                owner_id,
+                conversation_id,
+                messages[0].ordinal,
+                int(summary_row["message_ordinal"]) if summary_row else 0,
+            )
+        return ConversationSnapshot(
+            _conversation_from_row(conversation_row),
+            messages,
+            summary_row["summary"] if summary_row else None,
+            int(summary_row["message_ordinal"]) if summary_row else 0,
+            has_older_messages,
+            has_unsummarized_older,
+        )
+
+    def _has_unsummarized_messages_before(
+        self,
+        owner_id: str,
+        conversation_id: str,
+        before_ordinal: int,
+        summary_through_ordinal: int,
+    ) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT 1 FROM messages
+                WHERE conversation_id = ? AND owner_id = ?
+                  AND ordinal < ? AND ordinal > ?
+                LIMIT 1
+                """,
+                (
+                    conversation_id,
+                    owner_id,
+                    before_ordinal,
+                    summary_through_ordinal,
+                ),
+            ).fetchone()
+        return row is not None
+
+    def get_message_page(
+        self,
+        owner_id: str,
+        conversation_id: str,
+        *,
+        before_ordinal: int | None = None,
+        limit: int = _MAX_MESSAGE_PAGE,
+    ) -> MessagePage:
+        """Return one owner-scoped page, newest first in storage and oldest first to callers."""
+
+        self._validate_owner(owner_id)
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _MAX_MESSAGE_PAGE:
+            raise ValueError(f"Message page size must be between 1 and {_MAX_MESSAGE_PAGE}")
+        if before_ordinal is not None and (
+            isinstance(before_ordinal, bool)
+            or not isinstance(before_ordinal, int)
+            or before_ordinal < 1
+        ):
+            raise ValueError("Message page cursor is invalid")
+        with self._connect() as connection:
+            conversation = connection.execute(
+                "SELECT 1 FROM conversations WHERE id = ? AND owner_id = ?",
+                (conversation_id, owner_id),
+            ).fetchone()
+            if conversation is None:
+                raise ConversationNotFound("Conversation not found.")
+            if before_ordinal is None:
+                rows = connection.execute(
+                    """
+                    SELECT ordinal, id, conversation_id, owner_id, role, content, created_at,
+                           references_json, sources_json
+                    FROM messages WHERE conversation_id = ? AND owner_id = ?
+                    ORDER BY ordinal DESC LIMIT ?
+                    """,
+                    (conversation_id, owner_id, limit + 1),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT ordinal, id, conversation_id, owner_id, role, content, created_at,
+                           references_json, sources_json
+                    FROM messages
+                    WHERE conversation_id = ? AND owner_id = ? AND ordinal < ?
+                    ORDER BY ordinal DESC LIMIT ?
+                    """,
+                    (conversation_id, owner_id, before_ordinal, limit + 1),
+                ).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        messages = tuple(_message_from_row(row) for row in reversed(page_rows))
+        next_before = messages[0].ordinal if has_more and messages else None
+        return MessagePage(messages, next_before, has_more)
+
+    def get_message_batch_after(
+        self,
+        owner_id: str,
+        conversation_id: str,
+        after_ordinal: int,
+        *,
+        before_ordinal: int | None = None,
+        limit: int = _MAX_MESSAGE_PAGE,
+    ) -> tuple[StoredMessage, ...]:
+        """Read a bounded ascending batch for incremental summary construction."""
+
+        self._validate_owner(owner_id)
+        if isinstance(after_ordinal, bool) or not isinstance(after_ordinal, int) or after_ordinal < 0:
+            raise ValueError("Summary ordinal is invalid")
+        if before_ordinal is not None and (
+            isinstance(before_ordinal, bool)
+            or not isinstance(before_ordinal, int)
+            or before_ordinal < 1
+            or before_ordinal <= after_ordinal
+        ):
+            raise ValueError("Summary upper ordinal is invalid")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _MAX_MESSAGE_PAGE:
+            raise ValueError(f"Message batch size must be between 1 and {_MAX_MESSAGE_PAGE}")
+        with self._connect() as connection:
+            conversation = connection.execute(
+                "SELECT 1 FROM conversations WHERE id = ? AND owner_id = ?",
+                (conversation_id, owner_id),
+            ).fetchone()
+            if conversation is None:
+                raise ConversationNotFound("Conversation not found.")
+            if before_ordinal is None:
+                rows = connection.execute(
+                    """
+                    SELECT ordinal, id, conversation_id, owner_id, role, content, created_at,
+                           references_json, sources_json
+                    FROM messages
+                    WHERE conversation_id = ? AND owner_id = ? AND ordinal > ?
+                    ORDER BY ordinal ASC LIMIT ?
+                    """,
+                    (conversation_id, owner_id, after_ordinal, limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT ordinal, id, conversation_id, owner_id, role, content, created_at,
+                           references_json, sources_json
+                    FROM messages
+                    WHERE conversation_id = ? AND owner_id = ? AND ordinal > ? AND ordinal < ?
+                    ORDER BY ordinal ASC LIMIT ?
+                    """,
+                    (conversation_id, owner_id, after_ordinal, before_ordinal, limit),
+                ).fetchall()
+        return tuple(_message_from_row(row) for row in rows)
+
+    def save_summary(
+        self,
+        owner_id: str,
+        conversation_id: str,
+        message_ordinal: int,
+        summary: str,
+    ) -> None:
+        """Atomically advance a rolling summary without changing transcript rows."""
+
+        self._validate_owner(owner_id)
+        if (
+            isinstance(message_ordinal, bool)
+            or not isinstance(message_ordinal, int)
+            or message_ordinal < 1
+            or not summary.strip()
+        ):
+            raise ValueError("A non-empty summary and positive message ordinal are required")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            conversation = connection.execute(
+                "SELECT 1 FROM conversations WHERE id = ? AND owner_id = ?",
+                (conversation_id, owner_id),
+            ).fetchone()
+            maximum = connection.execute(
+                "SELECT MAX(ordinal) FROM messages WHERE conversation_id = ? AND owner_id = ?",
+                (conversation_id, owner_id),
+            ).fetchone()[0]
+            if conversation is None or maximum is None or message_ordinal > maximum:
+                raise ConversationNotFound("Conversation or summarized messages not found.")
+            connection.execute(
+                """
+                INSERT INTO conversation_summaries(
+                    conversation_id, owner_id, message_ordinal, summary, updated_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(conversation_id, owner_id) DO UPDATE SET
+                    message_ordinal = excluded.message_ordinal,
+                    summary = excluded.summary,
+                    updated_at = excluded.updated_at
+                WHERE excluded.message_ordinal >= conversation_summaries.message_ordinal
+                """,
+                (conversation_id, owner_id, message_ordinal, summary, _utc_now()),
+            )
+            connection.commit()
 
     def rename_conversation(
         self, owner_id: str, conversation_id: str, title: str
@@ -404,6 +616,25 @@ class ConversationStore:
                     COMMIT;
                     """
                 )
+                version = 1
+            if version == 1:
+                connection.executescript(
+                    """
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE conversation_summaries (
+                        conversation_id TEXT NOT NULL,
+                        owner_id TEXT NOT NULL,
+                        message_ordinal INTEGER NOT NULL CHECK (message_ordinal > 0),
+                        summary TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY (conversation_id, owner_id),
+                        FOREIGN KEY (conversation_id, owner_id)
+                            REFERENCES conversations(id, owner_id) ON DELETE CASCADE
+                    );
+                    PRAGMA user_version = 2;
+                    COMMIT;
+                    """
+                )
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -451,6 +682,7 @@ def _message_from_row(row: sqlite3.Row) -> StoredMessage:
         created_at=row["created_at"],
         references=tuple(EntityReference(**reference) for reference in references),
         sources=tuple(Source(**source) for source in sources),
+        ordinal=int(row["ordinal"]) if "ordinal" in row.keys() else 0,
     )
 
 

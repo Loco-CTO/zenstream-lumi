@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 
 from lumi.contracts import ChatAnswer, EntityReference, Source
@@ -145,8 +146,73 @@ class ConversationStoreTests(unittest.TestCase):
 
         snapshot = self.store.get_snapshot("account-1", conversation.id, message_limit=7_000)
 
-        self.assertEqual(len(snapshot.messages), 110)
+        self.assertEqual(len(snapshot.messages), 50)
+        self.assertTrue(snapshot.has_older_messages)
         self.assertEqual(len(self.store.list_conversations("account-1", limit=7_000)), 1)
+
+    def test_message_pages_are_bounded_and_cursor_through_250_transcript_rows(self) -> None:
+        conversation = self.store.create_conversation("account-1", "qwen3.5:2b")
+        for index in range(125):
+            self.store.append_turn(
+                "account-1",
+                conversation.id,
+                f"Question {index}",
+                ChatAnswer(f"Answer {index}", (), (), 0, 0),
+            )
+
+        pages = []
+        page = self.store.get_message_page("account-1", conversation.id)
+        while True:
+            pages.append(page)
+            if not page.has_more:
+                break
+            page = self.store.get_message_page(
+                "account-1", conversation.id, before_ordinal=page.next_before_ordinal
+            )
+
+        self.assertEqual([len(page.messages) for page in pages], [50] * 5)
+        self.assertTrue(all(page.has_more for page in pages[:-1]))
+        self.assertFalse(pages[-1].has_more)
+        self.assertEqual(
+            len({message.id for page in pages for message in page.messages}),
+            250,
+        )
+        self.assertEqual(
+            sorted(message.ordinal for page in pages for message in page.messages),
+            list(range(1, 251)),
+        )
+
+    def test_rolling_summary_survives_reopen_is_owner_scoped_and_deletes_with_chat(self) -> None:
+        conversation = self.store.create_conversation("account-1", "qwen3.5:2b")
+        self.store.append_turn(
+            "account-1", conversation.id, "Keep this preference", ChatAnswer("Noted", (), (), 0, 0)
+        )
+        self.store.save_summary("account-1", conversation.id, 2, "User prefers short answers.")
+        self.store.save_summary("account-1", conversation.id, 1, "Older replacement.")
+
+        reopened = ConversationStore(self.store._database_path)
+        snapshot = reopened.get_snapshot("account-1", conversation.id)
+
+        self.assertEqual(snapshot.summary, "User prefers short answers.")
+        self.assertEqual(snapshot.summary_through_ordinal, 2)
+        self.assertEqual(len(snapshot.messages), 2)
+        with self.assertRaises(ConversationNotFound):
+            reopened.get_snapshot("account-2", conversation.id)
+        with self.assertRaises(ConversationNotFound):
+            reopened.save_summary("account-2", conversation.id, 2, "Cross-account summary")
+
+        reopened.delete_conversation("account-1", conversation.id)
+        connection = sqlite3.connect(reopened._database_path)
+        try:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM conversation_summaries WHERE conversation_id = ?",
+                    (conversation.id,),
+                ).fetchone()[0],
+                0,
+            )
+        finally:
+            connection.close()
 
 
 if __name__ == "__main__":

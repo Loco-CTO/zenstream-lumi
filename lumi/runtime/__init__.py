@@ -2,6 +2,7 @@
 
 from lumi.runtime.llama_cpp import (
     LUMI_RUNTIME_API_VERSION,
+    LUMI_RUNTIME_CAPABILITIES,
     SUPPORTED_QWEN35_MODELS,
     LlamaCppChatRuntime,
     LlamaCppConfig,
@@ -24,6 +25,7 @@ from lumi.runtime.ollama import (
 __all__ = [
     "DEFAULT_QWEN35_MODELS",
     "LUMI_RUNTIME_API_VERSION",
+    "LUMI_RUNTIME_CAPABILITIES",
     "SUPPORTED_QWEN35_MODELS",
     "LlamaCppChatRuntime",
     "LlamaCppConfig",

@@ -10,6 +10,12 @@ The runtime loads supported Qwen3.5 GGUF files lazily into the Orchestrator proc
 
 The in-process runtime exposes `LUMI_RUNTIME_API_VERSION`, `LlamaCppChatRuntime`, and `LlamaCppConfig` from `lumi.runtime`. Orchestrator can reject an incompatible Lumi release before making the integration available. The runtime accepts only configured Qwen3.5 model IDs and locally installed, hash-verified GGUF files; it performs no model download and makes no HTTP request for inference.
 
+Runtime API version 2 advertises token counting, context-capacity management, completion reasons, and safe status events. Automatic context mode starts at 32,768 tokens, then grows through 65,536 and 131,072 to the lower of the provenance-controlled model limit, GGUF metadata limit, and installation memory ceiling. The native `n_ctx` is reallocated for each growth step under the runtime's single-owner lock. Memory telemetry is an estimate; a native allocation can still fail, in which case Lumi restores the last working capacity, remembers that growth ceiling, and compacts older history there. Initial automatic loads fall back to 16,384 and then 8,192 tokens if needed.
+
+Before each request, Lumi counts the selected chat template after formatting the system prompt, conversation messages, read-only tool definitions, and tool results. History selection reserves 8,192 tokens plus a 256-token margin for the answer, or one quarter of smaller fallback contexts plus the margin. At the usable ceiling, Lumi writes an account-scoped rolling summary of older turns and keeps recent turns verbatim; summary updates are bounded, versioned, and atomic. Original transcript rows are never replaced or deleted, and conversation reads expose them in owner-bound pages of 50 messages. Summary text is treated as untrusted historical data and does not authorize catalog access.
+
+Automatic output uses the remaining allocated context and ends on the model end token, cancellation, context exhaustion, or the administrator-configured 1–120 minute overall turn deadline (30 minutes by default). Context exhaustion and deadline finishes are reported as incomplete while retaining visible partial text. The input limit remains 6,000 characters. Manual context and output modes continue to use the saved numeric limits. Orchestrator enables these behaviors only when the installed Lumi package advertises the required runtime capabilities; older supported releases retain their existing behavior.
+
 Install the runtime dependency in an opted-in development environment with:
 
 ```powershell

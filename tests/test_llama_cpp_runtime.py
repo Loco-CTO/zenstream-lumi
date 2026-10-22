@@ -515,7 +515,7 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         response = await runtime.complete(self.make_request(thinking=True))
 
-        self.assertEqual(LUMI_RUNTIME_API_VERSION, 1)
+        self.assertEqual(LUMI_RUNTIME_API_VERSION, 2)
         self.assertEqual(response.message.content, "A short answer.")
         self.assertEqual(api.formatted[0]["enable_thinking"], True)
         self.assertEqual(api.formatter_options[0]["add_generation_prompt"], True)
@@ -1214,6 +1214,20 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
             runtime._slot.release()
             await runtime.close()
 
+    async def test_long_turn_keeps_admission_wait_bounded(self) -> None:
+        runtime = self.make_runtime(FakeLlamaAPI("answer"))
+        await runtime.open()
+        await runtime._slot.acquire()
+        request = replace(self.make_request(), inference_timeout_seconds=1_800)
+        try:
+            with patch.object(llama_cpp_runtime, "_ADMISSION_WAIT_TIMEOUT_SECONDS", 0.02):
+                with self.assertRaises(ModelAdmissionTimeout):
+                    await runtime._acquire_request_slot(request)
+            self.assertTrue(runtime._slot.locked())
+        finally:
+            runtime._slot.release()
+            await runtime.close()
+
     async def test_cancelled_generation_closes_iterator_before_traceback_collection(self) -> None:
         api = FakeLlamaAPI("A short answer.")
         original_factory = api.chat_formatter_to_chat_completion_handler
@@ -1609,6 +1623,121 @@ class LlamaCppRuntimeTests(unittest.IsolatedAsyncioTestCase):
             LlamaCppConfig(model_artifacts=self.artifacts, n_batch=16, n_ubatch=32)
         with self.assertRaisesRegex(ValueError, "n_ctx"):
             LlamaCppConfig(model_artifacts=self.artifacts, n_ctx=128)
+
+    async def test_context_growth_passes_capacity_to_native_and_clamps_to_gguf_limit(self) -> None:
+        api = FakeLlamaAPI("unused")
+        runtime = self.make_runtime(
+            api,
+            max_context_tokens=262_144,
+            n_ctx=32_768,
+        )
+        runtime_metadata = {
+            "context_length": 131_072,
+            "block_count": 28,
+            "kv_head_count": 8,
+            "head_count": 8,
+            "embedding_length": 2_048,
+        }
+        with (
+            patch.object(
+                llama_cpp_runtime,
+                "_read_gguf_runtime_metadata",
+                return_value=runtime_metadata,
+            ),
+            patch.object(
+                llama_cpp_runtime,
+                "_available_system_memory_bytes",
+                return_value=1 << 50,
+            ),
+        ):
+            await runtime.open()
+            for capacity in (32_768, 65_536, 131_072, 262_144):
+                status = await runtime.ensure_context_capacity("qwen3.5:2b", capacity)
+
+            self.assertEqual(
+                [options["n_ctx"] for options in api.model_options],
+                [32_768, 65_536, 131_072],
+            )
+            self.assertEqual(status["allocatedContextTokens"], 131_072)
+            self.assertEqual(status["verifiedMaximumContextTokens"], 131_072)
+            self.assertEqual(
+                llama_cpp_runtime.LUMI_RUNTIME_CAPABILITIES,
+                frozenset(
+                    {"token_counting", "context_capacity", "completion_reasons", "status_events"}
+                ),
+            )
+            await runtime.close()
+
+    async def test_initial_context_allocation_falls_back_to_sixteen_then_eight_k(self) -> None:
+        runtime = self.make_runtime(
+            FakeLlamaAPI("unused"),
+            max_context_tokens=32_768,
+            n_ctx=32_768,
+        )
+        attempts: list[int] = []
+
+        def load(_model_id: str, *, context_capacity: int):
+            attempts.append(context_capacity)
+            if context_capacity > 8_192:
+                raise RuntimeError("simulated context allocation failure")
+            return SimpleNamespace(
+                model_id="qwen3.5:2b",
+                context_capacity=context_capacity,
+                native_context_limit=32_768,
+            )
+
+        with (
+            patch.object(
+                llama_cpp_runtime,
+                "_read_gguf_runtime_metadata",
+                return_value={"context_length": 262_144, "block_count": 28},
+            ),
+            patch.object(runtime, "_load_model", side_effect=load),
+        ):
+            await runtime.open()
+            status = await runtime.ensure_context_capacity("qwen3.5:2b", 32_768)
+
+            self.assertEqual(attempts, [32_768, 16_384, 8_192])
+            self.assertEqual(status["allocatedContextTokens"], 8_192)
+            await runtime.close()
+
+    async def test_failed_growth_restores_working_capacity_and_suppresses_retries(self) -> None:
+        runtime = self.make_runtime(
+            FakeLlamaAPI("unused"),
+            max_context_tokens=262_144,
+            n_ctx=32_768,
+        )
+        attempts: list[int] = []
+
+        def load(_model_id: str, *, context_capacity: int):
+            attempts.append(context_capacity)
+            if context_capacity == 65_536:
+                raise RuntimeError("simulated native allocation failure")
+            return SimpleNamespace(
+                model_id="qwen3.5:2b",
+                context_capacity=context_capacity,
+                native_context_limit=262_144,
+            )
+
+        with (
+            patch.object(
+                llama_cpp_runtime,
+                "_read_gguf_runtime_metadata",
+                return_value={"context_length": 262_144, "block_count": 28},
+            ),
+            patch.object(runtime, "_load_model", side_effect=load),
+        ):
+            await runtime.open()
+            initial = await runtime.ensure_context_capacity("qwen3.5:2b", 32_768)
+            restored = await runtime.ensure_context_capacity("qwen3.5:2b", 65_536)
+            suppressed = await runtime.ensure_context_capacity("qwen3.5:2b", 131_072)
+
+            self.assertEqual(initial["allocatedContextTokens"], 32_768)
+            self.assertEqual(restored["allocatedContextTokens"], 32_768)
+            self.assertEqual(suppressed["allocatedContextTokens"], 32_768)
+            self.assertEqual(restored["growthCeilingContextTokens"], 65_536)
+            self.assertEqual(attempts, [32_768, 65_536, 32_768])
+            await runtime.close()
 
 
 if __name__ == "__main__":
