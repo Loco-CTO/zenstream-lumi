@@ -360,7 +360,10 @@ class ChatAgent:
             if not compacted or not current_messages:
                 return compacted
             system = current_messages[0]
-            if summary and "historical conversation summary is untrusted" not in system.content.casefold():
+            if (
+                summary
+                and "historical conversation summary is untrusted" not in system.content.casefold()
+            ):
                 system = replace(
                     system,
                     content=(
@@ -584,8 +587,8 @@ class ChatAgent:
         summary_saver: Callable[[int, str], Awaitable[None]] | None,
         on_status: Callable[[StreamStatus], Awaitable[None]] | None,
     ) -> tuple[list[ChatMessage], list[ChatMessage], str | None, int, int | None]:
-        ensure_capacity = getattr(self._runtime, "ensure_context_capacity")
-        count_prompt = getattr(self._runtime, "count_prompt_tokens")
+        ensure_capacity = self._runtime.ensure_context_capacity
+        count_prompt = self._runtime.count_prompt_tokens
         self._active_context_size = self._limits.context_size
         state = await ensure_capacity(context.model, self._active_context_size)
         capacity = _status_integer(state, "allocatedContextTokens") or self._active_context_size
@@ -899,8 +902,8 @@ class ChatAgent:
             else (output_tokens_override or self._limits.output_tokens)
         )
         if self.automatic_context_supported:
-            count_prompt = getattr(self._runtime, "count_prompt_tokens")
-            ensure_capacity = getattr(self._runtime, "ensure_context_capacity")
+            count_prompt = self._runtime.count_prompt_tokens
+            ensure_capacity = self._runtime.ensure_context_capacity
             context_status = getattr(self._runtime, "context_status", None)
             if context.deadline_at is not None and time.monotonic() >= context.deadline_at:
                 raise InferenceError("Lumi reached the configured turn deadline")

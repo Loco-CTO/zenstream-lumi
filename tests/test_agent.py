@@ -75,7 +75,9 @@ class AutomaticContextRuntime(FakeRuntime):
         self.prompt_checks.append((messages, tools))
         text_size = sum(len(message.content) for message in messages)
         tool_size = sum(
-            len(tool.name) + len(tool.description) + len(json.dumps(tool.parameters, ensure_ascii=False))
+            len(tool.name)
+            + len(tool.description)
+            + len(json.dumps(tool.parameters, ensure_ascii=False))
             for tool in tools
         )
         # Test tokenizer approximation includes non-ASCII text, tool schemas,
@@ -1119,7 +1121,9 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.requests[-1].tools, ())
         self.assertEqual(answer.tool_rounds, 1)
 
-    async def test_automatic_context_counts_multilingual_history_and_tool_schema_before_growth(self) -> None:
+    async def test_automatic_context_counts_multilingual_history_and_tool_schema_before_growth(
+        self,
+    ) -> None:
         runtime = AutomaticContextRuntime(
             [ChatMessage("assistant", "The answer is ready.")],
             maximum=65_536,
@@ -1202,7 +1206,10 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
             for index in range(1, 9)
         ]
         runtime = AutomaticContextRuntime(
-            [*[ChatMessage("assistant", "compact") for _ in range(12)], ChatMessage("assistant", "Current answer")],
+            [
+                *[ChatMessage("assistant", "compact") for _ in range(12)],
+                ChatMessage("assistant", "Current answer"),
+            ],
             maximum=8_192,
         )
         agent = ChatAgent(
@@ -1247,9 +1254,15 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("compact", runtime.requests[-1].messages[1].content)
         self.assertIn("untrusted", runtime.requests[-1].messages[0].content)
 
-    async def test_tool_result_context_pressure_compacts_before_retrying_at_the_working_ceiling(self) -> None:
+    async def test_tool_result_context_pressure_compacts_before_retrying_at_the_working_ceiling(
+        self,
+    ) -> None:
         transcript = [
-            ChatMessage("user" if index % 2 else "assistant", f"turn {index}", history_ordinal=index)
+            ChatMessage(
+                "user" if index % 2 else "assistant",
+                f"turn {index}",
+                history_ordinal=index,
+            )
             for index in range(1, 5)
         ]
         runtime = ToolPressureRuntime(

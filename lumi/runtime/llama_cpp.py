@@ -894,14 +894,22 @@ class LlamaCppChatRuntime(ChatRuntime):
         self._verified_context_limits[model_id] = native_limit
         requested = max(256, min(requested_tokens, native_limit))
         loaded = self._loaded
-        if loaded is not None and loaded.model_id == model_id and loaded.context_capacity >= requested:
+        if (
+            loaded is not None
+            and loaded.model_id == model_id
+            and loaded.context_capacity >= requested
+        ):
             self._context_growth_state = "ready"
             return loaded
         previous_capacity = (
             loaded.context_capacity if loaded is not None and loaded.model_id == model_id else None
         )
         failed_ceiling = self._failed_context_ceiling.get(model_id)
-        if previous_capacity is not None and failed_ceiling is not None and requested >= failed_ceiling:
+        if (
+            previous_capacity is not None
+            and failed_ceiling is not None
+            and requested >= failed_ceiling
+        ):
             self._context_growth_state = "limited"
             return loaded
 
@@ -1233,7 +1241,10 @@ class LlamaCppChatRuntime(ChatRuntime):
                 total_response_bytes = len(response_text.encode("utf-8"))
                 if (
                     total_response_bytes > response_byte_limit
-                    or (not request.automatic_output and total_chars > self.config.max_response_chars)
+                    or (
+                        not request.automatic_output
+                        and total_chars > self.config.max_response_chars
+                    )
                 ):
                     raise LlamaCppProtocolError("The Qwen3.5 response is too large")
                 text = response_text
@@ -1320,7 +1331,10 @@ class LlamaCppChatRuntime(ChatRuntime):
                     total_response_bytes += len(chunk_text.encode("utf-8"))
                     if (
                         total_response_bytes > response_byte_limit
-                        or (not request.automatic_output and total_chars > self.config.max_response_chars)
+                        or (
+                            not request.automatic_output
+                            and total_chars > self.config.max_response_chars
+                        )
                     ):
                         raise LlamaCppProtocolError("The Qwen3.5 response is too large")
                     text_parts.append(chunk_text)

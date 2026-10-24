@@ -279,7 +279,11 @@ class ConversationStore:
         """Return one owner-scoped page, newest first in storage and oldest first to callers."""
 
         self._validate_owner(owner_id)
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _MAX_MESSAGE_PAGE:
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= _MAX_MESSAGE_PAGE
+        ):
             raise ValueError(f"Message page size must be between 1 and {_MAX_MESSAGE_PAGE}")
         if before_ordinal is not None and (
             isinstance(before_ordinal, bool)
@@ -333,7 +337,11 @@ class ConversationStore:
         """Read a bounded ascending batch for incremental summary construction."""
 
         self._validate_owner(owner_id)
-        if isinstance(after_ordinal, bool) or not isinstance(after_ordinal, int) or after_ordinal < 0:
+        if (
+            isinstance(after_ordinal, bool)
+            or not isinstance(after_ordinal, int)
+            or after_ordinal < 0
+        ):
             raise ValueError("Summary ordinal is invalid")
         if before_ordinal is not None and (
             isinstance(before_ordinal, bool)
@@ -342,7 +350,11 @@ class ConversationStore:
             or before_ordinal <= after_ordinal
         ):
             raise ValueError("Summary upper ordinal is invalid")
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _MAX_MESSAGE_PAGE:
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= _MAX_MESSAGE_PAGE
+        ):
             raise ValueError(f"Message batch size must be between 1 and {_MAX_MESSAGE_PAGE}")
         with self._connect() as connection:
             conversation = connection.execute(
