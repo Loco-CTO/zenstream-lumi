@@ -98,7 +98,7 @@ class ModelInstallOption:
 
 @dataclass(frozen=True, slots=True)
 class Qwen35ModelSpec:
-    """Immutable source and artifact pins for one supported Qwen3.5 GGUF."""
+    """Immutable artifact pins and provenance-backed native model limits."""
 
     model_id: str
     directory_name: str
@@ -111,6 +111,10 @@ class Qwen35ModelSpec:
     download_size_bytes: int
     max_download_bytes: int
     supports_thinking: bool = True
+    # Official Qwen3.5 0.8B, 2B, and 4B configs declare
+    # max_position_embeddings=262144. Lumi clamps this against the installed,
+    # hash-verified GGUF context_length metadata before allocating a context.
+    native_context_tokens: int = 262_144
 
     @property
     def pinned_source_manifest_sha256(self) -> str:

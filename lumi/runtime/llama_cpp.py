@@ -32,6 +32,7 @@ from uuid import uuid4
 from lumi.contracts import (
     ChatMessage,
     ChatRuntime,
+  CompletionReason,
     ModelAdmissionTimeout,
     ModelRequest,
     ModelResponse,
@@ -56,7 +57,15 @@ from lumi.runtime.acceleration import (
 )
 from lumi.runtime.streaming import VisibleTextFilter
 
-LUMI_RUNTIME_API_VERSION = 1
+LUMI_RUNTIME_API_VERSION = 2
+LUMI_RUNTIME_CAPABILITIES = frozenset(
+    {"token_counting", "context_capacity", "completion_reasons", "status_events"}
+)
+_CONTEXT_STEPS = (8_192, 16_384, 32_768, 65_536, 131_072, 262_144)
+_CONTEXT_START = 32_768
+_ADMISSION_WAIT_TIMEOUT_SECONDS = 120
+_BASE_MEMORY_RESERVE_BYTES = 1_073_741_824
+_CONTEXT_MEMORY_SAFETY_FACTOR = 1.25
 SUPPORTED_QWEN35_MODELS = frozenset(option.model_id for option in supported_models())
 
 _TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -139,14 +148,15 @@ class LlamaCppConfig:
 
     model_artifacts: Mapping[str, VerifiedModelArtifact]
     idle_unload_seconds: int = 300
-    max_context_tokens: int = 8192
+    max_context_tokens: int = 262_144
     max_output_tokens: int = 2048
-    max_messages: int = 64
+    max_messages: int = 8_192
     max_tools: int = 32
     max_message_chars: int = 32_000
-    max_request_bytes: int = 2_000_000
+    max_request_bytes: int = 32_000_000
     max_response_chars: int = 200_000
-    n_ctx: int = 8192
+    max_response_bytes: int = 32_000_000
+    n_ctx: int = _CONTEXT_START
     n_batch: int = 512
     n_ubatch: int = 512
     n_threads: int = 0
@@ -170,14 +180,15 @@ class LlamaCppConfig:
 
         bounded_values = (
             ("idle_unload_seconds", self.idle_unload_seconds, 0, 86_400),
-            ("max_context_tokens", self.max_context_tokens, 256, 32_768),
+            ("max_context_tokens", self.max_context_tokens, 256, 262_144),
             ("max_output_tokens", self.max_output_tokens, 1, 8_192),
-            ("max_messages", self.max_messages, 1, 128),
+            ("max_messages", self.max_messages, 1, 8_192),
             ("max_tools", self.max_tools, 0, 64),
             ("max_message_chars", self.max_message_chars, 256, 1_000_000),
-            ("max_request_bytes", self.max_request_bytes, 1_024, 16_000_000),
+            ("max_request_bytes", self.max_request_bytes, 1_024, 32_000_000),
             ("max_response_chars", self.max_response_chars, 1, 1_000_000),
-            ("n_ctx", self.n_ctx, 256, 32_768),
+            ("max_response_bytes", self.max_response_bytes, 1_024, 67_108_864),
+            ("n_ctx", self.n_ctx, 256, 262_144),
             ("n_batch", self.n_batch, 1, 4096),
             ("n_ubatch", self.n_ubatch, 1, 4096),
             ("n_threads", self.n_threads, 0, 256),
@@ -213,6 +224,8 @@ class _LoadedModel:
     bos_token: str
     acceleration: AccelerationChoice
     load_duration_ns: int
+    context_capacity: int
+    native_context_limit: int
 
 
 class LlamaCppChatRuntime(ChatRuntime):
@@ -251,6 +264,10 @@ class LlamaCppChatRuntime(ChatRuntime):
         self._acceleration_state = "not_loaded"
         self._forced_cpu_reason: str | None = None
         self._inference_phase = "idle"
+        self._failed_context_ceiling: dict[str, int] = {}
+        self._memory_growth_ceiling: dict[str, int] = {}
+        self._verified_context_limits: dict[str, int] = {}
+        self._context_growth_state = "idle"
 
     async def open(self) -> None:
         """Make the runtime available without importing llama.cpp or loading a model."""
@@ -297,11 +314,107 @@ class LlamaCppChatRuntime(ChatRuntime):
         await self._slot.acquire()
         try:
             if model is None or self._resident_model_id == model:
-                await asyncio.to_thread(self._unload_sync)
+                await asyncio.to_thread(self._unload_sync, reset_growth_failures=True)
                 self._resident_model_id = None
         finally:
             self._last_used = time.monotonic()
             self._slot.release()
+
+    async def ensure_context_capacity(
+        self, model: str, requested_tokens: int
+    ) -> dict[str, int | str | None]:
+        """Load or grow one model under the runtime's single-owner slot."""
+
+        if model not in self.config.model_artifacts:
+            raise ValueError("The selected Qwen3.5 model is not installed and enabled")
+        if isinstance(requested_tokens, bool) or not isinstance(requested_tokens, int):
+            raise ValueError("Requested context capacity must be a positive integer")
+        if requested_tokens < 1:
+            raise ValueError("Requested context capacity must be a positive integer")
+        await self._run_context_operation(
+            lambda cancellation: self._ensure_context_capacity_sync(
+                model, requested_tokens, cancellation
+            )
+        )
+        return self.context_status()
+
+    async def count_prompt_tokens(
+        self,
+        model: str,
+        messages: tuple[ChatMessage, ...] | list[ChatMessage],
+        tools: tuple[ToolDefinition, ...] | list[ToolDefinition],
+        thinking: bool,
+    ) -> int:
+        """Count the exact formatted template, tool schemas, and special tokens."""
+
+        if model not in self.config.model_artifacts:
+            raise ValueError("The selected Qwen3.5 model is not installed and enabled")
+        if not isinstance(thinking, bool):
+            raise ValueError("thinking must be a boolean")
+
+        def count(cancellation: threading.Event) -> int:
+            if self._loaded is None or self._loaded.model_id != model:
+                self._ensure_context_capacity_sync(model, self.config.n_ctx, cancellation)
+            loaded = self._loaded
+            if loaded is None or cancellation.is_set():
+                raise asyncio.CancelledError
+            serialized_messages = [self._serialize_message(message) for message in messages]
+            serialized_tools = [self._serialize_tool(tool) for tool in tools]
+            return self._count_formatted_prompt_tokens(
+                loaded,
+                serialized_messages,
+                serialized_tools,
+                thinking,
+            )
+
+        return await self._run_context_operation(count)
+
+    def context_status(self) -> dict[str, Any]:
+        """Return cached context and growth telemetry without loading or inferring."""
+
+        loaded = self._loaded
+        model_id = loaded.model_id if loaded is not None else self._resident_model_id
+        return {
+            "allocatedContextTokens": loaded.context_capacity if loaded is not None else None,
+            "verifiedMaximumContextTokens": (
+                loaded.native_context_limit
+                if loaded is not None
+                else self._verified_context_limits.get(model_id)
+                if model_id is not None
+                else None
+            ),
+            "growthCeilingContextTokens": (
+                self._failed_context_ceiling.get(model_id) if model_id is not None else None
+            ),
+            "memoryGrowthCeilingContextTokens": (
+                self._memory_growth_ceiling.get(model_id) if model_id is not None else None
+            ),
+            "growthState": self._context_growth_state,
+        }
+
+    async def _run_context_operation(self, operation: Callable[[threading.Event], Any]) -> Any:
+        if not self._opened or self._closing or self._closed:
+            raise RuntimeError("Open the Lumi runtime before managing context")
+        try:
+            await asyncio.wait_for(self._slot.acquire(), timeout=120)
+        except TimeoutError as error:
+            raise ModelAdmissionTimeout("The native inference slot remained occupied") from error
+        cancellation = threading.Event()
+        worker = asyncio.create_task(asyncio.to_thread(operation, cancellation))
+        release_in_callback = False
+        try:
+            result = await asyncio.shield(worker)
+            self._resident_model_id = self._loaded.model_id if self._loaded is not None else None
+            self._last_used = time.monotonic()
+            return result
+        except asyncio.CancelledError:
+            cancellation.set()
+            release_in_callback = True
+            worker.add_done_callback(self._finish_cancelled_worker)
+            raise
+        finally:
+            if not release_in_callback:
+                self._slot.release()
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
         """Generate one bounded assistant answer or normalized native tool call."""
@@ -595,7 +708,13 @@ class LlamaCppChatRuntime(ChatRuntime):
             request.inference_timeout_seconds,
         )
         try:
-            async with asyncio.timeout(request.inference_timeout_seconds):
+            async with asyncio.timeout(
+                _ADMISSION_WAIT_TIMEOUT_SECONDS
+                if request.inference_timeout_seconds is None
+                else min(
+                    _ADMISSION_WAIT_TIMEOUT_SECONDS, request.inference_timeout_seconds
+                )
+            ):
                 await self._slot.acquire()
         except TimeoutError as error:
             logger.warning(
@@ -650,7 +769,9 @@ class LlamaCppChatRuntime(ChatRuntime):
                     self._resident_model_id is not None
                     and time.monotonic() - self._last_used >= self.config.idle_unload_seconds
                 ):
-                    await asyncio.to_thread(self._unload_sync)
+                    await asyncio.to_thread(
+                        self._unload_sync, reset_growth_failures=True
+                    )
                     self._resident_model_id = None
             finally:
                 self._slot.release()
@@ -674,6 +795,14 @@ class LlamaCppChatRuntime(ChatRuntime):
             raise ValueError("output_tokens must be a positive integer")
         if request.context_size < 1 or request.output_tokens < 1:
             raise ValueError("context_size and output_tokens must be positive")
+        if not isinstance(request.automatic_output, bool):
+            raise ValueError("automatic_output must be a boolean")
+        if request.deadline_at is not None and (
+            isinstance(request.deadline_at, bool)
+            or not isinstance(request.deadline_at, (int, float))
+            or not math.isfinite(request.deadline_at)
+        ):
+            raise ValueError("The inference deadline must be a finite monotonic timestamp")
         if not request.messages or len(request.messages) > self.config.max_messages:
             raise ValueError("The message count is outside the configured Lumi limit")
         if len(request.tools) > self.config.max_tools:
@@ -739,6 +868,151 @@ class LlamaCppChatRuntime(ChatRuntime):
             },
         }
 
+    def _ensure_context_capacity_sync(
+        self,
+        model_id: str,
+        requested_tokens: int,
+        cancellation: threading.Event,
+    ) -> _LoadedModel:
+        if cancellation.is_set():
+            raise asyncio.CancelledError
+        artifact = self.config.model_artifacts[model_id]
+        model_dir = _verify_model_artifact(artifact, self._verified_models)
+        spec = _require_spec(model_id)
+        model_path = model_dir / spec.gguf_filename
+        metadata_values = _read_gguf_runtime_metadata(model_path)
+        gguf_limit = metadata_values.get("context_length")
+        native_limit = min(
+            spec.native_context_tokens,
+            gguf_limit if gguf_limit is not None else self.config.n_ctx,
+            self.config.max_context_tokens,
+        )
+        if native_limit < 256:
+            raise LlamaCppRuntimeError(
+                "The selected Qwen3.5 model context is below the supported native minimum"
+            )
+        self._verified_context_limits[model_id] = native_limit
+        requested = max(256, min(requested_tokens, native_limit))
+        loaded = self._loaded
+        if (
+            loaded is not None
+            and loaded.model_id == model_id
+            and loaded.context_capacity >= requested
+        ):
+            self._context_growth_state = "ready"
+            return loaded
+        previous_capacity = (
+            loaded.context_capacity if loaded is not None and loaded.model_id == model_id else None
+        )
+        failed_ceiling = self._failed_context_ceiling.get(model_id)
+        if (
+            previous_capacity is not None
+            and failed_ceiling is not None
+            and requested >= failed_ceiling
+        ):
+            self._context_growth_state = "limited"
+            return loaded
+
+        # Do not hold a local reference to the old native model while replacing
+        # its allocation with a larger context.
+        loaded = None
+
+        candidates = [requested]
+        if previous_capacity is None and requested_tokens >= _CONTEXT_START:
+            candidates.extend(
+                step for step in reversed(_CONTEXT_STEPS) if 8_192 <= step < requested
+            )
+        for capacity in dict.fromkeys(candidates):
+            if capacity < 256 or capacity > native_limit:
+                continue
+            if cancellation.is_set():
+                raise asyncio.CancelledError
+            if previous_capacity is not None and capacity <= previous_capacity:
+                continue
+            self._context_growth_state = "growing" if previous_capacity else "loading"
+            self._unload_sync()
+            try:
+                candidate = self._load_model(model_id, context_capacity=capacity)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                self._failed_context_ceiling[model_id] = max(
+                    capacity, self._failed_context_ceiling.get(model_id, 0)
+                )
+                if "Available system memory" in str(error):
+                    memory_ceiling = _memory_growth_ceiling(
+                        _available_system_memory_bytes(),
+                        spec.download_size_bytes,
+                        metadata_values,
+                        native_limit,
+                    )
+                    if memory_ceiling is not None:
+                        self._memory_growth_ceiling[model_id] = memory_ceiling
+                logger.warning(
+                    "Lumi context allocation failed model=%s requested=%d category=%s",
+                    model_id,
+                    capacity,
+                    type(error).__name__,
+                )
+                if previous_capacity is not None:
+                    try:
+                        restored = self._load_model(
+                            model_id, context_capacity=previous_capacity
+                        )
+                    except Exception as restore_error:
+                        self._context_growth_state = "unavailable"
+                        raise LlamaCppRuntimeError(
+                            "The prior working Lumi context could not be restored"
+                        ) from restore_error
+                    self._loaded = restored
+                    self._context_growth_state = "limited"
+                    return restored
+                continue
+            if cancellation.is_set():
+                self._unload_sync()
+                raise asyncio.CancelledError
+            self._loaded = candidate
+            self._failed_context_ceiling.setdefault(model_id, 0)
+            if self._failed_context_ceiling.get(model_id) == 0:
+                self._failed_context_ceiling.pop(model_id, None)
+            self._context_growth_state = "ready"
+            return candidate
+
+        self._context_growth_state = "unavailable"
+        raise LlamaCppRuntimeError(
+            "The selected Qwen3.5 model could not be loaded with a supported context"
+        )
+
+    def _count_formatted_prompt_tokens(
+        self,
+        loaded: _LoadedModel,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        thinking: bool,
+    ) -> int:
+        api = self._api_module()
+        formatter = api.Jinja2ChatFormatter(
+            template=loaded.chat_template,
+            eos_token=loaded.eos_token,
+            bos_token=loaded.bos_token,
+            add_generation_prompt=True,
+        )
+        formatted = formatter(
+            messages=messages,
+            tools=tools or None,
+            enable_thinking=thinking,
+        )
+        prompt = getattr(formatted, "prompt", None)
+        added_special = bool(getattr(formatted, "added_special", False))
+        if not isinstance(prompt, str) or not prompt:
+            raise LlamaCppProtocolError("The Qwen3.5 chat template returned invalid text")
+        encoded = loaded.model.tokenize(
+            prompt.encode("utf-8"),
+            add_bos=not added_special,
+            special=True,
+        )
+        return _token_count(encoded)
+
     @staticmethod
     def _json_object(value: Any, label: str) -> dict[str, Any]:
         try:
@@ -772,13 +1046,15 @@ class LlamaCppChatRuntime(ChatRuntime):
             raise asyncio.CancelledError
         loaded = self._loaded
         load_duration_ns = 0
-        if loaded is None or loaded.model_id != request.model:
-            # Drop this local reference before clearing the runtime-owned reference;
-            # otherwise the old native weights remain alive during the next load.
+        if (
+            loaded is None
+            or loaded.model_id != request.model
+            or loaded.context_capacity < request.context_size
+        ):
             loaded = None
-            self._unload_sync()
-            self._loaded = self._load_model(request.model)
-            loaded = self._loaded
+            loaded = self._ensure_context_capacity_sync(
+                request.model, request.context_size, cancellation
+            )
             load_duration_ns = loaded.load_duration_ns
         if cancellation.is_set():
             # A cold native model load cannot be interrupted safely. Do not let a
@@ -850,18 +1126,25 @@ class LlamaCppChatRuntime(ChatRuntime):
             prompt_tokens = _token_count(encoded)
             context_limit = min(
                 request.context_size,
+                loaded.context_capacity,
+                loaded.native_context_limit,
                 self.config.max_context_tokens,
-                self.config.n_ctx,
             )
             if prompt_tokens <= 0 or prompt_tokens >= context_limit:
                 raise ValueError("The prompt leaves no room for a Qwen3.5 response")
-            output_limit = min(
-                request.output_tokens,
-                self.config.max_output_tokens,
-                context_limit - prompt_tokens,
-            )
+            output_limit = context_limit - prompt_tokens
+            if not request.automatic_output:
+                output_limit = min(
+                    request.output_tokens,
+                    self.config.max_output_tokens,
+                    output_limit,
+                )
             if output_limit <= 0:
                 raise ValueError("The prompt leaves no room for a Qwen3.5 response")
+            response_byte_limit = min(
+                self.config.max_response_bytes,
+                max(1_024, output_limit * 64),
+            )
             logger.info(
                 "Lumi runtime stage completed turn_id=%s stage=prompt_preparation "
                 "duration_ms=%.1f prompt_chars=%d prompt_tokens=%d context_limit=%d "
@@ -875,7 +1158,10 @@ class LlamaCppChatRuntime(ChatRuntime):
             )
 
             def should_stop(_tokens: Any, _logits: Any) -> bool:
-                return cancellation.is_set()
+                return cancellation.is_set() or (
+                    request.deadline_at is not None
+                    and time.monotonic() >= request.deadline_at
+                )
 
             stopping_criteria = _CombinedStoppingCriteria(
                 [*formatter_stopping_criteria, should_stop]
@@ -926,6 +1212,8 @@ class LlamaCppChatRuntime(ChatRuntime):
 
             text_parts: list[str] = []
             total_chars = 0
+            total_response_bytes = 0
+            native_finish_reason: str | None = None
             structured_tool_parts: dict[int, dict[str, Any]] = {}
             filter_visible = VisibleTextFilter(
                 require_final_channel=False,
@@ -935,6 +1223,9 @@ class LlamaCppChatRuntime(ChatRuntime):
                 choices = result.get("choices") if isinstance(result, Mapping) else None
                 choice = choices[0] if isinstance(choices, list) and choices else None
                 message = choice.get("message") if isinstance(choice, Mapping) else None
+                reason = choice.get("finish_reason") if isinstance(choice, Mapping) else None
+                if isinstance(reason, str):
+                    native_finish_reason = reason
                 if not isinstance(message, Mapping):
                     raise LlamaCppProtocolError(
                         "The Qwen3.5 chat response returned a malformed completion"
@@ -947,7 +1238,14 @@ class LlamaCppChatRuntime(ChatRuntime):
                         "The Qwen3.5 chat response returned malformed text"
                     )
                 total_chars = len(response_text)
-                if total_chars > self.config.max_response_chars:
+                total_response_bytes = len(response_text.encode("utf-8"))
+                if (
+                    total_response_bytes > response_byte_limit
+                    or (
+                        not request.automatic_output
+                        and total_chars > self.config.max_response_chars
+                    )
+                ):
                     raise LlamaCppProtocolError("The Qwen3.5 response is too large")
                 text = response_text
                 structured_calls = message.get("tool_calls")
@@ -984,6 +1282,9 @@ class LlamaCppChatRuntime(ChatRuntime):
                         raise asyncio.CancelledError
                     choices = chunk.get("choices") if isinstance(chunk, Mapping) else None
                     choice = choices[0] if isinstance(choices, list) and choices else None
+                    reason = choice.get("finish_reason") if isinstance(choice, Mapping) else None
+                    if isinstance(reason, str):
+                        native_finish_reason = reason
                     delta = choice.get("delta") if isinstance(choice, Mapping) else None
                     if not isinstance(delta, Mapping):
                         raise LlamaCppProtocolError(
@@ -1027,7 +1328,14 @@ class LlamaCppChatRuntime(ChatRuntime):
                             prompt_duration_ns / 1_000_000,
                         )
                     total_chars += len(chunk_text)
-                    if total_chars > self.config.max_response_chars:
+                    total_response_bytes += len(chunk_text.encode("utf-8"))
+                    if (
+                        total_response_bytes > response_byte_limit
+                        or (
+                            not request.automatic_output
+                            and total_chars > self.config.max_response_chars
+                        )
+                    ):
                         raise LlamaCppProtocolError("The Qwen3.5 response is too large")
                     text_parts.append(chunk_text)
                     visible = filter_visible.feed(chunk_text)
@@ -1113,6 +1421,7 @@ class LlamaCppChatRuntime(ChatRuntime):
                     except Exception:
                         pass
                 result = None
+                failed_context_capacity = loaded.context_capacity
                 self._loaded = None
                 loaded = None
                 gc.collect()
@@ -1120,7 +1429,9 @@ class LlamaCppChatRuntime(ChatRuntime):
                     emit_delta(ModelStreamEvent(kind="reset", reason="cpu_fallback"))
                     streamed_visible = False
                 if not cancellation.is_set():
-                    self._loaded = self._load_model(request.model)
+                    self._loaded = self._load_model(
+                        request.model, context_capacity=failed_context_capacity
+                    )
                     return self._generate_sync(request, cancellation, emit_delta)
                 raise LlamaCppRuntimeError(
                     "Embedded Qwen3.5 GPU inference failed; CPU fallback is ready"
@@ -1136,8 +1447,20 @@ class LlamaCppChatRuntime(ChatRuntime):
                         "Lumi native stream cleanup failed category=%s", type(error).__name__
                     )
 
-        if not isinstance(text, str) or len(text) > self.config.max_response_chars:
+        if not isinstance(text, str) or (
+            len(text.encode("utf-8")) > response_byte_limit
+            or (not request.automatic_output and len(text) > self.config.max_response_chars)
+        ):
             raise LlamaCppProtocolError("The Qwen3.5 response is malformed or too large")
+        finish_reason: CompletionReason
+        if request.deadline_at is not None and time.monotonic() >= request.deadline_at:
+            finish_reason = "deadline"
+        elif native_finish_reason == "length":
+            finish_reason = "context_exhausted"
+        elif calls:
+            finish_reason = "tool_calls"
+        else:
+            finish_reason = "stop"
         response = ModelResponse(
             ChatMessage("assistant", content, tool_calls=calls),
             prompt_tokens=prompt_tokens,
@@ -1145,6 +1468,7 @@ class LlamaCppChatRuntime(ChatRuntime):
             generation_duration_ns=generation_duration_ns,
             load_duration_ns=load_duration_ns,
             total_duration_ns=total_duration_ns,
+            finish_reason=finish_reason,
         )
         logger.info(
             "Lumi runtime request result ready turn_id=%s duration_ms=%.1f load_ms=%s "
@@ -1164,12 +1488,38 @@ class LlamaCppChatRuntime(ChatRuntime):
         )
         return response
 
-    def _load_model(self, model_id: str) -> _LoadedModel:
+    def _load_model(self, model_id: str, *, context_capacity: int) -> _LoadedModel:
         load_started_ns = time.perf_counter_ns()
         artifact = self.config.model_artifacts[model_id]
         model_dir = _verify_model_artifact(artifact, self._verified_models)
         spec = _require_spec(model_id)
         model_path = model_dir / spec.gguf_filename
+        metadata_values = _read_gguf_runtime_metadata(model_path)
+        gguf_context = metadata_values.get("context_length")
+        native_context_limit = min(
+            spec.native_context_tokens,
+            gguf_context if gguf_context is not None else self.config.n_ctx,
+        )
+        native_context_limit = min(native_context_limit, self.config.max_context_tokens)
+        if not 256 <= context_capacity <= native_context_limit:
+            raise LlamaCppRuntimeError(
+                "The requested context is outside the verified Qwen3.5 model limit"
+            )
+        self._verified_context_limits[model_id] = native_context_limit
+        context_memory_bytes = _estimate_context_memory_bytes(
+            metadata_values, context_capacity
+        )
+        available_memory = _available_system_memory_bytes()
+        if available_memory is not None:
+            required_memory = (
+                spec.download_size_bytes
+                + math.ceil(context_memory_bytes * _CONTEXT_MEMORY_SAFETY_FACTOR)
+                + _BASE_MEMORY_RESERVE_BYTES
+            )
+            if available_memory < required_memory:
+                raise LlamaCppRuntimeError(
+                    "Available system memory is below the conservative context budget"
+                )
         api = self._api_module()
         try:
             total_layers = _read_gguf_layer_count(model_path)
@@ -1192,6 +1542,10 @@ class LlamaCppChatRuntime(ChatRuntime):
                 devices,
                 model_size_bytes=spec.download_size_bytes,
                 total_layers=total_layers,
+                memory_reserve_bytes=(
+                    _BASE_MEMORY_RESERVE_BYTES
+                    + math.ceil(context_memory_bytes * _CONTEXT_MEMORY_SAFETY_FACTOR)
+                ),
                 max_layers=self.config.n_gpu_layers,
             )
         self._acceleration = choice
@@ -1200,7 +1554,7 @@ class LlamaCppChatRuntime(ChatRuntime):
         def load_native(n_gpu_layers: int, native_device_name: str | None) -> Any:
             options = dict(
                 model_path=str(model_path),
-                n_ctx=self.config.n_ctx,
+                n_ctx=context_capacity,
                 n_batch=self.config.n_batch,
                 n_ubatch=self.config.n_ubatch,
                 n_threads=self.config.n_threads,
@@ -1263,6 +1617,8 @@ class LlamaCppChatRuntime(ChatRuntime):
             bos_token,
             self._acceleration,
             time.perf_counter_ns() - load_started_ns,
+            context_capacity,
+            native_context_limit,
         )
 
     def _api_module(self) -> Any:
@@ -1296,9 +1652,13 @@ class LlamaCppChatRuntime(ChatRuntime):
         )
         return self._api
 
-    def _unload_sync(self) -> None:
+    def _unload_sync(self, *, reset_growth_failures: bool = False) -> None:
         self._loaded = None
         gc.collect()
+        if reset_growth_failures:
+            self._failed_context_ceiling.clear()
+            self._memory_growth_ceiling.clear()
+            self._context_growth_state = "idle"
         if self._acceleration_state != "unavailable":
             self._acceleration_state = "not_loaded"
             self._acceleration = _cpu_choice(0, None)
@@ -1523,6 +1883,136 @@ def _metadata_layer_count(metadata: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 512:
         return None
     return value
+
+
+def _read_gguf_runtime_metadata(path: Path) -> dict[str, int]:
+    """Read context and KV dimensions from a verified GGUF metadata block."""
+
+    wanted_suffixes = {
+        "context_length": "context_length",
+        "block_count": "block_count",
+        "kv_head_count": "attention.head_count_kv",
+        "head_count": "attention.head_count",
+        "embedding_length": "embedding_length",
+    }
+    integer_formats = {4: "<I", 5: "<i", 10: "<Q", 11: "<q"}
+    found: dict[str, list[tuple[str, int]]] = {name: [] for name in wanted_suffixes}
+    architecture: str | None = None
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as stream:
+            if stream.read(4) != b"GGUF":
+                raise ValueError("invalid GGUF header")
+            version, = _read_gguf_struct(stream, "<I")
+            if version not in {1, 2, 3}:
+                raise ValueError("unsupported GGUF version")
+            _tensor_count, metadata_count = _read_gguf_struct(stream, "<QQ")
+            if metadata_count > 100_000:
+                raise ValueError("excessive GGUF metadata count")
+            raw_values: list[tuple[str, int]] = []
+            for _ in range(metadata_count):
+                key = _read_gguf_string(stream, size, decode=True)
+                value_type, = _read_gguf_struct(stream, "<I")
+                if key == "general.architecture" and value_type == 8:
+                    architecture = _read_gguf_string(stream, size, decode=True)
+                    continue
+                if value_type in integer_formats and any(
+                    key.endswith(suffix) for suffix in wanted_suffixes.values()
+                ):
+                    value, = _read_gguf_struct(stream, integer_formats[value_type])
+                    raw_values.append((key, int(value)))
+                else:
+                    _skip_gguf_value(stream, size, value_type)
+        for name, suffix in wanted_suffixes.items():
+            matching = [
+                value
+                for key, value in raw_values
+                if key == f"{architecture}.{suffix}"
+                or (architecture is None and key.endswith(f".{suffix}"))
+            ]
+            if matching:
+                found[name] = [(f"{architecture}.{suffix}", value) for value in matching]
+        values: dict[str, int] = {}
+        for name, candidates in found.items():
+            if candidates:
+                value = min(candidate for _key, candidate in candidates)
+                if value > 0:
+                    values[name] = value
+        if not values:
+            raise ValueError("GGUF has no usable runtime metadata")
+        return values
+    except (OSError, EOFError, UnicodeDecodeError, ValueError, struct.error) as error:
+        raise LlamaCppRuntimeError(
+            "The selected Qwen3.5 GGUF runtime metadata could not be measured safely"
+        ) from error
+
+
+def _estimate_context_memory_bytes(metadata: Mapping[str, int], context_tokens: int) -> int:
+    layers = max(1, min(metadata.get("block_count", 64), 512))
+    heads = max(1, min(metadata.get("kv_head_count", metadata.get("head_count", 8)), 256))
+    embedding = max(256, min(metadata.get("embedding_length", 2_048), 131_072))
+    head_count = max(1, metadata.get("head_count", 8))
+    head_dimension = max(64, min(embedding // head_count, 16_384))
+    # Float16 K and V cache for every layer is a deliberately conservative
+    # upper estimate; hybrid linear-attention layers may use less memory.
+    bytes_per_token = 2 * 2 * layers * heads * head_dimension
+    return max(64 * 1024, bytes_per_token) * context_tokens
+
+
+def _available_system_memory_bytes() -> int | None:
+    """Return OS-reported free/available RAM, or None when telemetry is absent."""
+
+    if sys.platform == "win32":
+        class _MemoryStatus(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        try:
+            status = _MemoryStatus()
+            status.dwLength = ctypes.sizeof(status)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return int(status.ullAvailPhys)
+        except (AttributeError, OSError):
+            return None
+    try:
+        available_pages = os.sysconf("SC_AVPHYS_PAGES")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        if available_pages > 0 and page_size > 0:
+            return int(available_pages * page_size)
+    except (AttributeError, OSError, ValueError):
+        return None
+    return None
+
+
+def _memory_growth_ceiling(
+    available_bytes: int | None,
+    model_size_bytes: int,
+    metadata: Mapping[str, int],
+    native_limit: int,
+) -> int | None:
+    if available_bytes is None or available_bytes <= 0:
+        return None
+    bytes_per_token = max(
+        1,
+        math.ceil(
+            _estimate_context_memory_bytes(metadata, 1)
+            * _CONTEXT_MEMORY_SAFETY_FACTOR
+        ),
+    )
+    capacity = max(
+        0,
+        available_bytes - model_size_bytes - _BASE_MEMORY_RESERVE_BYTES,
+    ) // bytes_per_token
+    return min(native_limit, int(capacity))
 
 
 def _read_gguf_layer_count(path: Path) -> int:

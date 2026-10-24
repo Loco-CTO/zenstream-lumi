@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import logging
 import sqlite3
+import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -20,7 +21,9 @@ from lumi.contracts import (
     ChatMessage,
     ChatRuntime,
     EntityReference,
+    HistoryPage,
     StreamResetReason,
+    StreamStatus,
 )
 from lumi.delegation import DelegationClaims, DelegationError, DelegationVerifier
 from lumi.model_catalog import ModelCatalog, ModelConfigurationError, QwenModelOption
@@ -28,6 +31,7 @@ from lumi.storage import (
     ConversationNotFound,
     ConversationSnapshot,
     ConversationStore,
+    MessagePage,
     StoredConversation,
     StoredMessage,
     UserModelPreference,
@@ -72,12 +76,13 @@ class ChatTurn:
 
 @dataclass(frozen=True, slots=True)
 class LumiStreamEvent:
-    """A visible delta, partial-turn reset, or authoritative completed chat turn."""
+    """A visible delta, safe status, partial-turn reset, or completed chat turn."""
 
-    kind: Literal["delta", "reset", "complete"]
+    kind: Literal["delta", "reset", "status", "complete"]
     text: str | None = None
     turn: ChatTurn | None = None
     reason: StreamResetReason | None = None
+    status: StreamStatus | None = None
 
     def __post_init__(self) -> None:
         if self.kind == "delta":
@@ -86,6 +91,7 @@ class LumiStreamEvent:
                 or not self.text
                 or self.turn is not None
                 or self.reason is not None
+                or self.status is not None
             ):
                 raise ValueError("A Lumi delta must contain only nonempty visible text")
         elif self.kind == "reset":
@@ -93,15 +99,25 @@ class LumiStreamEvent:
                 self.text is not None
                 or self.turn is not None
                 or self.reason not in {"intermediate", "cpu_fallback"}
+                or self.status is not None
             ):
                 raise ValueError("A Lumi stream reset must contain only a safe reason")
         elif self.kind == "complete":
             if (
                 self.text is not None
                 or self.reason is not None
+                or self.status is not None
                 or not isinstance(self.turn, ChatTurn)
             ):
                 raise ValueError("A Lumi completion must carry its saved chat turn")
+        elif self.kind == "status":
+            if (
+                self.text is not None
+                or self.turn is not None
+                or self.reason is not None
+                or self.status not in {"context_expansion", "summarization", "generation"}
+            ):
+                raise ValueError("A Lumi status event must contain one safe status value")
         else:
             raise ValueError("Unsupported Lumi stream event")
 
@@ -187,6 +203,23 @@ class LumiConversationService:
         self._agent_limits = agent_limits or AgentLimits()
         self._inference_slots = asyncio.Semaphore(max_concurrent_chats)
         self._conversation_locks = _ConversationLockPool(max_active_conversations)
+        self._context_status_lock = threading.Lock()
+        self._summarizing_turns: set[str] = set()
+
+    def context_management_status(self) -> dict[str, str]:
+        """Return cached compaction activity without triggering model work."""
+
+        with self._context_status_lock:
+            return {
+                "compactionState": "summarizing" if self._summarizing_turns else "idle"
+            }
+
+    def _set_compaction_state(self, turn_id: str, summarizing: bool) -> None:
+        with self._context_status_lock:
+            if summarizing:
+                self._summarizing_turns.add(turn_id)
+            else:
+                self._summarizing_turns.discard(turn_id)
 
     async def start(self) -> None:
         opener = getattr(self._runtime, "open", None)
@@ -274,6 +307,9 @@ class LumiConversationService:
         async def on_reset(reason: StreamResetReason) -> None:
             await queue.put(LumiStreamEvent(kind="reset", reason=reason))
 
+        async def on_status(status: StreamStatus) -> None:
+            await queue.put(LumiStreamEvent(kind="status", status=status))
+
         async def run_turn() -> None:
             try:
                 turn = await self._run_chat(
@@ -287,6 +323,7 @@ class LumiConversationService:
                     turn_id=turn_id,
                     on_delta=on_delta,
                     on_reset=on_reset,
+                    on_status=on_status,
                 )
             except asyncio.CancelledError:
                 _LOGGER.info(
@@ -379,6 +416,7 @@ class LumiConversationService:
         turn_id: str | None = None,
         on_delta: Callable[[str], Awaitable[None]] | None = None,
         on_reset: Callable[[StreamResetReason], Awaitable[None]] | None = None,
+        on_status: Callable[[StreamStatus], Awaitable[None]] | None = None,
     ) -> ChatTurn:
         account_id = _validate_account_id(account_id)
         turn_id = _diagnostic_turn_id(turn_id)
@@ -390,6 +428,13 @@ class LumiConversationService:
             self._agent_limits.turn_timeout_seconds,
         )
         try:
+            deadline_at = time.monotonic() + self._agent_limits.turn_timeout_seconds
+
+            async def report_status(status: StreamStatus) -> None:
+                self._set_compaction_state(turn_id, status == "summarization")
+                if on_status is not None:
+                    await on_status(status)
+
             async with asyncio.timeout(self._agent_limits.turn_timeout_seconds):
                 result = await self._complete_turn(
                     account_id,
@@ -402,6 +447,8 @@ class LumiConversationService:
                     turn_id,
                     on_delta,
                     on_reset,
+                    report_status,
+                    deadline_at - 0.5,
                 )
             _LOGGER.info(
                 "Lumi turn completed turn_id=%s duration_ms=%.1f tool_rounds=%d tool_calls=%d "
@@ -436,6 +483,8 @@ class LumiConversationService:
                 (time.perf_counter() - started) * 1000,
             )
             raise
+        finally:
+            self._set_compaction_state(turn_id, False)
 
     async def _complete_turn(
         self,
@@ -449,6 +498,8 @@ class LumiConversationService:
         turn_id: str,
         on_delta: Callable[[str], Awaitable[None]] | None,
         on_reset: Callable[[StreamResetReason], Awaitable[None]] | None,
+        on_status: Callable[[StreamStatus], Awaitable[None]] | None,
+        deadline_at: float,
     ) -> ChatTurn:
         lock_started = time.perf_counter()
         _LOGGER.info("Lumi turn stage started turn_id=%s stage=conversation_lock", turn_id)
@@ -508,8 +559,65 @@ class LumiConversationService:
                     )
             option = self._models.validate_choice(conversation.model, conversation.thinking)
             history = tuple(
-                ChatMessage(message.role, message.content) for message in snapshot.messages
+                ChatMessage(
+                    message.role,
+                    message.content,
+                    history_ordinal=message.ordinal,
+                )
+                for message in snapshot.messages
             )
+
+            async def load_history_page(before_ordinal: int):
+                page = await asyncio.to_thread(
+                    self._store.get_message_page,
+                    account_id,
+                    conversation_id,
+                    before_ordinal=before_ordinal,
+                )
+                return HistoryPage(
+                    tuple(
+                        ChatMessage(
+                            message.role,
+                            message.content,
+                            history_ordinal=message.ordinal,
+                        )
+                        for message in page.messages
+                    ),
+                    page.next_before_ordinal,
+                    page.has_more,
+                )
+
+            async def load_summary_batch(
+                after_ordinal: int,
+                before_ordinal: int,
+                limit: int,
+            ) -> tuple[ChatMessage, ...]:
+                batch = await asyncio.to_thread(
+                    self._store.get_message_batch_after,
+                    account_id,
+                    conversation_id,
+                    after_ordinal,
+                    before_ordinal=before_ordinal,
+                    limit=limit,
+                )
+                return tuple(
+                    ChatMessage(
+                        message.role,
+                        message.content,
+                        history_ordinal=message.ordinal,
+                    )
+                    for message in batch
+                )
+
+            async def save_summary(ordinal: int, text: str) -> None:
+                await asyncio.to_thread(
+                    self._store.save_summary,
+                    account_id,
+                    conversation_id,
+                    ordinal,
+                    text,
+                )
+
             context = ChatContext(
                 account_id=account_id,
                 conversation_id=conversation_id,
@@ -522,6 +630,7 @@ class LumiConversationService:
                     self._agent_limits.max_trusted_entities,
                 ),
                 turn_id=turn_id,
+                deadline_at=deadline_at,
             )
             slot_started = time.perf_counter()
             _LOGGER.info("Lumi turn stage started turn_id=%s stage=inference_slot_wait", turn_id)
@@ -542,6 +651,17 @@ class LumiConversationService:
                     user_text,
                     on_delta=on_delta,
                     on_reset=on_reset,
+                    on_status=on_status,
+                    history_page_loader=load_history_page,
+                    summary_batch_loader=load_summary_batch,
+                    summary_saver=save_summary,
+                    summary=snapshot.summary,
+                    summary_through_ordinal=snapshot.summary_through_ordinal,
+                    history_cursor=(
+                        snapshot.messages[0].ordinal
+                        if snapshot.has_unsummarized_older_messages and snapshot.messages
+                        else None
+                    ),
                 )
                 _LOGGER.info(
                     "Lumi turn stage completed turn_id=%s stage=agent_answer duration_ms=%.1f "
@@ -609,6 +729,21 @@ class LumiConversationService:
             owner_id,
             conversation_id,
             self._history_limit,
+        )
+
+    async def get_message_page_for_account(
+        self,
+        account_id: str,
+        conversation_id: str,
+        *,
+        before_ordinal: int | None = None,
+    ) -> MessagePage:
+        owner_id = _validate_account_id(account_id)
+        return await asyncio.to_thread(
+            self._store.get_message_page,
+            owner_id,
+            conversation_id,
+            before_ordinal=before_ordinal,
         )
 
     async def rename_conversation_for_account(
@@ -737,7 +872,9 @@ class LumiConversationService:
 
     @property
     def _history_limit(self) -> int:
-        return min(200, max(2, self._agent_limits.max_context_messages * 2))
+        # Keep initial transcript reads bounded to one storage page. The agent
+        # requests older pages only when the exact token budget permits them.
+        return 50
 
     def _authorize(
         self,

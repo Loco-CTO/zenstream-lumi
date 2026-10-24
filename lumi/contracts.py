@@ -48,6 +48,14 @@ class ChatMessage:
     name: str | None = None
     tool_call_id: str | None = None
     tool_calls: tuple[ToolCall, ...] = ()
+    history_ordinal: int | None = field(default=None, repr=False, compare=False)
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryPage:
+    messages: tuple[ChatMessage, ...]
+    next_before_ordinal: int | None
+    has_more: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +205,7 @@ class ChatContext:
     user_message: str = field(default="", repr=False, compare=False)
     delegation_token: str | None = field(default=None, repr=False)
     previous_entities: tuple[EntityReference, ...] = ()
+    deadline_at: float | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self.account_id.strip() or not self.conversation_id.strip():
@@ -219,6 +228,11 @@ class ModelRequest:
     output_tokens: int
     inference_timeout_seconds: float | None = None
     turn_id: str = field(default="", repr=False, compare=False)
+    automatic_output: bool = False
+    deadline_at: float | None = field(default=None, repr=False, compare=False)
+
+
+CompletionReason = Literal["stop", "tool_calls", "context_exhausted", "deadline"]
 
 
 class ModelAdmissionTimeout(TimeoutError):
@@ -234,19 +248,22 @@ class ModelResponse:
     generation_duration_ns: int | None = None
     load_duration_ns: int | None = None
     total_duration_ns: int | None = None
+    finish_reason: CompletionReason = "stop"
 
 
 StreamResetReason = Literal["intermediate", "cpu_fallback"]
+StreamStatus = Literal["context_expansion", "summarization", "generation"]
 
 
 @dataclass(frozen=True, slots=True)
 class ModelStreamEvent:
     """A visible delta, partial-turn reset, or completed normalized response."""
 
-    kind: Literal["delta", "reset", "complete"]
+    kind: Literal["delta", "reset", "complete", "status"]
     text: str | None = None
     response: ModelResponse | None = None
     reason: StreamResetReason | None = None
+    status: StreamStatus | None = None
 
     def __post_init__(self) -> None:
         if self.kind == "delta":
@@ -255,6 +272,7 @@ class ModelStreamEvent:
                 or not self.text
                 or self.response is not None
                 or self.reason is not None
+                or self.status is not None
             ):
                 raise ValueError("A model delta must contain only nonempty visible text")
         elif self.kind == "reset":
@@ -262,15 +280,25 @@ class ModelStreamEvent:
                 self.text is not None
                 or self.response is not None
                 or self.reason not in {"intermediate", "cpu_fallback"}
+                or self.status is not None
             ):
                 raise ValueError("A model stream reset must contain only a safe reason")
         elif self.kind == "complete":
             if (
                 self.text is not None
                 or self.reason is not None
+                or self.status is not None
                 or not isinstance(self.response, ModelResponse)
             ):
                 raise ValueError("A model completion must contain one normalized response")
+        elif self.kind == "status":
+            if (
+                self.text is not None
+                or self.response is not None
+                or self.reason is not None
+                or self.status not in {"context_expansion", "summarization"}
+            ):
+                raise ValueError("A model status event must contain one safe status value")
         else:
             raise ValueError("Unsupported model stream event")
 
@@ -297,3 +325,4 @@ class ChatAnswer:
     sources: tuple[Source, ...]
     tool_rounds: int
     tool_calls: int
+    finish_reason: CompletionReason = "stop"

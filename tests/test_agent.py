@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import unittest
 from collections.abc import Mapping
 
@@ -15,6 +16,7 @@ from lumi.contracts import (
     ChatMessage,
     EntityReference,
     EvidenceTrust,
+    HistoryPage,
     ModelAdmissionTimeout,
     ModelRequest,
     ModelResponse,
@@ -29,13 +31,73 @@ from lumi.tools import ToolRegistry
 
 
 class FakeRuntime:
-    def __init__(self, responses: list[ChatMessage]) -> None:
+    def __init__(self, responses: list[ChatMessage | ModelResponse]) -> None:
         self._responses = list(responses)
         self.requests: list[ModelRequest] = []
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
         self.requests.append(request)
-        return ModelResponse(self._responses.pop(0))
+        response = self._responses.pop(0)
+        return response if isinstance(response, ModelResponse) else ModelResponse(response)
+
+
+class AutomaticContextRuntime(FakeRuntime):
+    def __init__(self, responses: list[ChatMessage], *, maximum: int) -> None:
+        super().__init__(responses)
+        self.maximum = maximum
+        self.capacity = 0
+        self.capacity_requests: list[int] = []
+        self.prompt_checks: list[tuple[tuple[ChatMessage, ...], tuple[ToolDefinition, ...]]] = []
+
+    async def ensure_context_capacity(self, _model: str, requested: int) -> dict[str, int | None]:
+        self.capacity_requests.append(requested)
+        self.capacity = max(self.capacity, min(requested, self.maximum))
+        return {
+            "allocatedContextTokens": self.capacity,
+            "verifiedMaximumContextTokens": self.maximum,
+            "growthCeilingContextTokens": None,
+        }
+
+    def context_status(self) -> dict[str, int | None]:
+        return {
+            "allocatedContextTokens": self.capacity,
+            "verifiedMaximumContextTokens": self.maximum,
+            "growthCeilingContextTokens": None,
+        }
+
+    async def count_prompt_tokens(
+        self,
+        _model: str,
+        messages: tuple[ChatMessage, ...],
+        tools: tuple[ToolDefinition, ...],
+        _thinking: bool,
+    ) -> int:
+        self.prompt_checks.append((messages, tools))
+        text_size = sum(len(message.content) for message in messages)
+        tool_size = sum(
+            len(tool.name)
+            + len(tool.description)
+            + len(json.dumps(tool.parameters, ensure_ascii=False))
+            for tool in tools
+        )
+        # Test tokenizer approximation includes non-ASCII text, tool schemas,
+        # and a fixed allowance for template and control-token overhead.
+        return math.ceil((text_size + tool_size) / 4) + 32 + len(tools) * 8
+
+
+class ToolPressureRuntime(AutomaticContextRuntime):
+    async def count_prompt_tokens(
+        self,
+        model: str,
+        messages: tuple[ChatMessage, ...],
+        tools: tuple[ToolDefinition, ...],
+        thinking: bool,
+    ) -> int:
+        if any(message.role == "tool" for message in messages):
+            history_messages = sum(message.history_ordinal is not None for message in messages)
+            self.prompt_checks.append((messages, tools))
+            return 7_000 + history_messages * 300
+        return await super().count_prompt_tokens(model, messages, tools, thinking)
 
 
 class SearchCatalogTool:
@@ -428,11 +490,12 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(answer.markdown, "Repeated answer.\n\nFinal detail.")
 
-    async def test_turn_timeout_has_a_720_second_default_and_upper_bound(self) -> None:
-        self.assertEqual(AgentLimits().turn_timeout_seconds, 720)
-        self.assertEqual(AgentLimits(turn_timeout_seconds=720).turn_timeout_seconds, 720)
+    async def test_turn_timeout_defaults_to_thirty_minutes_and_caps_at_two_hours(self) -> None:
+        self.assertEqual(AgentLimits().turn_timeout_seconds, 1_800)
+        self.assertEqual(AgentLimits(turn_timeout_seconds=7_200).turn_timeout_seconds, 7_200)
+        self.assertEqual(AgentLimits(turn_timeout_seconds=59.9).turn_timeout_seconds, 59.9)
 
-        for timeout in (0, -1, 720.1, float("inf"), float("nan"), True):
+        for timeout in (0, -1, 7_200.1, float("inf"), float("nan"), True):
             with self.subTest(timeout=timeout), self.assertRaises(ValueError):
                 AgentLimits(turn_timeout_seconds=timeout)
 
@@ -1057,6 +1120,237 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer.markdown, "I found one useful local result.")
         self.assertEqual(runtime.requests[-1].tools, ())
         self.assertEqual(answer.tool_rounds, 1)
+
+    async def test_automatic_context_counts_multilingual_history_and_tool_schema_before_growth(
+        self,
+    ) -> None:
+        runtime = AutomaticContextRuntime(
+            [ChatMessage("assistant", "The answer is ready.")],
+            maximum=65_536,
+        )
+        registry = ToolRegistry([SearchCatalogTool()])
+        agent = ChatAgent(
+            runtime,
+            registry,
+            AgentLimits(
+                context_size=32_768,
+                context_mode="automatic",
+                output_mode="automatic",
+            ),
+        )
+
+        answer = await agent.answer(
+            chat_context(),
+            [ChatMessage("user", "猫と日本語と中文" * 17_000, history_ordinal=1)],
+            "Continue the conversation",
+        )
+
+        self.assertEqual(answer.markdown, "The answer is ready.")
+        self.assertIn(32_768, runtime.capacity_requests)
+        self.assertIn(65_536, runtime.capacity_requests)
+        self.assertEqual(runtime.requests[0].context_size, 65_536)
+        self.assertTrue(runtime.requests[0].automatic_output)
+        self.assertEqual(runtime.requests[0].tools, registry.definitions)
+        self.assertIn(registry.definitions, [tools for _messages, tools in runtime.prompt_checks])
+
+    async def test_automatic_context_paginates_a_transcript_beyond_200_messages(self) -> None:
+        transcript = [
+            ChatMessage(
+                "user" if index % 2 else "assistant",
+                f"historical message {index}",
+                history_ordinal=index,
+            )
+            for index in range(1, 251)
+        ]
+        runtime = AutomaticContextRuntime(
+            [ChatMessage("assistant", "The full conversation is available.")],
+            maximum=32_768,
+        )
+
+        async def load_page(before_ordinal: int) -> HistoryPage:
+            older = [
+                message
+                for message in transcript
+                if (message.history_ordinal or 0) < before_ordinal
+            ]
+            page = older[-50:]
+            return HistoryPage(
+                tuple(page),
+                page[0].history_ordinal if len(older) > 50 else None,
+                len(older) > 50,
+            )
+
+        answer = await ChatAgent(
+            runtime,
+            ToolRegistry([]),
+            AgentLimits(context_size=32_768),
+        ).answer(
+            chat_context(),
+            transcript[-50:],
+            "Continue from the full history",
+            history_page_loader=load_page,
+            history_cursor=201,
+        )
+
+        self.assertEqual(answer.markdown, "The full conversation is available.")
+        included_ordinals = [
+            message.history_ordinal
+            for message in runtime.requests[0].messages
+            if message.history_ordinal is not None
+        ]
+        self.assertEqual(sorted(included_ordinals), list(range(1, 251)))
+
+    async def test_automatic_context_summarizes_older_turns_and_keeps_transcript_rows(self) -> None:
+        transcript = [
+            ChatMessage("user" if index % 2 else "assistant", "日" * 4_000, history_ordinal=index)
+            for index in range(1, 9)
+        ]
+        runtime = AutomaticContextRuntime(
+            [
+                *[ChatMessage("assistant", "compact") for _ in range(12)],
+                ChatMessage("assistant", "Current answer"),
+            ],
+            maximum=8_192,
+        )
+        agent = ChatAgent(
+            runtime,
+            ToolRegistry([]),
+            AgentLimits(
+                context_size=8_192,
+                output_tokens=2_048,
+                context_mode="automatic",
+                output_mode="automatic",
+            ),
+        )
+        summarized: list[tuple[int, str]] = []
+        statuses: list[str] = []
+
+        async def load_batch(after: int, before: int, limit: int):
+            return tuple(
+                message
+                for message in transcript
+                if after < (message.history_ordinal or 0) < before
+            )[:limit]
+
+        async def save_summary(ordinal: int, summary: str) -> None:
+            summarized.append((ordinal, summary))
+
+        async def report_status(status: str) -> None:
+            statuses.append(status)
+
+        answer = await agent.answer(
+            chat_context(),
+            transcript,
+            "What did we decide?",
+            summary_batch_loader=load_batch,
+            summary_saver=save_summary,
+            on_status=report_status,
+        )
+
+        self.assertEqual(answer.markdown, "Current answer")
+        self.assertEqual([ordinal for ordinal, _summary in summarized], [1, 2, 3, 4, 5, 6])
+        self.assertEqual(len(transcript), 8)
+        self.assertEqual(statuses, ["summarization", "generation"])
+        self.assertIn("compact", runtime.requests[-1].messages[1].content)
+        self.assertIn("untrusted", runtime.requests[-1].messages[0].content)
+
+    async def test_tool_result_context_pressure_compacts_before_retrying_at_the_working_ceiling(
+        self,
+    ) -> None:
+        transcript = [
+            ChatMessage(
+                "user" if index % 2 else "assistant",
+                f"turn {index}",
+                history_ordinal=index,
+            )
+            for index in range(1, 5)
+        ]
+        runtime = ToolPressureRuntime(
+            [
+                ChatMessage(
+                    "assistant",
+                    "",
+                    tool_calls=(ToolCall("call-1", "search_catalog", {"query": "local"}),),
+                ),
+                ChatMessage("assistant", "summary one"),
+                ChatMessage("assistant", "summary two"),
+                ChatMessage("assistant", "The evidence fits after compaction."),
+            ],
+            maximum=8_192,
+        )
+        tool = SearchCatalogTool(ToolResult("local evidence", EvidenceTrust.LOCAL))
+        agent = ChatAgent(
+            runtime,
+            ToolRegistry([tool]),
+            AgentLimits(
+                context_size=8_192,
+                output_tokens=2_048,
+                context_mode="automatic",
+                output_mode="automatic",
+                max_context_chars=50_000,
+                max_tool_result_chars=30_000,
+            ),
+        )
+        saved_summaries: list[tuple[int, str]] = []
+
+        async def load_batch(after: int, before: int, limit: int):
+            return tuple(
+                message
+                for message in transcript
+                if after < (message.history_ordinal or 0) < before
+            )[:limit]
+
+        async def save_summary(ordinal: int, summary: str) -> None:
+            saved_summaries.append((ordinal, summary))
+
+        answer = await agent.answer(
+            chat_context(),
+            transcript,
+            "Continue using the search result",
+            summary_batch_loader=load_batch,
+            summary_saver=save_summary,
+        )
+
+        self.assertEqual(answer.markdown, "The evidence fits after compaction.")
+        self.assertEqual([ordinal for ordinal, _summary in saved_summaries], [1, 2])
+        self.assertEqual(len(runtime.requests), 4)
+        final_messages, _final_tools = runtime.prompt_checks[-1]
+        self.assertEqual(
+            [message.history_ordinal for message in final_messages if message.history_ordinal],
+            [3, 4],
+        )
+        self.assertTrue(any("summary two" in message.content for message in final_messages))
+
+    async def test_automatic_output_is_not_truncated_at_the_legacy_character_limit(self) -> None:
+        runtime = AutomaticContextRuntime(
+            [ChatMessage("assistant", "x" * 13_000)],
+            maximum=32_768,
+        )
+        agent = ChatAgent(
+            runtime,
+            ToolRegistry([]),
+            AgentLimits(context_size=32_768, output_mode="automatic"),
+        )
+
+        answer = await agent.answer(chat_context(), [], "Write a long answer")
+
+        self.assertEqual(len(answer.markdown), 13_000)
+
+    async def test_keeps_partial_answer_marked_incomplete_on_context_exhaustion(self) -> None:
+        runtime = FakeRuntime(
+            [
+                ModelResponse(
+                    ChatMessage("assistant", "A partial but useful answer."),
+                    finish_reason="context_exhausted",
+                )
+            ]
+        )
+        agent = ChatAgent(runtime, ToolRegistry([]))
+
+        answer = await agent.answer(chat_context(), [], "Answer within a short limit")
+
+        self.assertEqual(answer.markdown, "A partial but useful answer.")
+        self.assertEqual(answer.finish_reason, "context_exhausted")
 
     async def test_trims_old_context_without_sending_internal_tool_messages(self) -> None:
         runtime = FakeRuntime([ChatMessage("assistant", "Here is the answer.")])
