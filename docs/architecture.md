@@ -1,6 +1,6 @@
 # Lumi architecture
 
-Status: initial implementation decisions, 2026-10-06
+This document records package and host ownership. Keep it aligned with the runtime contract, source modules, and compatibility tests.
 
 ## In-process responsibilities
 

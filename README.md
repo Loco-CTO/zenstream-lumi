@@ -1,128 +1,64 @@
-# Lumi
+<div align="center">
+  <h1 align="center">Lumi</h1>
+  <p>ZenStream’s optional, locally run conversational media assistant.</p>
+</div>
 
-Lumi is ZenStream's local, read-only conversational media assistant. It uses the user's permission-filtered ZenStream catalog and viewing context together with optional bounded web research, then answers with Markdown, validated ZenStream references, and inspectable sources.
+Lumi answers with permission-filtered catalog context, bounded public web research, Markdown, validated media references, and source links.
 
-Lumi is developed and released from its own repository as the `zenstream-lumi` Python package. ZenStream Orchestrator installs a supported Lumi release into its managed runtime directory only after an administrator explicitly enables the integration. Orchestrator then imports the installed package and calls it in-process. Lumi source remains in this repository; it is not copied into the Orchestrator source tree, and Lumi does not require a separately deployed service.
+## How it fits together
 
-The runtime loads supported Qwen3.5 GGUF files lazily into the Orchestrator process through the `llama-cpp-python` binding. Release wheels keep CPU inference available everywhere; Windows x64 and Linux x64 wheels also contain CUDA and Vulkan backends. Linux ARM64 wheels remain CPU-only. Its pinned native wheels are optional release assets, so an Orchestrator that has not enabled Lumi does not need the inference runtime. Model weights stay in the host-supplied data directory and are never committed to this repository.
+Lumi is a Python package imported in-process by a compatible ZenStream Orchestrator release after an administrator enables it. Orchestrator owns authentication, account context, permissions, installation, and the user interface. Lumi owns chat orchestration, read-only tools, model runtime integration, and answer validation. It is not a separate service and has no user interface.
 
-## Runtime package contract
+Model weights live in the host’s data directory outside this repository. Inference uses a locally installed Qwen3.5 GGUF through the optional `llama-cpp-python` runtime; Lumi does not call a hosted inference API or download weights during startup or inference.
 
-The in-process runtime exposes `LUMI_RUNTIME_API_VERSION`, `LlamaCppChatRuntime`, and `LlamaCppConfig` from `lumi.runtime`. Orchestrator can reject an incompatible Lumi release before making the integration available. The runtime accepts only configured Qwen3.5 model IDs and locally installed, hash-verified GGUF files; it performs no model download and makes no HTTP request for inference.
+## Configuration
 
-Runtime API version 2 advertises token counting, context-capacity management, completion reasons, and safe status events. Automatic context mode starts at 32,768 tokens, then grows through 65,536 and 131,072 to the lower of the provenance-controlled model limit, GGUF metadata limit, and installation memory ceiling. The native `n_ctx` is reallocated for each growth step under the runtime's single-owner lock. Memory telemetry is an estimate; a native allocation can still fail, in which case Lumi restores the last working capacity, remembers that growth ceiling, and compacts older history there. Initial automatic loads fall back to 16,384 and then 8,192 tokens if needed.
+Configuration and administrator controls belong to Orchestrator. Lumi receives the authenticated account context and bounded read-only adapters from the host. Model selection, context limits, backend mode, and model installation are configured through the host; see [architecture](docs/architecture.md) and [model installation](docs/model-installation.md).
 
-Before each request, Lumi counts the selected chat template after formatting the system prompt, conversation messages, read-only tool definitions, and tool results. History selection reserves 8,192 tokens plus a 256-token margin for the answer, or one quarter of smaller fallback contexts plus the margin. At the usable ceiling, Lumi writes an account-scoped rolling summary of older turns and keeps recent turns verbatim; summary updates are bounded, versioned, and atomic. Original transcript rows are never replaced or deleted, and conversation reads expose them in owner-bound pages of 50 messages. Summary text is treated as untrusted historical data and does not authorize catalog access.
+## Quick start
 
-Automatic output uses the remaining allocated context and ends on the model end token, cancellation, context exhaustion, or the administrator-configured 1–120 minute overall turn deadline (30 minutes by default). Context exhaustion and deadline finishes are reported as incomplete while retaining visible partial text. The input limit remains 6,000 characters. Manual context and output modes continue to use the saved numeric limits. Orchestrator enables these behaviors only when the installed Lumi package advertises the required runtime capabilities; older supported releases retain their existing behavior.
-
-Install the runtime dependency in an opted-in development environment with:
-
-```powershell
-python -m pip install '.[embedded]'
-```
-
-The Lumi installer downloads one GGUF from a commit-pinned repository for each supported model and verifies its exact size and SHA-256 before activation. It writes a schema 2 `lumi-model-manifest.json` containing the model identity, source repository, revision, quantization, and GGUF digest. The host passes Lumi a `VerifiedModelArtifact` created by `InstalledModelArtifact.as_verified_model_artifact()`. Before its first native load, Lumi checks the manifest digest, model identity, exact file set, safe paths, and pinned GGUF hash. It caches verified file identities and change timestamps in process, rehashing the model if its fingerprint changes. The native Qwen3.5 chat template handles per-request thinking and tool formatting; only read-only tool definitions are passed to Qwen, and native tool-call output is normalized into Lumi's `ToolCall` contract.
-
-## Building and releasing
-
-The `Lumi release` GitHub Actions workflow runs the package suite on pull requests and publishes a GitHub Release when a matching stable `vMAJOR.MINOR.PATCH` tag is pushed. The tag must match `project.version` in `pyproject.toml`. Each release contains `lumi-runtime.zip` and host-specific, SHA-256 recorded dependency wheels; it never contains Qwen checkpoints or model weights. Native runtime wheels are reused from the latest release only when their per-platform build ID matches. The existing v0.3.8 wheels are the one-time bootstrap because that release predates build IDs. A changed ID makes CI rebuild that platform from pinned sources and toolchains. Reused wheels are checked against the release SHA-256 and backend contents, then smoke-tested for every supported Python version before publication.
-
-The release manifest keeps native runtime wheels separate from the deferred model-download dependency wheels. Orchestrator downloads and loads the CPU runtime only after an administrator enables Lumi. It downloads the small Hugging Face client dependency set only after an administrator explicitly starts a model installation. No checkpoint conversion, PyTorch, Transformers, model API URL, or remote inference service is used. Built-in public web search is included in the Lumi runtime; an administrator may optionally override its search provider with SearXNG.
-
-For local native runtime development, install the optional extra (building llama.cpp from source may require CMake and a C++ compiler):
+For local package development, install the optional embedded runtime extra when native inference is needed:
 
 ```powershell
 python -m pip install ".[embedded]"
 ```
 
-Run `python -m unittest discover -s tests -v` for the package suite, `python -m unittest discover -s tests -p "test_release_build.py" -v` for release archive tests, and `ruff check lumi tests scripts` for lint.
+Model installation is a separate, explicit operation and requires the `model-install` extra. It downloads a pinned, hash-verified model to a host-supplied data directory. See [model installation and provenance](docs/model-installation.md) before installing models.
 
-## Optional Qwen3.5 model installation
+## Deployment
 
-Lumi owns its supported model catalog and installer. `supported_models()` is the single source for supported model IDs, display labels, and thinking support. It currently exposes the pinned official `qwen3.5:0.8b`, `qwen3.5:2b`, and `qwen3.5:4b` models. `Qwen35ModelInstaller.list_models()` adds local installation state and provenance.
+Deploy Lumi only as a compatible Orchestrator-managed package release. The host downloads and verifies the release and optional native runtime wheels; model data is installed separately after an administrator requests it. See [release process](docs/releasing.md).
 
-The host supplies a model data directory outside the Lumi package and repository. Install the optional model-download dependency with `python -m pip install ".[model-install]"`, then call the public package API only after an administrator explicitly requests installation:
-
-```python
-from lumi import Qwen35ModelInstaller, supported_models
-
-options = supported_models()
-installer = Qwen35ModelInstaller(data_directory / "lumi-models")
-installed = installer.list_models()
-artifact = installer.install_model("qwen3.5:0.8b", progress=report_progress)
-runtime_artifact = artifact.as_verified_model_artifact()
-installer.remove_model("qwen3.5:0.8b")
-```
-
-`install_model` is synchronous because it downloads and hashes a multi-gigabyte GGUF. Async hosts should call it from a bounded worker lane. Progress events carry a monotonic `current` value bounded by `total=10000`. Importing Lumi or starting the runtime never downloads weights. The installed GGUF files stay outside this repository.
-
-The release workflow produces one host-specific `llama-cpp-python` runtime wheel per platform, then validates it across every supported Python version. Windows x64 and Linux x64 wheels include CPU, CUDA, and Vulkan backends; Linux ARM64 wheels include CPU support. The target build IDs in `pyproject.toml` must be bumped when a platform's llama.cpp source, toolchain, SDK pins, backend flags, architecture list, or manylinux baseline changes; a changed ID forces a fresh native build. The wheel always contains the CPU backend as the fallback, and the same verified GGUF can be used in either mode. CUDA/Vulkan support depends on compatible GPU drivers already provided by the host operating system. Lumi does not build HIP/ROCm or Metal wheels because those targets are not validated and the project has no macOS release target. See [runtime acceleration and streaming](docs/runtime-acceleration-and-streaming.md) for the platform details and benchmark methodology.
-
-The optional live smoke and benchmark scripts use an already installed model and never download one:
+## Development checks
 
 ```powershell
-python scripts/smoke_llama_cpp.py --models-dir C:\path\to\lumi-models --model qwen3.5:0.8b
-python scripts/benchmark_llama_cpp.py --models-dir C:\path\to\lumi-models --model qwen3.5:2b --runs 4 --json-out lumi-benchmark.json
+python -m unittest discover -s tests -v
+ruff check lumi tests scripts
+python -m unittest discover -s tests -p "test_release_build.py" -v
 ```
 
-The benchmark defaults to comparing `cpu_only` with `automatic`. It reports time to first visible text, prompt and generation timing, tokenizer-counted visible answer tokens per second, runtime end-to-end latency, process RAM, best-effort NVIDIA system VRAM, and the selected backend. Visible answer throughput excludes hidden reasoning and tool-call tokens, so it measures user-visible generation speed rather than the binding's unavailable full completion token rate. `--mode` can be repeated to select a different comparison. Runtime end-to-end timing excludes Lumi tools, web research, service/network overhead, and browser rendering; verify those separately in the running Orchestrator UI.
+The synthetic quality suite uses already installed models and local fixtures. Its results and model files must stay outside Git; see [quality evaluation](docs/quality-evaluation.md).
 
-## Local quality evaluation
+## Developer documentation
 
-`scripts/lumi_quality_eval.py` runs a 42-turn synthetic suite through Lumi's current agent, read-only tools, and installed llama.cpp models. It covers multi-turn follow-ups, recommendations, local grounding, requests about current information with frozen fixture evidence, cast lookup, aliases, ambiguity, Chinese and Japanese conversations, read-only requests, and unrelated coding/homework requests. The suite uses local fixtures, including fictional `.example.test` pages; it makes no web requests and does not download models. These cases assess evidence synthesis from fixture results, not live freshness or search-query relevance. Prompts, fixtures, and the rubric are evaluation data only. They are not imported by production code, used to route user text, or used as canned responses.
+- [Documentation index](docs/README.md)
+- [Architecture and ownership](docs/architecture.md)
+- [Runtime acceleration and streaming](docs/runtime-acceleration-and-streaming.md)
+- [Model installation and provenance](docs/model-installation.md)
+- [Quality evaluation and benchmarking](docs/quality-evaluation.md)
+- [Privacy and web research](docs/privacy-and-web-research.md)
+- [Release process](docs/releasing.md)
 
-The default run uses the pinned 0.8B, 2B, and 4B models, with 2B as the acceptance baseline and the 4B model as the local rubric judge. Specify the host-installed release directory so the evaluator can load its existing pinned runtime wheels, and write every generated result outside this repository:
+## Troubleshooting
 
-```powershell
-python scripts/lumi_quality_eval.py `
-  --models-dir C:\path\to\lumi-models `
-  --runtime-release-dir C:\path\to\orchestrator\sqlite\lumi\lumi\releases\v0.3.9-release-id `
-  --output-dir $env:USERPROFILE\.codex\lumi-quality-evals
-```
+- **Lumi is unavailable:** confirm the Orchestrator release supports the Lumi runtime API and that an administrator enabled the integration.
+- **No model is available:** install a supported model through the host and check its managed model-data directory.
+- **Native backend fails to load:** confirm the host platform, Python ABI, runtime release, and GPU driver match the published support matrix. CPU remains the fallback.
 
-The verified 9B Q4_K_M artifact is not a supported installer model. It is available only by explicit evaluation opt-in, after it has already been installed locally:
+## Releases
 
-```powershell
-python scripts/lumi_quality_eval.py `
-  --models-dir C:\path\to\lumi-models `
-  --experimental-9b-models-dir C:\path\to\verified-9b-model-parent `
-  --runtime-release-dir C:\path\to\orchestrator\sqlite\lumi\lumi\releases\v0.3.9-release-id `
-  --models qwen3.5:0.8b qwen3.5:2b qwen3.5:4b qwen3.5:9b `
-  --include-experimental-9b `
-  --output-dir $env:USERPROFILE\.codex\lumi-quality-evals
-```
+Stable package tags use `vMAJOR.MINOR.PATCH` and match `project.version` in `pyproject.toml`. Release assets contain the Lumi runtime and platform-specific dependency wheels, never model weights. See [release process](docs/releasing.md).
 
-The runner records the evaluator, scenario, fixture, rubric, judge-prompt, selected-case, model-manifest, and installed runtime-release hashes. It reports stable first visible text, agent end-to-end latency, prompt-processing and generation time, visible answer token rate across the stable visible-stream window, maximum sampled process working set per model, evaluation-wide process high-water memory, and best-effort system-wide NVIDIA VRAM usage and change. The process high-water mark covers the whole run and must not be compared as a per-model peak. Timings use local fixtures and exclude live web, service, and browser latency.
+## License
 
-The same run can report paired comparisons, but a comparison is eligible to show a clear quality advantage only when its judge is independent of both compared models, all selected cases have scores, at least 20 cases are paired, and at least three cases in each required language (English, Japanese, and Chinese) are covered. It also requires an average gain of at least 0.25/5, a positive lower 95% conversation-cluster bootstrap bound, wins on at least 60% of cases, no increase in critical failures, and no meaningful grounding, scope, safety, language, or task-category regression. Model-assisted ordinal scores are not ground truth and still require blind human review. A default 4B judge can describe the 4B/9B pair, but cannot establish a clear advantage for that pair.
-
-Raw candidate outputs can be rescored with a different local judge without repeating inference. The source run, case IDs, rubric hashes, raw output digests, and installed model manifests are checked before scoring, and rescores are written separately. Repeat `--judge-existing-dir` to combine candidate outputs from separate runs that used the exact same case selection:
-
-```powershell
-python scripts/lumi_quality_eval.py `
-  --models-dir C:\path\to\lumi-models `
-  --experimental-9b-models-dir C:\path\to\verified-9b-model-parent `
-  --runtime-release-dir C:\path\to\orchestrator\sqlite\lumi\lumi\releases\v0.3.9-release-id `
-  --judge-existing-dir C:\path\to\existing-quality-run `
-  --models qwen3.5:4b qwen3.5:9b `
-  --judge-model qwen3.5:2b `
-  --include-experimental-9b `
-  --output-dir $env:USERPROFILE\.codex\lumi-quality-evals
-```
-
-For the 9B-versus-4B comparison, use a judge other than 4B or 9B. A limited run can be useful for debugging, but missing any required language coverage prevents the comparison from qualifying.
-
-## Conversation and privacy
-
-The web and Android clients continue to use authenticated Orchestrator APIs. Orchestrator derives the current account from its normal session and supplies Lumi only the internal, permission-scoped context it needs. Lumi has no playback, download, delete, metadata-edit, watched-state, favourite-write, or library-write tools. It does not connect directly to the Orchestrator database or media filesystem.
-
-Retrieved webpage content is untrusted evidence. Lumi never sends browser credentials, complete watch history, usernames, private library inventories, or conversation transcripts to external websites. Local model inference does not send prompts, conversation history, or user media context to an external model provider.
-
-## Web research
-
-Web search and page retrieval use the bundled DDGS-compatible adapter by default, with no account, API key, endpoint URL, proxy, or separate search service. An administrator may optionally configure a trusted SearXNG origin as the search-provider override. `web_search` accepts one focused query at a time; Lumi can reformulate it or search in another language within bounded per-turn limits. A local planning pass uses only a bounded recent conversation window to resolve follow-ups, and sends the search provider only the minimum public query. `web_read(url)` fetches public HTTP(S) pages, revalidates every redirect, and applies response size and time limits. Retrieved pages are untrusted evidence; Lumi sends no Orchestrator credentials, complete watch history, usernames, private library inventories, or full conversation transcripts to external websites.
-
-## Development status
-
-The repository contains the Lumi chat core, read-only tool contracts, optional web research, the Qwen3.5 model catalog and installer, local runtime adapters, tests, and the local synthetic quality-evaluation harness. Orchestrator release installation, admin controls, client experience, and live browser verification are developed in their respective repositories and remain separate stages.
+See [LICENSE](LICENSE).
