@@ -32,3 +32,9 @@ This repository owns Lumi, an optional Python package imported in-process by a c
 - Use the same README structure across all four repositories: `How it fits together`, `Configuration`, `Quick start`, `Deployment`, `Development checks`, `Developer documentation`, `Troubleshooting`, `Releases`, and `License`, in that order where relevant. Keep a project title and one-sentence summary at the top; place optional screenshots after the overview and first-run or platform-specific steps under the relevant section.
 - Use sentence-case headings, short paragraphs, descriptive links, and repository-relative paths.
 - Architecture describes package and host ownership. Model installation, evaluation, privacy, streaming, and releases have separate guides; link to them instead of copying them here.
+
+## Contribution guidance
+
+- Follow `CONTRIBUTING.md` for issue reports, PR descriptions, validation evidence, and cross-repository coordination.
+- Issue forms and the PR template live in `.github/`; label meanings and the dry-run metadata sync command are documented in `docs/triage.md`.
+- Keep shared label semantics consistent across the four repositories and tailor area labels and environment prompts to this repository's ownership.

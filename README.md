@@ -41,6 +41,9 @@ The synthetic quality suite uses already installed models and local fixtures. It
 
 ## Developer documentation
 
+- [Contributing](CONTRIBUTING.md)
+- [Issue and pull request triage](docs/triage.md)
+
 - [Documentation index](docs/README.md)
 - [Architecture and ownership](docs/architecture.md)
 - [Runtime acceleration and streaming](docs/runtime-acceleration-and-streaming.md)

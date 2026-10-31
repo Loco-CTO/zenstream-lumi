@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation and troubleshooting
+    url: https://github.com/Loco-CTO/zenstream-lumi/blob/main/README.md
+    about: Read setup instructions, troubleshooting, and developer documentation.
+  - name: Web client
+    url: https://github.com/Loco-CTO/zenstream/issues
+    about: Report problems owned by zenstream.
+  - name: Android client
+    url: https://github.com/Loco-CTO/zenstream-mobile/issues
+    about: Report problems owned by zenstream-mobile.
+  - name: API, services, dashboard, and Windows launcher
+    url: https://github.com/Loco-CTO/zenstream-orchestrator/issues
+    about: Report problems owned by zenstream-orchestrator.

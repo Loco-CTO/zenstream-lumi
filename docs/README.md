@@ -15,3 +15,8 @@ Use this index to find details for a specific task. `AGENTS.md` gives the short 
 - [Release process](releasing.md)
 
 Lumi does not own a user interface, so this repository has no UI design guide.
+
+## Contributing and triage
+
+- [Contributing](../CONTRIBUTING.md)
+- [Issue and pull request triage](triage.md)
