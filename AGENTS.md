@@ -25,6 +25,7 @@ This repository owns Lumi, an optional Python package imported in-process by a c
 - `python -m unittest discover -s tests -v` — package test suite.
 - `ruff check lumi tests scripts` — lint.
 - `python -m unittest discover -s tests -p 'test_release_build.py' -v` — release archive tests.
+- The tag workflow runs the Windows and Linux wheelhouse matrices after their respective native wheels are ready. Publication requires both matrices and the full package test matrix.
 - `python scripts/lumi_quality_eval.py --help` — inspect local evaluation options.
 
 ## Documentation conventions
